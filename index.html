@@ -123,6 +123,22 @@ textarea.field-input { min-height: 80px; resize: vertical; }
 .model-photo-actions { display: flex; gap: 8px; margin-top: 8px; }
 .model-photo-actions .btn { margin-bottom: 0; flex: 1; padding: 11px; font-size: 13px; }
 
+.slot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+.photo-slot { border: 2px dashed var(--border); border-radius: var(--radius); overflow: hidden; position: relative; aspect-ratio: 3/4; background: var(--gold-pale); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.photo-slot.filled { border-color: var(--emerald-mid); border-style: solid; }
+.photo-slot.required-missing { border-color: var(--burgundy); }
+.photo-slot img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.slot-label { font-size: 11px; font-weight: 500; color: var(--ink); text-align: center; padding: 0 6px; z-index: 1; }
+.slot-badge { font-size: 9px; padding: 2px 7px; border-radius: 20px; margin-top: 4px; z-index: 1; }
+.slot-badge.required { background: var(--burgundy); color: white; }
+.slot-badge.optional { background: var(--border); color: var(--muted); }
+.slot-check { position: absolute; top: 6px; right: 6px; background: var(--emerald-mid); color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 13px; z-index: 2; }
+.extras-section { margin-top: 8px; margin-bottom: 12px; }
+.extras-title { font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase; }
+.add-extra-row { display: flex; gap: 8px; margin-top: 8px; }
+.add-extra-input { flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; font-family: 'Inter', sans-serif; }
+.add-extra-btn { padding: 9px 14px; background: var(--burgundy); color: white; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; white-space: nowrap; }
+
 .portfolio-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .portfolio-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; }
 .portfolio-thumb { width: 100%; aspect-ratio: 3/4; background: var(--gold-pale); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -212,94 +228,75 @@ textarea.field-input { min-height: 80px; resize: vertical; }
     <!-- UPLOAD -->
     <div id="screen-upload" class="screen active">
       <p class="section-title" id="t-uploadTitle">Add New Piece</p>
-      <p class="section-sub" id="t-uploadSub">Take a photo or choose from your gallery</p>
+      <p class="section-sub" id="t-uploadSub">Select garment type, then upload your photos</p>
 
-      <!-- Primary upload zone (shown before first photo) -->
-      <div id="primaryUploadZone" class="upload-zone" onclick="document.getElementById('fileInput').click()">
-        <i class="ti ti-camera-plus"></i>
-        <div class="upload-text" id="t-uploadZone">Tap to take or upload a photo</div>
-        <div class="upload-sub" id="t-uploadZoneSub">iPhone photo works perfectly</div>
+      <!-- Garment type selector -->
+      <div class="tab-pills" id="garmentTypePills" style="margin-bottom:12px">
+        <button class="tab-pill active" onclick="setGarmentType('full-suit',this)">Full Suit</button>
+        <button class="tab-pill" onclick="setGarmentType('kameez',this)">Kameez Only</button>
+        <button class="tab-pill" onclick="setGarmentType('lehenga',this)">Lehenga Set</button>
+        <button class="tab-pill" onclick="setGarmentType('dupatta',this)">Dupatta Only</button>
+        <button class="tab-pill" onclick="setGarmentType('other',this)">Other</button>
       </div>
-      <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFile(event, 0)">
 
-      <!-- Multi-angle section (shown after first photo) -->
-      <div id="uploadPreview" style="display:none">
-        <!-- Front preview large -->
-        <img id="previewImg" class="preview-img" src="" alt="Garment photo">
+      <!-- Photo slot grid -->
+      <div id="slotGrid" class="slot-grid"></div>
 
-        <!-- Add More Angles -->
-        <div class="angles-section" id="anglesSection">
-          <div class="angles-title"><i class="ti ti-camera-rotate"></i> Add More Angles <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:4px">(optional but recommended)</span></div>
-          <div class="angles-grid">
-            <!-- Slot 0: Front — already uploaded, shown as filled -->
-            <div class="angle-slot filled" id="angleSlot0" onclick="document.getElementById('angleInput0').click()">
-              <img id="angleThumb0" src="" alt="Front">
-              <div class="angle-slot-label">Front (uploaded)</div>
-              <span class="angle-required-badge">✓</span>
-            </div>
-            <input type="file" id="angleInput0" accept="image/*" style="display:none" onchange="handleFile(event, 0)">
+      <!-- Extras section -->
+      <div class="extras-section">
+        <div class="extras-title">Add More Details</div>
+        <div class="refine-chips" id="quickAddChips">
+          <button class="refine-chip" onclick="quickAddSlot('Side View')">Side View</button>
+          <button class="refine-chip" onclick="quickAddSlot('Lining')">Lining</button>
+          <button class="refine-chip" onclick="quickAddSlot('Buttons / Hooks')">Buttons / Hooks</button>
+          <button class="refine-chip" onclick="quickAddSlot('Mirror Work')">Mirror Work</button>
+          <button class="refine-chip" onclick="quickAddSlot('Print Pattern')">Print Pattern</button>
+          <button class="refine-chip" onclick="quickAddSlot('Full Look')">Full Look</button>
+        </div>
+        <div class="add-extra-row">
+          <input type="text" id="extraLabelInput" class="add-extra-input" placeholder="Custom label…">
+          <button class="add-extra-btn" onclick="addCustomExtraSlot()">Add Photo</button>
+        </div>
+        <div id="extraSlotsGrid" class="slot-grid" style="margin-top:10px"></div>
+      </div>
 
-            <!-- Slot 1: Back -->
-            <div class="angle-slot" id="angleSlot1" onclick="document.getElementById('angleInput1').click()">
-              <i class="ti ti-plus"></i>
-              <div class="angle-slot-label">Back</div>
-            </div>
-            <input type="file" id="angleInput1" accept="image/*" style="display:none" onchange="handleFile(event, 1)">
-
-            <!-- Slot 2: Sleeve/Detail -->
-            <div class="angle-slot" id="angleSlot2" onclick="document.getElementById('angleInput2').click()">
-              <i class="ti ti-plus"></i>
-              <div class="angle-slot-label">Sleeve / Detail</div>
-            </div>
-            <input type="file" id="angleInput2" accept="image/*" style="display:none" onchange="handleFile(event, 2)">
-
-            <!-- Slot 3: Close-up Embroidery -->
-            <div class="angle-slot" id="angleSlot3" onclick="document.getElementById('angleInput3').click()">
-              <i class="ti ti-plus"></i>
-              <div class="angle-slot-label">Close-up Embroidery</div>
-            </div>
-            <input type="file" id="angleInput3" accept="image/*" style="display:none" onchange="handleFile(event, 3)">
-          </div>
+      <div class="card">
+        <div class="field-label" id="t-priceLabel">Price (USD)</div>
+        <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150" style="margin-top:0">
+      </div>
+      <button class="btn btn-primary" id="analyzeBtn" onclick="analyzePhoto()">
+        <i class="ti ti-wand"></i><span id="t-analyzeBtn">Analyze & Name this Piece</span>
+      </button>
+      <div id="analyzeResult" style="display:none">
+        <div class="result-box">
+          <div class="result-label" id="t-analysisLabel">Garment Analysis</div>
+          <div id="analysisText" style="white-space:pre-wrap"></div>
         </div>
 
-        <div class="card">
-          <div class="field-label" id="t-priceLabel">Price (USD)</div>
-          <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150" style="margin-top:0">
-        </div>
-        <button class="btn btn-primary" id="analyzeBtn" onclick="analyzePhoto()">
-          <i class="ti ti-wand"></i><span id="t-analyzeBtn">Analyze & Name this Piece</span>
-        </button>
-        <div id="analyzeResult" style="display:none">
-          <div class="result-box">
-            <div class="result-label" id="t-analysisLabel">Garment Analysis</div>
-            <div id="analysisText" style="white-space:pre-wrap"></div>
-          </div>
-
-          <!-- AI Model Photo Generation -->
-          <div class="model-photo-section">
-            <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()" style="margin-top:10px">
-              <i class="ti ti-user"></i><span>Generate AI Model Photo</span>
-            </button>
-            <p class="model-photo-note">Uses 1 Ideogram credit &bull; Only generates on tap</p>
-            <div id="modelPhotoOutput" style="display:none">
-              <img id="modelPhotoImg" class="model-photo-img" src="" alt="AI model photo">
-              <div class="model-photo-actions">
-                <button class="btn btn-green" onclick="saveModelToPortfolio()">
-                  <i class="ti ti-device-floppy"></i> Save to Portfolio
-                </button>
-                <button class="btn btn-secondary" onclick="downloadModelPhoto()">
-                  <i class="ti ti-download"></i> Download
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <button class="btn btn-gold" style="margin-top:10px" onclick="saveToPortfolio()">
-            <i class="ti ti-device-floppy"></i><span id="t-saveBtn">Save to Portfolio</span>
+        <!-- AI Model Photo Generation -->
+        <div class="model-photo-section">
+          <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()" style="margin-top:10px">
+            <i class="ti ti-user"></i><span>Generate AI Model Photo</span>
           </button>
-          <div id="savedConfirm" style="display:none;text-align:center;padding:10px;font-size:13px;color:var(--emerald-mid);font-weight:500">
-            ✓ <span id="t-savedMsg">Saved to your portfolio!</span>
+          <p class="model-photo-note">Uses 1 Ideogram credit &bull; Only generates on tap</p>
+          <div id="modelPhotoOutput" style="display:none">
+            <img id="modelPhotoImg" class="model-photo-img" src="" alt="AI model photo">
+            <div class="model-photo-actions">
+              <button class="btn btn-green" onclick="saveModelToPortfolio()">
+                <i class="ti ti-device-floppy"></i> Save to Portfolio
+              </button>
+              <button class="btn btn-secondary" onclick="downloadModelPhoto()">
+                <i class="ti ti-download"></i> Download
+              </button>
+            </div>
           </div>
+        </div>
+
+        <button class="btn btn-gold" style="margin-top:10px" onclick="saveToPortfolio()">
+          <i class="ti ti-device-floppy"></i><span id="t-saveBtn">Save to Portfolio</span>
+        </button>
+        <div id="savedConfirm" style="display:none;text-align:center;padding:10px;font-size:13px;color:var(--emerald-mid);font-weight:500">
+          ✓ <span id="t-savedMsg">Saved to your portfolio!</span>
         </div>
       </div>
     </div>
@@ -469,8 +466,50 @@ const PORTFOLIO_KEY = 'meraki_portfolio_v2';
 let lang = 'en';
 
 // Multi-photo state: array of {b64, type, label}
-let uploadedPhotos = [null, null, null, null]; // [front, back, sleeve, closeup]
-const PHOTO_LABELS = ['Front', 'Back', 'Sleeve / Detail', 'Close-up Embroidery'];
+let uploadedPhotos = {}; // keyed by slot id
+let garmentType = 'full-suit';
+let extraSlotCount = 0;
+
+const PHOTO_SLOTS = {
+  'full-suit': [
+    { id: 'front', label: 'Full Front', required: true },
+    { id: 'back', label: 'Full Back', required: true },
+    { id: 'neckline', label: 'Neckline Close-up', required: true },
+    { id: 'sleeve', label: 'Sleeve & Cuff', required: true },
+    { id: 'hem', label: 'Hem / Border', required: true },
+    { id: 'embroidery', label: 'Bodice Embroidery', required: true },
+    { id: 'dupatta', label: 'Dupatta', required: true },
+    { id: 'trouser', label: 'Trouser / Sharara Hem', required: true },
+  ],
+  'kameez': [
+    { id: 'front', label: 'Full Front', required: true },
+    { id: 'back', label: 'Full Back', required: true },
+    { id: 'neckline', label: 'Neckline Close-up', required: true },
+    { id: 'sleeve', label: 'Sleeve & Cuff', required: true },
+    { id: 'hem', label: 'Hem / Border', required: true },
+    { id: 'embroidery', label: 'Bodice Embroidery', required: true },
+  ],
+  'lehenga': [
+    { id: 'front', label: 'Full Front', required: true },
+    { id: 'back', label: 'Full Back', required: true },
+    { id: 'neckline', label: 'Neckline / Blouse', required: true },
+    { id: 'hem', label: 'Lehenga Hem', required: true },
+    { id: 'embroidery', label: 'Bodice Embroidery', required: true },
+    { id: 'dupatta', label: 'Dupatta', required: true },
+    { id: 'trouser', label: 'Sharara / Skirt Detail', required: true },
+  ],
+  'dupatta': [
+    { id: 'front', label: 'Full Dupatta Front', required: true },
+    { id: 'back', label: 'Full Dupatta Back', required: true },
+    { id: 'hem', label: 'Border Close-up', required: true },
+    { id: 'embroidery', label: 'Embroidery Detail', required: true },
+  ],
+  'other': [
+    { id: 'front', label: 'Full Front', required: true },
+    { id: 'back', label: 'Full Back', required: true },
+    { id: 'detail', label: 'Detail Close-up', required: true },
+  ],
+};
 
 let currentAnalysis = '';
 let currentIdeogramPrompt = '';
@@ -622,8 +661,65 @@ function setLoading(btnId, loading) {
   }
 }
 
-// Handle file upload for a specific slot index (0=front, 1=back, 2=sleeve, 3=closeup)
-function handleFile(e, slotIndex) {
+function setGarmentType(type, btn) {
+  garmentType = type;
+  document.querySelectorAll('#garmentTypePills .tab-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  renderPhotoSlots();
+}
+
+function renderPhotoSlots() {
+  const grid = document.getElementById('slotGrid');
+  grid.innerHTML = '';
+  const slots = PHOTO_SLOTS[garmentType] || [];
+  slots.forEach(slot => {
+    const photo = uploadedPhotos[slot.id];
+    const div = document.createElement('div');
+    div.className = 'photo-slot' + (photo ? ' filled' : '');
+    div.id = 'slot_' + slot.id;
+    div.onclick = () => document.getElementById('slotInput_' + slot.id).click();
+    if (photo) {
+      div.innerHTML = `<img src="data:${photo.type};base64,${photo.b64}" alt="${slot.label}">
+        <div class="slot-check">✓</div>`;
+    } else {
+      div.innerHTML = `<i class="ti ti-camera-plus" style="font-size:24px;color:var(--gold-light);z-index:1"></i>
+        <div class="slot-label">${slot.label}</div>
+        <span class="slot-badge ${slot.required ? 'required' : 'optional'}">${slot.required ? 'Required' : 'Optional'}</span>`;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.id = 'slotInput_' + slot.id;
+    input.style.display = 'none';
+    input.onchange = (e) => handleSlotFile(e, slot.id, slot.label, false);
+    grid.appendChild(div);
+    grid.appendChild(input);
+  });
+}
+
+function renderExtraSlots() {
+  const grid = document.getElementById('extraSlotsGrid');
+  grid.innerHTML = '';
+  Object.keys(uploadedPhotos).filter(k => k.startsWith('extra_')).forEach(key => {
+    const photo = uploadedPhotos[key];
+    const div = document.createElement('div');
+    div.className = 'photo-slot filled';
+    div.id = 'slot_' + key;
+    div.onclick = () => document.getElementById('slotInput_' + key).click();
+    div.innerHTML = `<img src="data:${photo.type};base64,${photo.b64}" alt="${photo.label}">
+      <div class="slot-check">✓</div>`;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.id = 'slotInput_' + key;
+    input.style.display = 'none';
+    input.onchange = (e) => handleSlotFile(e, key, photo.label, true);
+    grid.appendChild(div);
+    grid.appendChild(input);
+  });
+}
+
+function handleSlotFile(e, slotId, label, isExtra) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -631,64 +727,86 @@ function handleFile(e, slotIndex) {
     const dataUrl = ev.target.result;
     const b64 = dataUrl.split(',')[1];
     const type = file.type;
-    uploadedPhotos[slotIndex] = { b64, type, label: PHOTO_LABELS[slotIndex] };
-
-    if (slotIndex === 0) {
-      // Front photo: show main preview and the angles section
-      document.getElementById('previewImg').src = dataUrl;
-      document.getElementById('primaryUploadZone').style.display = 'none';
-      document.getElementById('uploadPreview').style.display = 'block';
-      document.getElementById('analyzeResult').style.display = 'none';
-      document.getElementById('savedConfirm').style.display = 'none';
-      document.getElementById('modelPhotoOutput').style.display = 'none';
-      generatedModelPhotoDataUrl = null;
-      currentAnalysis = '';
-    currentIdeogramPrompt = '';
+    uploadedPhotos[slotId] = { b64, type, label };
+    if (isExtra) {
+      renderExtraSlots();
+    } else {
+      renderPhotoSlots();
     }
-
-    // Update the angle slot thumbnail
-    const slot = document.getElementById('angleSlot' + slotIndex);
-    const thumb = document.getElementById('angleThumb' + slotIndex);
-    if (slot && thumb) {
-      thumb.src = dataUrl;
-      slot.classList.add('filled');
-      const labelEl = slot.querySelector('.angle-slot-label');
-      if (labelEl) {
-        if (slotIndex === 0) {
-          labelEl.textContent = 'Front (uploaded)';
-        } else {
-          labelEl.textContent = PHOTO_LABELS[slotIndex];
-        }
-      }
-    }
-
-    // Reset the file input so same file can be re-selected
     e.target.value = '';
   };
   reader.readAsDataURL(file);
 }
 
+function quickAddSlot(label) {
+  const key = 'extra_' + extraSlotCount++;
+  // Create a temporary slot that triggers file pick immediately
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.style.display = 'none';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      uploadedPhotos[key] = { b64: dataUrl.split(',')[1], type: file.type, label };
+      renderExtraSlots();
+    };
+    reader.readAsDataURL(file);
+    document.body.removeChild(input);
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+
+function addCustomExtraSlot() {
+  const labelInput = document.getElementById('extraLabelInput');
+  const label = labelInput.value.trim() || 'Extra Photo';
+  labelInput.value = '';
+  quickAddSlot(label);
+}
+
+// Handle file upload (kept for backward compat but now delegates)
+function handleFile(e, slotIndex) {
+  // legacy no-op; new system uses handleSlotFile
+}
+
 // Build content array for Claude with all uploaded photos
 function buildPhotoContent(textPrompt) {
   const content = [];
-  uploadedPhotos.forEach((photo, idx) => {
+  let first = true;
+  Object.entries(uploadedPhotos).forEach(([key, photo]) => {
     if (!photo) return;
     content.push({ type: 'image', source: { type: 'base64', media_type: photo.type, data: photo.b64 } });
-    if (idx > 0) {
+    if (!first) {
       content.push({ type: 'text', text: `(Above image: ${photo.label})` });
     }
+    first = false;
   });
   content.push({ type: 'text', text: textPrompt });
   return content;
 }
 
 async function analyzePhoto() {
-  if (!uploadedPhotos[0]) return;
+  // Check for any uploaded photos
+  if (Object.keys(uploadedPhotos).length === 0) {
+    showToast('Please upload at least one photo first.');
+    return;
+  }
+  // Check for missing required slots and warn
+  const slots = PHOTO_SLOTS[garmentType] || [];
+  const missing = slots.filter(s => s.required && !uploadedPhotos[s.id]).map(s => s.label);
+  if (missing.length > 0) {
+    showToast('Missing: ' + missing.join(', '));
+    // allow proceeding — just a warning
+  }
   setLoading('analyzeBtn', true);
   try {
     const price = document.getElementById('priceInput').value;
-    const photoCount = uploadedPhotos.filter(Boolean).length;
-    const angleNote = photoCount > 1 ? `\n\nNote: ${photoCount} photos provided showing different angles — use all views in your analysis.` : '';
+    const filledLabels = Object.values(uploadedPhotos).map(p => p.label);
+    const angleNote = filledLabels.length > 0 ? `\n\nPhotos provided: ${filledLabels.join(', ')}.` : '';
     const result = await callClaude([{
       role: 'user',
       content: buildPhotoContent(`You are a Pakistani fashion expert for "Meraki by Sam" — a traditional Pakistani clothing brand for the Pakistani-American diaspora.
