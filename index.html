@@ -699,8 +699,23 @@ DESCRIPTION:
 A short, elegant, poetic description covering: a poetic name (2–4 words), garment type, key details (colors, embroidery style, fabric, embellishments), and best occasions to wear it (weddings, Eid, mehndi, formal dinners, cultural events).${price ? ` Price: $${price}.` : ''} Keep it warm and culturally resonant. 3–5 sentences. No bullet points.${angleNote}
 
 IDEOGRAM_PROMPT:
-A highly specific, technical image generation prompt for AI art tools. Include ALL of: exact garment type, precise color names (e.g. "deep ruby red", "ivory"), embroidery style and exact placement (e.g. "gold zari threadwork on neckline and cuffs"), fabric texture (e.g. "silk chiffon", "raw silk"), silhouette and cut, any embellishments (mirrors, sequins, beadwork). Format: "Full-length [garment type] in [colors]. [Fabric]. [Embroidery/embellishment details]. [Silhouette]. Worn by an elegant Pakistani woman model, studio portrait, soft diffused lighting, clean white background, marketing fashion photography."`)
-    }], null, 800);
+A surgical, millimeter-precise image generation prompt. Study every photo angle provided and map every visual detail to its exact location on the garment. You must describe:
+
+1. GARMENT TYPE & SILHOUETTE: Exact cut, length, flare, neckline shape, sleeve style and length
+2. BASE COLORS: Precise color names for every panel, layer, or section (e.g. "deep burgundy wine red bodice", "dusty rose blush sleeves", "ivory lining visible at hem")
+3. EMBROIDERY — map each element to its exact zone:
+   - Neckline: shape, width of embroidered border, stitch type, thread color
+   - Bodice front: coverage percentage, pattern motifs, thread colors
+   - Bodice back: same detail
+   - Sleeves: where embroidery starts and ends, pattern density
+   - Hem/border: width, pattern, color
+   - Any scattered motifs: their size and distribution
+4. FABRIC: Texture of each section (e.g. "matte raw silk bodice", "sheer organza overlay on sleeves", "heavy dupatta with stiff border")
+5. EMBELLISHMENTS: Type (mirrors, sequins, pearls, stones), exact location, density, color
+6. DUPATTA/SHAWL if present: color, embroidery placement, border details
+
+Write as a single dense paragraph prompt ending with: "Worn by an elegant Pakistani woman, full-body studio portrait, soft even lighting, pure white background, high-end fashion photography."`)
+    }], null, 1200);
 
     const descMatch = result.match(/DESCRIPTION:\s*([\s\S]*?)(?=IDEOGRAM_PROMPT:|$)/i);
     const ideogramMatch = result.match(/IDEOGRAM_PROMPT:\s*([\s\S]*?)$/i);
