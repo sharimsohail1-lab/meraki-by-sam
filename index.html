@@ -586,7 +586,7 @@ function showScreen(name, btn) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   btn.classList.add('active');
-  const hasFront = !!(uploadedPhotos[0]);
+  const hasFront = !!(uploadedPhotos['front']);
   if (name === 'captions') {
     document.getElementById('captionNoPhoto').style.display = hasFront ? 'none' : 'block';
     document.getElementById('captionReady').style.display = hasFront ? 'block' : 'none';
@@ -932,7 +932,7 @@ function saveToPortfolio() {
     const items = JSON.parse(localStorage.getItem(PORTFOLIO_KEY) || '[]');
     const price = document.getElementById('priceInput').value;
     const firstLine = currentAnalysis.split('\n')[0].trim().replace(/^["']|["']$/g,'');
-    const frontPhoto = uploadedPhotos[0];
+    const frontPhoto = uploadedPhotos['front'] || Object.values(uploadedPhotos)[0];
     const item = {
       id: Date.now(),
       name: firstLine.substring(0, 50) || 'New Piece',
@@ -959,7 +959,7 @@ function setCaptionLang(l, btn) {
 async function generateCaptions() {
   setLoading('genCaptionsBtn', true);
   try {
-    const frontPhoto = uploadedPhotos[0];
+    const frontPhoto = uploadedPhotos['front'] || Object.values(uploadedPhotos)[0];
     const result = await callClaude([{
       role: 'user',
       content: buildPhotoContent(`You are a social media expert for "Meraki by Sam" — traditional Pakistani clothing for the Pakistani-American community in NJ/NY, sold at local exhibitions and cultural events.
@@ -1285,6 +1285,7 @@ function copyMessage() {
 
 applyLang();
 renderPortfolio('all');
+renderPhotoSlots();
 </script>
 </body>
 </html>
