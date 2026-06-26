@@ -128,6 +128,35 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .attention-name { font-size: 11px; color: var(--ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attention-issue { font-size: 10px; color: #E65100; margin-top: 2px; }
 
+/* Post-save next steps */
+.next-steps { background: white; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 4px; }
+.next-steps-header { background: var(--emerald); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+.next-steps-header i { font-size: 22px; }
+.next-steps-title { font-family: 'Playfair Display', serif; font-size: 16px; }
+.next-steps-sub { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+.next-step-item { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--border); cursor: pointer; }
+.next-step-item:active { background: var(--gold-pale); }
+.next-step-icon { font-size: 22px; flex-shrink: 0; width: 30px; text-align: center; }
+.next-step-body { flex: 1; }
+.next-step-title { font-size: 13px; font-weight: 500; color: var(--ink); }
+.next-step-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.next-step-arrow { color: var(--muted); font-size: 16px; }
+.next-steps-footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+
+/* Nudge banner on product detail sheet */
+.detail-nudge { font-size: 12px; padding: 9px 12px; border-radius: 8px; margin-bottom: 10px; line-height: 1.5; }
+.detail-nudge.nudge-price { background: #FFF3E0; color: #E65100; }
+.detail-nudge.nudge-pkg { background: var(--gold-pale); color: #8B6914; }
+.detail-nudge.nudge-old { background: #F3E5F5; color: #6A1B9A; }
+.detail-nudge.nudge-share { background: #E3F2FD; color: #1565C0; }
+
+/* Nudge chip on stock card */
+.nudge-chip { display: inline-block; font-size: 9px; padding: 2px 7px; border-radius: 20px; font-weight: 500; margin-top: 3px; }
+.nudge-price { background: #FFF3E0; color: #E65100; }
+.nudge-share { background: #E3F2FD; color: #1565C0; }
+.nudge-pkg { background: var(--gold-pale); color: #8B6914; }
+.nudge-old { background: #F3E5F5; color: #6A1B9A; }
+
 /* WhatsApp Import */
 .whatsapp-import-btn { width:100%; background:white; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:12px; cursor:pointer; margin-bottom:14px; text-align:left; font-family:'Inter',sans-serif; }
 .whatsapp-import-btn:active { border-color:#25D366; }
@@ -453,14 +482,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             </div>
           </div>
           <button class="btn btn-green" id="saveProductBtn" onclick="saveProduct()"><i class="ti ti-device-floppy"></i><span id="t-saveProduct">Save to Inventory</span></button>
-          <div id="saveSuccess" style="display:none;text-align:center;padding:12px">
-            <div style="font-size:15px;color:var(--emerald-mid);font-weight:500">✓ <span id="t-savedMsg">Saved to inventory!</span></div>
-            <div style="display:flex;gap:8px;margin-top:10px">
-              <button class="btn btn-secondary btn-sm" onclick="resetIntake()" style="flex:1" id="t-addAnother">Add Another</button>
-              <button class="btn btn-primary btn-sm" onclick="showScreen('stock')" style="flex:1" id="t-viewStock">View in Stock</button>
-            </div>
-          </div>
-          <button class="btn btn-secondary" onclick="goToStep(2)" style="margin-top:4px">← Back to Photos</button>
+          <div id="saveSuccess" style="display:none"></div>
+          <button class="btn btn-secondary" id="backToPhotosBtn" onclick="goToStep(2)" style="margin-top:4px">← Back to Photos</button>
         </div>
       </div>
     </div>
@@ -537,7 +560,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="productDetailSheet" onclick="closeSheetOutside(event,'productDetailSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
+      <button onclick="closeSheet('productDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
+    <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
     <div class="detail-name" id="detailName"></div>
     <div class="detail-meta" id="detailMeta"></div>
@@ -580,7 +607,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="addCustomerSheet" onclick="closeSheetOutside(event,'addCustomerSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title" id="t-addCustomer">Add Customer</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="sheet-title" style="margin-bottom:0" id="t-addCustomer">Add Customer</div>
+      <button onclick="closeSheet('addCustomerSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
     <div class="field-label">Name *</div>
     <input type="text" id="custNameInput" class="field-input" style="margin-bottom:12px">
     <div class="field-label">Phone (WhatsApp)</div>
@@ -622,6 +652,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="customerDetailSheet" onclick="closeSheetOutside(event,'customerDetailSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
+      <button onclick="closeSheet('customerDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
     <div class="customer-avatar" id="custDetailAvatar" style="width:56px;height:56px;font-size:22px;margin-bottom:12px"></div>
     <div class="sheet-title" id="custDetailName"></div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px" id="custDetailMeta"></div>
@@ -641,7 +674,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="addExhibitionSheet" onclick="closeSheetOutside(event,'addExhibitionSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title" id="t-newExhibition">New Exhibition</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="sheet-title" style="margin-bottom:0" id="t-newExhibition">New Exhibition</div>
+      <button onclick="closeSheet('addExhibitionSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
     <div class="field-label">Exhibition Name *</div>
     <input type="text" id="exhNameInput" class="field-input" placeholder="e.g. Edison Eid Mela" style="margin-bottom:12px">
     <div class="field-label">Date</div>
@@ -656,7 +692,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="exhibitionDetailSheet" onclick="closeSheetOutside(event,'exhibitionDetailSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title" id="exhDetailName"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="sheet-title" style="margin-bottom:0" id="exhDetailName"></div>
+      <button onclick="closeSheet('exhibitionDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px" id="exhDetailMeta"></div>
     <div class="exh-summary" id="exhSummary" style="display:none">
       <div><div class="exh-sum-num" id="exhSumSold">0</div><div class="exh-sum-label">Sold</div></div>
@@ -678,7 +717,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="whatsappImportSheet" onclick="closeSheetOutside(event,'whatsappImportSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title"><i class="ti ti-brand-whatsapp" style="color:#25D366"></i> Import WhatsApp Chat</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="sheet-title" style="margin-bottom:0"><i class="ti ti-brand-whatsapp" style="color:#25D366"></i> Import WhatsApp Chat</div>
+      <button onclick="closeSheet('whatsappImportSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
 
     <div class="import-how-to">
       <div class="import-step"><span class="import-num">1</span><span>Open WhatsApp and go to the customer's chat</span></div>
@@ -1258,17 +1300,89 @@ async function saveProduct() {
       photo,
       collection_name: collection,
     }});
-    inventory.unshift(rows[0]);
+    const saved = rows[0];
+    inventory.unshift(saved);
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
     btn.disabled = false;
     document.getElementById('saveProductBtn').style.display = 'none';
+    document.getElementById('backToPhotosBtn').style.display = 'none';
     document.getElementById('saveSuccess').style.display = 'block';
+    renderNextSteps(saved);
     showToast(T[lang].savedMsg);
+    buildSmartRecommendations();
   } catch(e) {
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
     btn.disabled = false;
     showToast('Save failed: ' + e.message);
   }
+}
+
+function renderNextSteps(product) {
+  const p = product;
+  const hasPrice = !!p.price;
+  const hasPkg = !!p.caption_en;
+  const upcomingExh = exhibitions.find(e => e.status === 'upcoming');
+
+  const steps = [];
+
+  if (!hasPrice) {
+    steps.push({
+      icon: '💰', title: 'Set a price', sub: 'Required before sharing with customers',
+      action: () => { openProductDetail(p.id); }
+    });
+  }
+
+  if (!hasPkg) {
+    steps.push({
+      icon: '📦', title: 'Create Marketing Package', sub: 'English caption, Urdu caption, WhatsApp message, hashtags',
+      action: () => { openProductDetail(p.id); setTimeout(() => document.getElementById('createPkgBtn')?.click(), 400); }
+    });
+  }
+
+  if (hasPkg) {
+    steps.push({
+      icon: '📱', title: 'Share on WhatsApp', sub: 'Copy the ready-made listing message',
+      action: () => openProductDetail(p.id)
+    });
+  }
+
+  if (upcomingExh) {
+    steps.push({
+      icon: '🏪', title: `Add to ${upcomingExh.name}`, sub: 'Mark this piece for your upcoming exhibition',
+      action: () => { showScreen('show'); setTimeout(() => openExhibitionDetail(upcomingExh.id), 100); }
+    });
+  }
+
+  steps.push({
+    icon: '✨', title: 'Add another piece', sub: 'Keep adding while you have them out',
+    action: () => resetIntake()
+  });
+
+  const el = document.getElementById('saveSuccess');
+  el.innerHTML = `
+    <div class="next-steps">
+      <div class="next-steps-header">
+        <i class="ti ti-circle-check"></i>
+        <div>
+          <div class="next-steps-title">${p.name} saved!</div>
+          <div class="next-steps-sub">What would you like to do next?</div>
+        </div>
+      </div>
+      ${steps.map((s, i) => `
+        <div class="next-step-item" onclick="window._nextStepActions[${i}]()">
+          <div class="next-step-icon">${s.icon}</div>
+          <div class="next-step-body">
+            <div class="next-step-title">${s.title}</div>
+            ${s.sub ? `<div class="next-step-sub">${s.sub}</div>` : ''}
+          </div>
+          <i class="ti ti-chevron-right next-step-arrow"></i>
+        </div>`).join('')}
+      <div class="next-steps-footer">
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showScreen('stock')"><i class="ti ti-hanger"></i> View Stock</button>
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showScreen('home')"><i class="ti ti-home"></i> Home</button>
+      </div>
+    </div>`;
+  window._nextStepActions = steps.map(s => s.action);
 }
 
 function resetIntake() {
@@ -1283,6 +1397,7 @@ function resetIntake() {
   document.getElementById('analysisResult').style.display = 'none';
   document.getElementById('saveSuccess').style.display = 'none';
   document.getElementById('saveProductBtn').style.display = '';
+  document.getElementById('backToPhotosBtn').style.display = '';
   document.getElementById('modelPhotoOutput').style.display = 'none';
   document.getElementById('feedbackPanel').style.display = 'none';
   document.querySelectorAll('#garmentTypePills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
@@ -1450,6 +1565,31 @@ async function init() {
   renderHome();
 }
 
+// ─── NUDGES ───────────────────────────────────────────────────────────────────
+function productNudge(p) {
+  if (p.status === 'sold') return '';
+  if (!p.price) return '<span class="nudge-chip nudge-price">💰 Needs price</span>';
+  if (!p.caption_en) return '<span class="nudge-chip nudge-pkg">📦 No marketing yet</span>';
+  const ageDays = Math.floor((Date.now() - new Date(p.created_at)) / 86400000);
+  if (ageDays > 45) return '<span class="nudge-chip nudge-old">🔄 Repost?</span>';
+  return '<span class="nudge-chip nudge-share">✓ Ready to share</span>';
+}
+
+function productDetailNudge(p) {
+  if (p.status === 'sold') return '';
+  const lines = [];
+  if (!p.price) lines.push({ cls: 'nudge-price', text: '💰 Set a price before sharing with customers.' });
+  if (p.price && !p.caption_en) lines.push({ cls: 'nudge-pkg', text: '📦 Tap "Create Marketing Package" to generate captions, WhatsApp message, and hashtags.' });
+  if (p.caption_en) {
+    const ageDays = Math.floor((Date.now() - new Date(p.created_at)) / 86400000);
+    if (ageDays > 45) lines.push({ cls: 'nudge-old', text: '🔄 This piece has been available for over 45 days — consider resharing or adjusting the price.' });
+    const upcomingExh = exhibitions.find(e => e.status === 'upcoming');
+    if (upcomingExh) lines.push({ cls: 'nudge-share', text: `🏪 Add to ${upcomingExh.name} before the exhibition.` });
+  }
+  if (!lines.length) return '';
+  return lines.map(l => `<div class="detail-nudge ${l.cls}">${l.text}</div>`).join('');
+}
+
 // ─── STOCK ────────────────────────────────────────────────────────────────────
 let stockFilter = 'all';
 
@@ -1480,6 +1620,7 @@ function renderInventory() {
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
+        ${productNudge(p)}
       </div>
     </div>`).join('');
 }
@@ -1497,6 +1638,7 @@ function openProductDetail(id) {
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailModelOutput').style.display = 'none';
+  document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
   renderMarketingPackageCache(p);
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
   document.getElementById('reservedForInput').value = p.reserved_for || '';
@@ -1569,14 +1711,16 @@ function renderMarketingPackageCache(p) {
 
 function buildPackageHTML(p) {
   const sections = [];
+  if (p.sharing_angle) sections.push({ label: '💡 Best Shared As', key: 'sharing_angle', text: p.sharing_angle, cls: 'angle' });
   if (p.caption_en) sections.push({ label: 'Instagram Caption (English)', key: 'caption_en', text: p.caption_en, cls: '' });
   if (p.caption_ur) sections.push({ label: 'Instagram Caption (Urdu)', key: 'caption_ur', text: p.caption_ur, cls: 'urdu' });
+  if (p.story_text) sections.push({ label: 'Story Text', key: 'story_text', text: p.story_text, cls: '' });
   if (p.hashtags) sections.push({ label: 'Hashtags', key: 'hashtags', text: p.hashtags, cls: '' });
   if (p.whatsapp_listing) sections.push({ label: 'WhatsApp Message', key: 'whatsapp_listing', text: p.whatsapp_listing, cls: 'whatsapp' });
-  if (p.story_text) sections.push({ label: 'Story / Short Caption', key: 'story_text', text: p.story_text, cls: '' });
+  if (p.catalog_blurb) sections.push({ label: 'Catalog Entry', key: 'catalog_blurb', text: p.catalog_blurb, cls: '' });
   if (p.price_card) sections.push({ label: 'Price Card', key: 'price_card', text: p.price_card, cls: '' });
   if (!sections.length) return '';
-  return `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Package saved</div>` +
+  return `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Package saved — tap any section to copy</div>` +
     sections.map(s => `
       <div class="pkg-section">
         <div class="pkg-label">${s.label}
@@ -1621,7 +1765,9 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
   "hashtags": "20 relevant hashtags as a single space-separated string. Mix of Pakistani fashion, occasion-specific, color-specific, and boutique hashtags.",
   "whatsapp_listing": "WhatsApp listing message. Warm and conversational. Include name, key features, price (or 'DM for price'), and SKU reference. Under 120 words. Use line breaks for readability.",
   "story_text": "Very short text for an Instagram Story overlay. 1-2 lines maximum. Punchy. Could be a price reveal or a one-line description.",
-  "price_card": "Text for a printable price card. Format: item name on first line, key detail on second line, price on third line. Keep it simple."
+  "price_card": "Text for a printable price card. Format: item name on first line, key detail on second line, price on third line. Keep it simple.",
+  "sharing_angle": "One short phrase describing the best way to position this piece. Examples: 'Best for Eid', 'Good for wedding guest', 'Premium formal piece', 'Great color for mehndi'. Pick the single most relevant angle.",
+  "catalog_blurb": "2-sentence catalog entry. Professional and concise. Suitable for a printed or digital catalog page."
 }`;
 
   try {
@@ -1641,6 +1787,8 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
       whatsapp_listing: pkg.whatsapp_listing || null,
       story_text: pkg.story_text || null,
       price_card: pkg.price_card || null,
+      sharing_angle: pkg.sharing_angle || null,
+      catalog_blurb: pkg.catalog_blurb || null,
     };
     await db('update', 'products', { id: p.id, data: update });
 
