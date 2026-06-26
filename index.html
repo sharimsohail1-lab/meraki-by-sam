@@ -604,15 +604,13 @@ async function callIdeogram(prompt) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      image_request: {
-        prompt,
-        aspect_ratio: 'ASPECT_9_16',
-        style_type: 'REALISTIC',
-        magic_prompt_option: 'OFF'
-      }
+      prompt,
+      aspect_ratio: 'ASPECT_9_16',
+      style_type: 'REALISTIC',
+      magic_prompt_option: 'OFF'
     })
   });
-  if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'Ideogram error ' + resp.status); }
+  if (!resp.ok) { const e = await resp.json(); throw new Error(e.error?.message || e.error || 'Ideogram error ' + resp.status); }
   return await resp.json();
 }
 
