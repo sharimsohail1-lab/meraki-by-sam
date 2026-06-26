@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Meraki by Sam">
+<meta name="theme-color" content="#6B1E3A">
+<title>Meraki by Sam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --gold: #C9A84C; --gold-light: #F0DFA0; --gold-pale: #FBF6E9;
+  --burgundy: #6B1E3A; --burgundy-mid: #9B3055;
+  --emerald: #1A4A3A; --emerald-mid: #2D7A5E;
+  --cream: #FAF8F4; --ink: #1C1410; --muted: #7A6E65;
+  --border: #E8DFD0; --radius: 12px;
+}
+html, body { height: 100%; overflow: hidden; }
+body { font-family: 'Inter', sans-serif; background: var(--cream); color: var(--ink); }
+#app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.header { background: var(--burgundy); padding: 14px 20px 10px; text-align: center; position: relative; flex-shrink: 0; padding-top: max(14px, env(safe-area-inset-top)); }
+.brand-name { font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 700; color: var(--gold-light); letter-spacing: 2px; }
+.brand-sub { font-size: 10px; color: var(--gold); letter-spacing: 3px; text-transform: uppercase; margin-top: 2px; }
+.lang-btn { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); background: rgba(201,168,76,0.2); border: 1px solid var(--gold); color: var(--gold-light); border-radius: 20px; padding: 5px 11px; font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; }
+.settings-btn { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--gold); cursor: pointer; font-size: 22px; padding: 4px; }
+.nav { display: flex; background: white; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
+.nav::-webkit-scrollbar { display: none; }
+.nav-btn { flex: 1; min-width: 60px; padding: 10px 8px 8px; font-size: 11px; border: none; background: none; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; font-family: 'Inter', sans-serif; transition: color 0.2s; }
+.nav-btn i { font-size: 20px; }
+.nav-btn.active { color: var(--burgundy); border-bottom-color: var(--burgundy); }
+.screens { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.screen { display: none; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+.screen.active { display: block; }
+.section-title { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--burgundy); margin-bottom: 3px; }
+.section-sub { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.upload-zone { border: 2px dashed var(--gold); border-radius: var(--radius); padding: 36px 20px; text-align: center; background: var(--gold-pale); cursor: pointer; margin-bottom: 16px; }
+.upload-zone i { font-size: 40px; color: var(--gold); }
+.upload-text { font-size: 15px; color: var(--burgundy); font-weight: 500; margin-top: 10px; }
+.upload-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.preview-img { width: 100%; max-height: 220px; object-fit: cover; border-radius: 10px; margin-bottom: 12px; }
+.card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+.field-label { font-size: 11px; font-weight: 500; color: var(--muted); margin-bottom: 5px; letter-spacing: 0.5px; text-transform: uppercase; }
+.field-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 14px; color: var(--ink); background: white; }
+.field-input:focus { outline: none; border-color: var(--burgundy); }
+textarea.field-input { min-height: 80px; resize: vertical; }
+.btn { width: 100%; padding: 14px; border: none; border-radius: var(--radius); font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; transition: opacity 0.2s; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--burgundy); color: white; }
+.btn-secondary { background: white; color: var(--burgundy); border: 1px solid var(--burgundy); }
+.btn-gold { background: var(--gold); color: var(--ink); }
+.result-box { background: var(--gold-pale); border: 1px solid var(--gold-light); border-radius: 8px; padding: 14px; margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--ink); }
+.result-label { font-size: 10px; font-weight: 500; color: var(--gold); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+.loading { display: inline-flex; gap: 5px; align-items: center; }
+.loading span { width: 7px; height: 7px; background: var(--gold-light); border-radius: 50%; animation: pulse 1.2s infinite; }
+.loading span:nth-child(2) { animation-delay: 0.2s; }
+.loading span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-7px)} }
+.tab-pills { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.tab-pill { padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: white; color: var(--muted); font-family: 'Inter', sans-serif; }
+.tab-pill.active { background: var(--burgundy); color: white; border-color: var(--burgundy); }
+.caption-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+.caption-card.selected { border-color: var(--burgundy); border-width: 2px; }
+.caption-tag { font-size: 10px; color: var(--gold); font-weight: 500; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
+.caption-body { font-size: 12px; line-height: 1.6; color: var(--ink); }
+.urdu { font-family: 'Noto Nastaliq Urdu', Arial, serif; direction: rtl; text-align: right; font-size: 15px; line-height: 2.2; }
+.copy-btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: 'Inter', sans-serif; margin-top: 10px; }
+.portfolio-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.portfolio-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; }
+.portfolio-thumb { width: 100%; aspect-ratio: 3/4; background: var(--gold-pale); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.portfolio-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.portfolio-thumb i { font-size: 36px; color: var(--gold-light); }
+.portfolio-info { padding: 8px 10px 10px; }
+.portfolio-name { font-size: 12px; font-weight: 500; color: var(--ink); margin-bottom: 3px; }
+.portfolio-price { font-size: 12px; color: var(--emerald-mid); font-weight: 500; }
+.status-pill { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; margin-top: 5px; }
+.status-available { background: #E8F5E9; color: #2E7D32; }
+.status-reserved { background: #FFF8E1; color: #E65100; }
+.status-sold { background: #FFEBEE; color: #B71C1C; }
+.share-banner { background: var(--emerald); color: white; padding: 14px 16px; border-radius: var(--radius); display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.share-banner-text { font-size: 13px; font-weight: 500; }
+.share-banner-sub { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+.share-banner-btn { background: var(--gold); color: var(--ink); border: none; border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; white-space: nowrap; }
+.campaign-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.campaign-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.campaign-title { font-family: 'Playfair Display', serif; font-size: 16px; color: var(--burgundy); }
+.campaign-month { font-size: 11px; padding: 3px 10px; background: var(--gold-pale); color: var(--gold); border-radius: 20px; border: 1px solid var(--gold-light); }
+.campaign-body { padding: 14px 16px; }
+.campaign-section { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 8px; }
+.campaign-section strong { color: var(--ink); }
+.campaign-actions { display: flex; gap: 8px; margin-top: 14px; }
+.btn-yes { flex: 1; padding: 11px; background: var(--emerald); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; }
+.btn-no { flex: 1; padding: 11px; background: white; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip { padding: 6px 13px; background: white; border: 1px solid var(--border); border-radius: 20px; font-size: 12px; color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; }
+.chip:hover { border-color: var(--burgundy); color: var(--burgundy); }
+.lang-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.lang-btn-msg { flex: 1; padding: 11px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; background: white; color: var(--muted); }
+.lang-btn-msg.active { background: var(--burgundy); color: white; border-color: var(--burgundy); }
+.empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+.empty i { font-size: 44px; color: var(--gold-light); }
+.empty p { font-size: 13px; margin-top: 10px; line-height: 1.6; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--ink); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; z-index: 999; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: 1; }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(28,20,16,0.65); z-index: 200; align-items: flex-start; justify-content: center; padding: 60px 16px 16px; overflow-y: auto; }
+.modal-overlay.open { display: flex; }
+.modal { background: white; border-radius: var(--radius); padding: 22px; width: 100%; max-width: 380px; }
+.modal-title { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--burgundy); margin-bottom: 18px; }
+.modal-close { float: right; background: none; border: none; font-size: 20px; color: var(--muted); cursor: pointer; margin-top: -4px; }
+.key-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: -6px; margin-bottom: 14px; }
+.item-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(28,20,16,0.75); z-index: 300; align-items: flex-end; justify-content: center; }
+.item-modal-overlay.open { display: flex; }
+.item-modal { background: white; border-radius: 16px 16px 0 0; padding: 20px; width: 100%; max-width: 480px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+.item-modal img { width: 100%; max-height: 260px; object-fit: cover; border-radius: 10px; margin-bottom: 14px; }
+.item-modal-name { font-family: 'Playfair Display', serif; font-size: 17px; color: var(--burgundy); margin-bottom: 6px; }
+.item-modal-desc { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; }
+.status-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.status-btn { flex: 1; padding: 9px; border-radius: 8px; font-size: 12px; cursor: pointer; font-family: 'Inter', sans-serif; border: 1px solid var(--border); background: white; color: var(--muted); }
+.status-btn.available { border-color: #2E7D32; color: #2E7D32; background: #E8F5E9; }
+.status-btn.reserved { border-color: #E65100; color: #E65100; background: #FFF8E1; }
+.status-btn.sold { border-color: #B71C1C; color: #B71C1C; background: #FFEBEE; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <button class="lang-btn" id="langToggle" onclick="toggleLang()">اردو</button>
+    <div class="brand-name">MERAKI BY SAM</div>
+    <div class="brand-sub" id="t-brandSub">Traditional Pakistani Clothing</div>
+    <button class="settings-btn" onclick="openModal('settingsModal')" aria-label="Settings"><i class="ti ti-settings"></i></button>
+  </div>
+  <nav class="nav">
+    <button class="nav-btn active" onclick="showScreen('upload',this)"><i class="ti ti-camera-plus"></i><span id="t-nav1">Upload</span></button>
+    <button class="nav-btn" onclick="showScreen('captions',this)"><i class="ti ti-brand-instagram"></i><span id="t-nav2">Captions</span></button>
+    <button class="nav-btn" onclick="showScreen('portfolio',this)"><i class="ti ti-layout-grid"></i><span id="t-nav3">Portfolio</span></button>
+    <button class="nav-btn" onclick="showScreen('branding',this)"><i class="ti ti-sparkles"></i><span id="t-nav4">Branding</span></button>
+    <button class="nav-btn" onclick="showScreen('comms',this)"><i class="ti ti-message-circle"></i><span id="t-nav5">Message</span></button>
+  </nav>
+  <div class="screens">
+    <div id="screen-upload" class="screen active">
+      <p class="section-title" id="t-uploadTitle">Add New Piece</p>
+      <p class="section-sub" id="t-uploadSub">Take a photo or choose from your gallery</p>
+      <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+        <i class="ti ti-camera-plus"></i>
+        <div class="upload-text" id="t-uploadZone">Tap to take or upload a photo</div>
+        <div class="upload-sub" id="t-uploadZoneSub">iPhone photo works perfectly</div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFile(event)">
+      <div id="uploadPreview" style="display:none">
+        <img id="previewImg" class="preview-img" src="" alt="Garment photo">
+        <div class="card">
+          <div class="field-label" id="t-priceLabel">Price (USD)</div>
+          <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150" style="margin-top:0">
+        </div>
+        <button class="btn btn-primary" id="analyzeBtn" onclick="analyzePhoto()"><i class="ti ti-wand"></i><span id="t-analyzeBtn">Analyze & Name this Piece</span></button>
+        <div id="analyzeResult" style="display:none">
+          <div class="result-box"><div class="result-label" id="t-analysisLabel">Garment Analysis</div><div id="analysisText" style="white-space:pre-wrap"></div></div>
+          <button class="btn btn-gold" style="margin-top:10px" onclick="saveToPortfolio()"><i class="ti ti-device-floppy"></i><span id="t-saveBtn">Save to Portfolio</span></button>
+          <div id="savedConfirm" style="display:none;text-align:center;padding:10px;font-size:13px;color:var(--emerald-mid);font-weight:500">✓ <span id="t-savedMsg">Saved to your portfolio!</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="screen-captions" class="screen">
+      <p class="section-title" id="t-captionsTitle">Instagram Content</p>
+      <p class="section-sub" id="t-captionsSub">Generate captions and hashtags for your latest piece</p>
+      <div id="captionNoPhoto"><div class="empty"><i class="ti ti-photo-up"></i><p id="t-captionEmpty">Upload a photo first from the Upload tab, then come back here to generate captions.</p></div></div>
+      <div id="captionReady" style="display:none">
+        <div class="tab-pills">
+          <button class="tab-pill active" onclick="setCaptionLang('en',this)">English</button>
+          <button class="tab-pill" onclick="setCaptionLang('ur',this)">اردو</button>
+        </div>
+        <button class="btn btn-gold" id="genCaptionsBtn" onclick="generateCaptions()"><i class="ti ti-sparkles"></i><span id="t-genCaptions">Generate 3 Caption Options</span></button>
+        <div id="captionOutput" style="display:none">
+          <div id="captionList"></div>
+          <div class="result-box" style="margin-top:8px"><div class="result-label">Hashtags</div><div id="hashtagText" style="font-size:12px;line-height:1.8"></div></div>
+          <button class="copy-btn" onclick="copyCaption()"><i class="ti ti-copy" style="font-size:15px"></i><span id="t-copyCaption">Copy caption + hashtags</span></button>
+        </div>
+      </div>
+    </div>
+    <div id="screen-portfolio" class="screen">
+      <div class="share-banner">
+        <div><div class="share-banner-text" id="t-shareBannerTitle">Share your catalog</div><div class="share-banner-sub" id="t-shareBannerSub">Show clients at exhibitions instantly</div></div>
+        <button class="share-banner-btn" onclick="sharePortfolio()"><span id="t-shareBtn">Share</span></button>
+      </div>
+      <div class="tab-pills">
+        <button class="tab-pill active" onclick="filterPortfolio('all',this)" id="t-filterAll">All</button>
+        <button class="tab-pill" onclick="filterPortfolio('available',this)" id="t-filterAvail">Available</button>
+        <button class="tab-pill" onclick="filterPortfolio('reserved',this)" id="t-filterRes">Reserved</button>
+        <button class="tab-pill" onclick="filterPortfolio('sold',this)" id="t-filterSold">Sold</button>
+      </div>
+      <div class="portfolio-grid" id="portfolioGrid"></div>
+    </div>
+    <div id="screen-branding" class="screen">
+      <p class="section-title" id="t-brandingTitle">Campaign Ideas</p>
+      <p class="section-sub" id="t-brandingSub">Tap "Yes" to adopt a campaign, "Skip" to try another</p>
+      <button class="btn btn-primary" id="genCampaignBtn" onclick="generateCampaign()"><i class="ti ti-sparkles"></i><span id="t-genCampaign">Suggest a New Campaign</span></button>
+      <div id="campaignList"></div>
+    </div>
+    <div id="screen-comms" class="screen">
+      <p class="section-title" id="t-commsTitle">Message Helper</p>
+      <p class="section-sub" id="t-commsSub">Type what you want to say — I'll write it professionally</p>
+      <div class="chip-row">
+        <div class="chip" onclick="fillTemplate('ready')">Order ready</div>
+        <div class="chip" onclick="fillTemplate('thanks')">Thank you</div>
+        <div class="chip" onclick="fillTemplate('custom')">Custom order</div>
+        <div class="chip" onclick="fillTemplate('price')">Price info</div>
+        <div class="chip" onclick="fillTemplate('ship')">Shipping update</div>
+        <div class="chip" onclick="fillTemplate('exhibition')">Exhibition invite</div>
+      </div>
+      <textarea id="commInput" class="field-input" placeholder="Type what you want to say..."></textarea>
+      <div class="lang-row" style="margin-top:8px">
+        <button class="lang-btn-msg active" id="msgLangEn" onclick="setMsgLang('en')">English</button>
+        <button class="lang-btn-msg" id="msgLangUr" onclick="setMsgLang('ur')">اردو میں</button>
+      </div>
+      <button class="btn btn-primary" id="genMsgBtn" onclick="generateMessage()"><i class="ti ti-writing"></i><span id="t-genMsg">Write Professional Message</span></button>
+      <div id="messageOutput" style="display:none">
+        <div class="result-box"><div class="result-label" id="t-msgLabel">Professional Message</div><div id="messageText" style="white-space:pre-wrap"></div></div>
+        <button class="copy-btn" onclick="copyMessage()"><i class="ti ti-copy" style="font-size:15px"></i><span id="t-copyMsg">Copy message</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="settingsModal" onclick="closeModalOutside(event,'settingsModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('settingsModal')"><i class="ti ti-x"></i></button>
+    <div class="modal-title" id="t-settingsTitle">Settings</div>
+    <div class="field-label">Anthropic API Key</div>
+    <input type="password" id="claudeKeyInput" class="field-input" placeholder="sk-ant-..." style="margin-bottom:6px">
+    <p class="key-note" id="t-claudeKeyNote">Your Claude key. Stored only on this device — never shared.</p>
+    <div class="field-label">Ideogram API Key</div>
+    <input type="password" id="ideogramKeyInput" class="field-input" placeholder="Paste key from developer.ideogram.ai" style="margin-bottom:6px">
+    <p class="key-note" id="t-ideogramKeyNote">For AI model photo generation. Leave blank until you have it.</p>
+    <button class="btn btn-primary" onclick="saveSettings()" style="margin-top:8px"><i class="ti ti-device-floppy"></i><span id="t-saveSettings">Save Keys</span></button>
+    <div id="settingsSavedMsg" style="display:none;text-align:center;padding:8px;font-size:13px;color:var(--emerald-mid);font-weight:500">✓ Keys saved</div>
+  </div>
+</div>
+<div class="item-modal-overlay" id="itemModal" onclick="closeModalOutside(event,'itemModal')">
+  <div class="item-modal">
+    <img id="itemModalImg" src="" alt="" style="display:none">
+    <div class="item-modal-name" id="itemModalName"></div>
+    <div class="item-modal-desc" id="itemModalDesc"></div>
+    <div class="field-label" id="t-statusLabel">Update Status</div>
+    <div class="status-row">
+      <button class="status-btn available" onclick="setItemStatus('available')">Available</button>
+      <button class="status-btn reserved" onclick="setItemStatus('reserved')">Reserved</button>
+      <button class="status-btn sold" onclick="setItemStatus('sold')">Sold</button>
+    </div>
+    <button class="btn btn-secondary" onclick="deleteItem()"><i class="ti ti-trash"></i> <span id="t-deleteItem">Remove from portfolio</span></button>
+    <button class="btn btn-primary" style="margin-top:6px" onclick="closeModal('itemModal')"><span id="t-closeItem">Done</span></button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const PORTFOLIO_KEY='meraki_portfolio_v2';let lang='en',uploadedB64=null,uploadedType=null,currentAnalysis='',selectedCaption='',captionLang='en',msgLang='en',generatedCaptions={en:[],ur:[]},generatedHashtags='',currentItemId=null;
+const T={en:{brandSub:'Traditional Pakistani Clothing',nav1:'Upload',nav2:'Captions',nav3:'Portfolio',nav4:'Branding',nav5:'Message',uploadTitle:'Add New Piece',uploadSub:'Take a photo or choose from your gallery',uploadZone:'Tap to take or upload a photo',uploadZoneSub:'iPhone photo works perfectly',priceLabel:'Price (USD)',analyzeBtn:'Analyze & Name this Piece',analysisLabel:'Garment Analysis',saveBtn:'Save to Portfolio',savedMsg:'Saved to your portfolio!',captionsTitle:'Instagram Content',captionsSub:'Generate captions and hashtags for your latest piece',captionEmpty:'Upload a photo first from the Upload tab, then come back here to generate captions.',genCaptions:'Generate 3 Caption Options',copyCaption:'Copy caption + hashtags',shareBannerTitle:'Share your catalog',shareBannerSub:'Show clients at exhibitions instantly',shareBtn:'Share',filterAll:'All',filterAvail:'Available',filterRes:'Reserved',filterSold:'Sold',brandingTitle:'Campaign Ideas',brandingSub:'Tap "Yes" to adopt a campaign, "Skip" to try another',genCampaign:'Suggest a New Campaign',commsTitle:'Message Helper',commsSub:"Type what you want to say — I'll write it professionally",genMsg:'Write Professional Message',msgLabel:'Professional Message',copyMsg:'Copy message',settingsTitle:'Settings',claudeKeyNote:'Your Claude key. Stored only on this device.',ideogramKeyNote:'For AI model photos. Leave blank until you have it.',saveSettings:'Save Keys',statusLabel:'Update Status',deleteItem:'Remove from portfolio',closeItem:'Done',langToggle:'اردو'},ur:{brandSub:'روایتی پاکستانی لباس',nav1:'اپلوڈ',nav2:'کیپشن',nav3:'پورٹ فولیو',nav4:'برانڈنگ',nav5:'پیغام',uploadTitle:'نیا لباس شامل کریں',uploadSub:'تصویر لیں یا گیلری سے اپلوڈ کریں',uploadZone:'تصویر اپلوڈ کریں',uploadZoneSub:'آئی فون کی تصویر بالکل ٹھیک ہے',priceLabel:'قیمت (ڈالر)',analyzeBtn:'تجزیہ کریں',analysisLabel:'لباس کا تجزیہ',saveBtn:'پورٹ فولیو میں محفوظ کریں',savedMsg:'پورٹ فولیو میں محفوظ ہو گیا!',captionsTitle:'انسٹاگرام مواد',captionsSub:'اپنے لباس کے لیے کیپشن بنائیں',captionEmpty:'پہلے اپلوڈ ٹیب سے تصویر اپلوڈ کریں۔',genCaptions:'۳ کیپشن بنائیں',copyCaption:'کیپشن کاپی کریں',shareBannerTitle:'کیٹلاگ شیئر کریں',shareBannerSub:'نمائش میں فوری دکھائیں',shareBtn:'شیئر',filterAll:'سب',filterAvail:'دستیاب',filterRes:'محفوظ',filterSold:'فروخت',brandingTitle:'مہم کی تجاویز',brandingSub:'ہاں یا چھوڑیں',genCampaign:'نئی مہم کی تجویز',commsTitle:'پیغام مددگار',commsSub:'جو کہنا ہو لکھیں',genMsg:'پیشہ ورانہ پیغام لکھیں',msgLabel:'پیشہ ورانہ پیغام',copyMsg:'پیغام کاپی کریں',settingsTitle:'ترتیبات',claudeKeyNote:'آپ کی Claude key۔ صرف اس ڈیوائس پر محفوظ۔',ideogramKeyNote:'AI ماڈل تصاویر کے لیے۔',saveSettings:'محفوظ کریں',statusLabel:'حالت بدلیں',deleteItem:'پورٹ فولیو سے ہٹائیں',closeItem:'ٹھیک ہے',langToggle:'EN'}};
+function t(k){return T[lang][k]||T.en[k]||k;}function applyLang(){Object.keys(T.en).forEach(k=>{const el=document.getElementById('t-'+k);if(el)el.textContent=t(k);});document.getElementById('langToggle').textContent=t('langToggle');document.getElementById('commInput').placeholder=lang==='ur'?'جو کہنا ہو لکھیں...':"Type what you want to say...";}function toggleLang(){lang=lang==='en'?'ur':'en';applyLang();}
+function showScreen(name,btn){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('screen-'+name).classList.add('active');btn.classList.add('active');if(name==='captions'){document.getElementById('captionNoPhoto').style.display=uploadedB64?'none':'block';document.getElementById('captionReady').style.display=uploadedB64?'block':'none';}if(name==='portfolio')renderPortfolio('all');}
+function openModal(id){document.getElementById(id).classList.add('open');loadSettingsInputs();}function closeModal(id){document.getElementById(id).classList.remove('open');}function closeModalOutside(e,id){if(e.target===document.getElementById(id))closeModal(id);}
+function showToast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2200);}
+function loadSettingsInputs(){try{const ck=localStorage.getItem('meraki_claude_key');const ik=localStorage.getItem('meraki_ideogram_key');if(ck)document.getElementById('claudeKeyInput').value=ck;if(ik)document.getElementById('ideogramKeyInput').value=ik;}catch(e){}}
+function saveSettings(){try{const ck=document.getElementById('claudeKeyInput').value.trim();const ik=document.getElementById('ideogramKeyInput').value.trim();if(ck)localStorage.setItem('meraki_claude_key',ck);if(ik)localStorage.setItem('meraki_ideogram_key',ik);document.getElementById('settingsSavedMsg').style.display='block';setTimeout(()=>{document.getElementById('settingsSavedMsg').style.display='none';closeModal('settingsModal');},1400);}catch(e){alert('Could not save settings.');}}
+async function callClaude(messages,system,maxTokens=800){const key=localStorage.getItem('meraki_claude_key')||'';const useProxy=!key;const url=useProxy?'/api/claude':'https://api.anthropic.com/v1/messages';const headers={'Content-Type':'application/json'};if(!useProxy){headers['x-api-key']=key;headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}const body={model:'claude-sonnet-4-6',max_tokens:maxTokens,messages};if(system)body.system=system;const resp=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});if(!resp.ok){const e=await resp.json();throw new Error(e.error?.message||'API error '+resp.status);}const data=await resp.json();return data.content[0].text;}
+function setLoading(btnId,loading){const btn=document.getElementById(btnId);if(!btn)return;btn.disabled=loading;if(loading){btn._orig=btn.innerHTML;btn.innerHTML='<div class="loading"><span></span><span></span><span></span></div>';}else{btn.innerHTML=btn._orig||btn.innerHTML;}}
+function handleFile(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{uploadedB64=ev.target.result.split(',')[1];uploadedType=file.type;document.getElementById('previewImg').src=ev.target.result;document.getElementById('uploadPreview').style.display='block';document.getElementById('analyzeResult').style.display='none';document.getElementById('savedConfirm').style.display='none';currentAnalysis='';};reader.readAsDataURL(file);}
+async function analyzePhoto(){if(!uploadedB64)return;setLoading('analyzeBtn',true);try{const price=document.getElementById('priceInput').value;const result=await callClaude([{role:'user',content:[{type:'image',source:{type:'base64',media_type:uploadedType,data:uploadedB64}},{type:'text',text:`You are a Pakistani fashion expert for "Meraki by Sam". Analyze this garment and write a short elegant description: poetic name (2-4 words), garment type, colors/embroidery/fabric details, best occasions.${price?` Price: $${price}.`:''} 3-5 sentences, no bullet points, warm and culturally resonant.`}]}],null,500);currentAnalysis=result;document.getElementById('analysisText').textContent=result;document.getElementById('analyzeResult').style.display='block';}catch(e){showToast('Error: '+e.message);}finally{setLoading('analyzeBtn',false);}}
+function saveToPortfolio(){try{const items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]');const price=document.getElementById('priceInput').value;const firstLine=currentAnalysis.split('\n')[0].trim().replace(/^["']|["']$/g,'');const item={id:Date.now(),name:firstLine.substring(0,50)||'New Piece',description:currentAnalysis,price:price?parseInt(price):null,image:uploadedB64?('data:'+uploadedType+';base64,'+uploadedB64):null,status:'available',added:new Date().toLocaleDateString()};items.push(item);localStorage.setItem(PORTFOLIO_KEY,JSON.stringify(items));document.getElementById('savedConfirm').style.display='block';setTimeout(()=>document.getElementById('savedConfirm').style.display='none',2500);}catch(e){showToast('Could not save: '+e.message);}}
+function setCaptionLang(l,btn){captionLang=l;document.querySelectorAll('#screen-captions .tab-pill').forEach(p=>p.classList.remove('active'));btn.classList.add('active');if(generatedCaptions.en.length>0)renderCaptions();}
+async function generateCaptions(){setLoading('genCaptionsBtn',true);try{const result=await callClaude([{role:'user',content:[{type:'image',source:{type:'base64',media_type:uploadedType,data:uploadedB64}},{type:'text',text:`Instagram content for "Meraki by Sam" traditional Pakistani clothing (NJ/NY):\nCAPTION 1 (Storytelling): heritage/nostalgia, 2-3 sentences.\nCAPTION 2 (Description): garment description mentioning brand, 2-3 sentences.\nCAPTION 3 (Call to Action): exhibitions/DM to order, 2-3 sentences.\nURDU CAPTION: one caption in Urdu script only.\nHASHTAGS: 20 hashtags.\n${currentAnalysis?'Context: '+currentAnalysis.substring(0,150):''}\nUse exact labels.`}]}],null,1200);const extract=(l,n)=>(result.match(new RegExp(l+':([\\s\\S]*?)(?='+n+':|$)','i'))?.[1]||'').trim();generatedCaptions.en=[{tag:'Story',text:extract('CAPTION 1','CAPTION 2')},{tag:'Description',text:extract('CAPTION 2','CAPTION 3')},{tag:'Promotional',text:extract('CAPTION 3','URDU CAPTION')}];generatedCaptions.ur=[{tag:'اردو',text:extract('URDU CAPTION','HASHTAGS')}];generatedHashtags=extract('HASHTAGS','XXXEND');selectedCaption=generatedCaptions.en[0]?.text||'';renderCaptions();document.getElementById('captionOutput').style.display='block';}catch(e){showToast('Error: '+e.message);}finally{setLoading('genCaptionsBtn',false);}}
+function renderCaptions(){const list=document.getElementById('captionList');const caps=captionLang==='ur'?generatedCaptions.ur:generatedCaptions.en;list.innerHTML=caps.map((c,i)=>`<div class="caption-card${i===0?' selected':''}" onclick="selectCaption(this,this.querySelector('.caption-body').textContent)"><div class="caption-tag">${c.tag}</div><div class="caption-body${captionLang==='ur'?' urdu':''}"> ${c.text}</div></div>`).join('');document.getElementById('hashtagText').textContent=generatedHashtags;if(caps.length>0)selectedCaption=caps[0].text;}
+function selectCaption(el,text){document.querySelectorAll('.caption-card').forEach(c=>c.classList.remove('selected'));el.classList.add('selected');selectedCaption=text;}
+function copyCaption(){navigator.clipboard?.writeText(selectedCaption+'\n\n'+generatedHashtags).then(()=>showToast('Copied!'));}
+function renderPortfolio(filter){const grid=document.getElementById('portfolioGrid');try{let items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]').reverse();if(filter!=='all')items=items.filter(i=>i.status===filter);if(!items.length){grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><i class="ti ti-hanger"></i><p>${filter==='all'?'No pieces yet. Add your first garment from the Upload tab.':'No '+filter+' pieces right now.'}</p></div>`;return;}grid.innerHTML=items.map(item=>`<div class="portfolio-card" onclick="openItem(${item.id})"><div class="portfolio-thumb">${item.image?`<img src="${item.image}" alt="">`:'<i class="ti ti-hanger"></i>'}</div><div class="portfolio-info"><div class="portfolio-name">${item.name.substring(0,30)}</div>${item.price?`<div class="portfolio-price">$${item.price}</div>`:''}<span class="status-pill status-${item.status}">${item.status}</span></div></div>`).join('');}catch(e){grid.innerHTML='<p style="padding:16px;color:var(--muted);font-size:13px">Could not load portfolio.</p>';}}
+function filterPortfolio(filter,btn){document.querySelectorAll('#screen-portfolio .tab-pill').forEach(p=>p.classList.remove('active'));btn.classList.add('active');renderPortfolio(filter);}
+function openItem(id){try{const items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]');const item=items.find(i=>i.id===id);if(!item)return;currentItemId=id;const imgEl=document.getElementById('itemModalImg');if(item.image){imgEl.src=item.image;imgEl.style.display='block';}else imgEl.style.display='none';document.getElementById('itemModalName').textContent=item.name+(item.price?' — $'+item.price:'');document.getElementById('itemModalDesc').textContent=item.description||'';openModal('itemModal');}catch(e){}}
+function setItemStatus(status){try{const items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]');const item=items.find(i=>i.id===currentItemId);if(item){item.status=status;localStorage.setItem(PORTFOLIO_KEY,JSON.stringify(items));}closeModal('itemModal');renderPortfolio('all');showToast('Marked as '+status);}catch(e){}}
+function deleteItem(){if(!confirm('Remove this piece?'))return;try{let items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]').filter(i=>i.id!==currentItemId);localStorage.setItem(PORTFOLIO_KEY,JSON.stringify(items));closeModal('itemModal');renderPortfolio('all');showToast('Removed');}catch(e){}}
+function sharePortfolio(){try{const items=JSON.parse(localStorage.getItem(PORTFOLIO_KEY)||'[]').filter(i=>i.status==='available');const text=`✨ Meraki by Sam — Available Now\n\n${items.map(i=>`• ${i.name}${i.price?' — $'+i.price:''}`).join('\n')}\n\n📍 NJ & Long Island exhibitions\n📞 DM or WhatsApp to order`;if(navigator.share)navigator.share({title:'Meraki by Sam',text});else navigator.clipboard?.writeText(text).then(()=>showToast('Catalog copied!'));}catch(e){showToast('Could not share');}}
+async function generateCampaign(){setLoading('genCampaignBtn',true);try{const month=new Date().toLocaleString('default',{month:'long',year:'numeric'});const result=await callClaude([{role:'user',content:`Brand strategist for "Meraki by Sam" — traditional Pakistani clothing, NJ/NY, professional Pakistani-American women 25-60.\nCreate ONE campaign for ${month}:\nCAMPAIGN NAME: (2-4 words)\nTHEME: (2-3 sentences)\nCOLOR PALETTE: (2-3 colors)\nTHREE POST IDEAS: (3 concepts)\nWHY THIS MONTH: (1 sentence)\nMake it luxurious and culturally resonant.`}],null,700);const extract=(l,n)=>(result.match(new RegExp(l+':([\\s\\S]*?)(?='+n+':|$)','i'))?.[1]||'').trim();const name=extract('CAMPAIGN NAME','THEME'),theme=extract('THEME','COLOR PALETTE'),colors=extract('COLOR PALETTE','THREE POST IDEAS'),posts=extract('THREE POST IDEAS','WHY THIS MONTH'),why=extract('WHY THIS MONTH','XEND');const cid=Date.now();const card=document.createElement('div');card.className='campaign-card';card.id='campaign-'+cid;card.innerHTML=`<div class="campaign-header"><div class="campaign-title">${name}</div><div class="campaign-month">${month}</div></div><div class="campaign-body"><div class="campaign-section"><strong>Theme:</strong> ${theme}</div><div class="campaign-section"><strong>Colors:</strong> ${colors}</div><div class="campaign-section"><strong>Post ideas:</strong> ${posts}</div><div class="campaign-section" style="color:var(--emerald-mid)"><strong>Why now:</strong> ${why}</div><div class="campaign-actions"><button class="btn-yes" onclick="adoptCampaign(this,'${name.replace(/'/g,"\\'")}')">Yes, use this!</button><button class="btn-no" onclick="this.closest('.campaign-card').remove()">Skip</button></div></div>`;document.getElementById('campaignList').prepend(card);}catch(e){showToast('Error: '+e.message);}finally{setLoading('genCampaignBtn',false);}}
+function adoptCampaign(btn,name){btn.textContent='✓ Adopted!';btn.style.background='var(--gold)';btn.style.color='var(--ink)';btn.disabled=true;btn.nextElementSibling.style.display='none';showToast(name+' adopted!');}
+const templates={ready:'tell customer her order is ready and we can ship next week, ask for her address',thanks:'thank the customer for buying from us, hope she loves the outfit, invite her back for new collection',custom:'ask customer what color, size, and style she wants for custom order, and when she needs it by',price:'reply to price question - say our pieces range from $80 to $350 depending on embroidery and fabric',ship:'let her know the package was shipped today, will arrive in 3 to 5 days',exhibition:'announce we will be at upcoming exhibition with brand new collection, give date and location'};
+function fillTemplate(key){document.getElementById('commInput').value=templates[key]||'';}
+function setMsgLang(l){msgLang=l;document.getElementById('msgLangEn').classList.toggle('active',l==='en');document.getElementById('msgLangUr').classList.toggle('active',l==='ur');}
+async function generateMessage(){const input=document.getElementById('commInput').value.trim();if(!input){showToast('Please type what you want to say');return;}setLoading('genMsgBtn',true);try{const result=await callClaude([{role:'user',content:`Communication helper for Sam, owner of "Meraki by Sam". Transform her note into a warm professional ${msgLang==='ur'?'URDU (Urdu script only)':'English'} customer message.\nSam's note: "${input}"\n${msgLang==='ur'?'Urdu script, warm and respectful.':'Warm professional English. Sign off: Sam | Meraki by Sam'}\nReturn ONLY the message.`}],null,400);const msgEl=document.getElementById('messageText');msgEl.textContent=result;msgEl.className=msgLang==='ur'?'urdu':'';document.getElementById('messageOutput').style.display='block';}catch(e){showToast('Error: '+e.message);}finally{setLoading('genMsgBtn',false);}}
+function copyMessage(){navigator.clipboard?.writeText(document.getElementById('messageText').textContent).then(()=>showToast('Copied!'));}
+applyLang();renderPortfolio('all');
+</script>
+</body>
+</html>
