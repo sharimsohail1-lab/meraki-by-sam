@@ -694,13 +694,13 @@ async function analyzePhoto() {
     const angleNote = photoCount > 1 ? `\n\nNote: ${photoCount} photos provided showing different angles — use all views in your analysis.` : '';
     const result = await callClaude([{
       role: 'user',
-      content: buildPhotoContent(`You are a Pakistani fashion expert for "Meraki by Sam" — a traditional Pakistani clothing brand for the Pakistani-American diaspora, sold at NJ/NY exhibitions and APPNA conferences.
+      content: buildPhotoContent(`You are a Pakistani fashion expert for "Meraki by Sam" — a traditional Pakistani clothing brand for the Pakistani-American diaspora.
 
 Analyze this garment and write a short, elegant description covering:
 - A poetic name for this piece (2–4 words)
 - Garment type (e.g. Embroidered Anarkali, Bridal Lehenga, Casual Shalwar Kameez)
 - Key details: colors, embroidery style, fabric, embellishments
-- Best occasions to wear it${price ? `\n- Price: $${price}` : ''}${angleNote}
+- Best occasions to wear it (e.g. weddings, Eid, mehndi, formal dinners, cultural events)${price ? `\n- Price: $${price}` : ''}${angleNote}
 
 Keep it warm, poetic, and culturally resonant. 3–5 sentences total. No bullet points.`)
     }], null, 500);
@@ -829,7 +829,7 @@ async function generateCaptions() {
     const frontPhoto = uploadedPhotos[0];
     const result = await callClaude([{
       role: 'user',
-      content: buildPhotoContent(`You are a social media expert for "Meraki by Sam" — traditional Pakistani clothing for the Pakistani-American community in NJ/NY, sold at exhibitions and APPNA physician conferences.
+      content: buildPhotoContent(`You are a social media expert for "Meraki by Sam" — traditional Pakistani clothing for the Pakistani-American community in NJ/NY, sold at local exhibitions and cultural events.
 
 Generate Instagram content for this garment:
 
