@@ -473,6 +473,7 @@ let uploadedPhotos = [null, null, null, null]; // [front, back, sleeve, closeup]
 const PHOTO_LABELS = ['Front', 'Back', 'Sleeve / Detail', 'Close-up Embroidery'];
 
 let currentAnalysis = '';
+let currentIdeogramPrompt = '';
 let selectedCaption = '';
 let captionLang = 'en';
 let msgLang = 'en';
@@ -642,6 +643,7 @@ function handleFile(e, slotIndex) {
       document.getElementById('modelPhotoOutput').style.display = 'none';
       generatedModelPhotoDataUrl = null;
       currentAnalysis = '';
+    currentIdeogramPrompt = '';
     }
 
     // Update the angle slot thumbnail
@@ -691,16 +693,20 @@ async function analyzePhoto() {
       role: 'user',
       content: buildPhotoContent(`You are a Pakistani fashion expert for "Meraki by Sam" — a traditional Pakistani clothing brand for the Pakistani-American diaspora.
 
-Analyze this garment and write a short, elegant description covering:
-- A poetic name for this piece (2–4 words)
-- Garment type (e.g. Embroidered Anarkali, Bridal Lehenga, Casual Shalwar Kameez)
-- Key details: colors, embroidery style, fabric, embellishments
-- Best occasions to wear it (e.g. weddings, Eid, mehndi, formal dinners, cultural events)${price ? `\n- Price: $${price}` : ''}${angleNote}
+Analyze this garment and return TWO sections using these exact labels:
 
-Keep it warm, poetic, and culturally resonant. 3–5 sentences total. No bullet points.`)
-    }], null, 500);
-    currentAnalysis = result;
-    document.getElementById('analysisText').textContent = result;
+DESCRIPTION:
+A short, elegant, poetic description covering: a poetic name (2–4 words), garment type, key details (colors, embroidery style, fabric, embellishments), and best occasions to wear it (weddings, Eid, mehndi, formal dinners, cultural events).${price ? ` Price: $${price}.` : ''} Keep it warm and culturally resonant. 3–5 sentences. No bullet points.${angleNote}
+
+IDEOGRAM_PROMPT:
+A highly specific, technical image generation prompt for AI art tools. Include ALL of: exact garment type, precise color names (e.g. "deep ruby red", "ivory"), embroidery style and exact placement (e.g. "gold zari threadwork on neckline and cuffs"), fabric texture (e.g. "silk chiffon", "raw silk"), silhouette and cut, any embellishments (mirrors, sequins, beadwork). Format: "Full-length [garment type] in [colors]. [Fabric]. [Embroidery/embellishment details]. [Silhouette]. Worn by an elegant Pakistani woman model, studio portrait, soft diffused lighting, clean white background, marketing fashion photography."`)
+    }], null, 800);
+
+    const descMatch = result.match(/DESCRIPTION:\s*([\s\S]*?)(?=IDEOGRAM_PROMPT:|$)/i);
+    const ideogramMatch = result.match(/IDEOGRAM_PROMPT:\s*([\s\S]*?)$/i);
+    currentAnalysis = (descMatch?.[1] || result).trim();
+    currentIdeogramPrompt = (ideogramMatch?.[1] || '').trim();
+    document.getElementById('analysisText').textContent = currentAnalysis;
     document.getElementById('analyzeResult').style.display = 'block';
   } catch(e) { showToast('Error: ' + e.message); }
   finally { setLoading('analyzeBtn', false); }
@@ -748,7 +754,7 @@ async function generateModelPhoto() {
   if (!currentAnalysis) { showToast('Analyze the garment first'); return; }
   setLoading('genModelBtn', true);
   try {
-    const prompt = `A beautiful Pakistani woman model wearing ${currentAnalysis.substring(0, 300)}, studio portrait, soft professional lighting, clean white background, elegant and graceful pose, marketing-ready fashion photography for a Pakistani clothing brand, 9:16 portrait`;
+    const prompt = currentIdeogramPrompt || `Full-length traditional Pakistani garment. ${currentAnalysis.substring(0, 200)}. Worn by an elegant Pakistani woman model, studio portrait, soft diffused lighting, clean white background, marketing fashion photography.`;
     const data = await callIdeogram(prompt);
     const imageUrl = data.data[0].url;
     const watermarkedDataUrl = await applyWatermark(imageUrl);
