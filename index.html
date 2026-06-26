@@ -712,7 +712,6 @@ async function applyWatermark(imageUrl) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const mainImg = new Image();
-    mainImg.crossOrigin = 'anonymous';
     mainImg.onload = () => {
       canvas.width = mainImg.naturalWidth;
       canvas.height = mainImg.naturalHeight;
@@ -741,7 +740,7 @@ async function applyWatermark(imageUrl) {
       }
     };
     mainImg.onerror = () => reject(new Error('Could not load model image for watermarking'));
-    mainImg.src = imageUrl;
+    mainImg.src = '/api/ideogram?url=' + encodeURIComponent(imageUrl);
   });
 }
 
