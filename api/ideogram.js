@@ -9,17 +9,15 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'Ideogram API key not configured' });
 
   try {
-    const imageRequest = JSON.stringify(req.body);
+    const { text_prompt, aspect_ratio, rendering_speed } = req.body;
+
     const boundary = 'boundary' + Date.now();
-    const body = [
-      `--${boundary}`,
-      'Content-Disposition: form-data; name="image_request"',
-      'Content-Type: application/json',
-      '',
-      imageRequest,
-      `--${boundary}--`,
-      ''
-    ].join('\r\n');
+    const parts = [];
+
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}`);
+    if (aspect_ratio) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="aspect_ratio"\r\n\r\n${aspect_ratio}`);
+    if (rendering_speed) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="rendering_speed"\r\n\r\n${rendering_speed}`);
+    const body = parts.join('\r\n') + `\r\n--${boundary}--\r\n`;
 
     const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/generate', {
       method: 'POST',

@@ -599,16 +599,11 @@ async function callClaude(messages, system, maxTokens = 800) {
   return data.content[0].text;
 }
 
-async function callIdeogram(prompt) {
+async function callIdeogram(text_prompt) {
   const resp = await fetch('/api/ideogram', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      aspect_ratio: 'ASPECT_9_16',
-      style_type: 'REALISTIC',
-      magic_prompt_option: 'OFF'
-    })
+    body: JSON.stringify({ text_prompt, aspect_ratio: 'ASPECT_9_16' })
   });
   if (!resp.ok) { const e = await resp.json(); throw new Error(e.error?.message || e.error || 'Ideogram error ' + resp.status); }
   return await resp.json();
