@@ -128,6 +128,22 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .attention-name { font-size: 11px; color: var(--ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attention-issue { font-size: 10px; color: #E65100; margin-top: 2px; }
 
+/* Smart Recommendations */
+.rec-list { display: flex; flex-direction: column; gap: 8px; }
+.rec-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 14px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: border-color 0.15s; }
+.rec-card:active { border-color: var(--burgundy); }
+.rec-icon { font-size: 22px; flex-shrink: 0; width: 36px; text-align: center; }
+.rec-body { flex: 1; min-width: 0; }
+.rec-title { font-size: 13px; font-weight: 500; color: var(--ink); line-height: 1.4; }
+.rec-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.rec-arrow { color: var(--muted); font-size: 16px; flex-shrink: 0; }
+.rec-card.urgent { border-left: 3px solid var(--burgundy); }
+.rec-card.info { border-left: 3px solid var(--gold); }
+.rec-card.good { border-left: 3px solid var(--emerald-mid); }
+.rec-all-good { text-align: center; padding: 20px; background: white; border: 1px solid var(--border); border-radius: var(--radius); }
+.rec-all-good i { font-size: 32px; color: var(--emerald-mid); }
+.rec-all-good p { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
 /* ADD / INTAKE */
 .step-indicator { display: flex; align-items: center; margin-bottom: 20px; }
 .step-dot { width: 28px; height: 28px; border-radius: 50%; background: var(--border); color: var(--muted); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -194,6 +210,16 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .content-btn i { font-size: 20px; color: var(--burgundy); }
 .whatsapp-box { background: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 8px; padding: 14px; margin-top: 10px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; font-family: monospace; }
 .copy-btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: 'Inter', sans-serif; margin-top: 8px; }
+
+/* Marketing Package */
+.pkg-section { margin-bottom: 12px; }
+.pkg-label { font-size: 10px; font-weight: 600; color: var(--gold); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; }
+.pkg-copy { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 18px; padding: 0; }
+.pkg-copy:active { color: var(--burgundy); }
+.pkg-text { background: var(--gold-pale); border: 1px solid var(--gold-light); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; color: var(--ink); }
+.pkg-text.whatsapp { background: #E8F5E9; border-color: #A5D6A7; font-family: monospace; }
+.pkg-text.urdu { font-family: 'Noto Nastaliq Urdu', Arial, serif; direction: rtl; text-align: right; font-size: 14px; line-height: 2.2; background: #F3E5F5; border-color: #CE93D8; }
+.pkg-saved-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; background: #E8F5E9; color: #2E7D32; border-radius: 20px; padding: 3px 9px; margin-bottom: 10px; }
 
 /* Model photo */
 .preview-img { width: 100%; max-height: 280px; object-fit: cover; border-radius: 10px; margin-bottom: 12px; }
@@ -281,26 +307,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div class="greeting-text" id="greetingText">Good morning, Sam ✨</div>
         <div class="greeting-date" id="greetingDate"></div>
       </div>
-      <div class="stats-row">
-        <div class="stat-card stat-available"><div class="stat-num" id="statAvail">—</div><div class="stat-label" id="t-statAvail">Available</div></div>
-        <div class="stat-card stat-reserved"><div class="stat-num" id="statRes">—</div><div class="stat-label" id="t-statRes">Reserved</div></div>
-        <div class="stat-card stat-sold"><div class="stat-num" id="statSold">—</div><div class="stat-label" id="t-statSold">Sold</div></div>
-      </div>
-      <div class="action-plan">
-        <div class="action-plan-title">
-          <span id="t-todayActions">📋 Today's Actions</span>
-          <button onclick="refreshActionPlan()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--gold)" title="Refresh"><i class="ti ti-refresh"></i></button>
-        </div>
-        <div id="actionPlanList"><div style="font-size:12px;color:var(--muted)">Loading...</div></div>
-      </div>
+      <div id="smartRecommendations" style="margin-bottom:14px"></div>
       <div class="quick-grid">
         <button class="quick-btn" onclick="showScreen('add')"><i class="ti ti-plus"></i><span id="t-qaAdd">Add New Piece</span></button>
         <button class="quick-btn" onclick="generateWhatsAppCatalog()"><i class="ti ti-brand-whatsapp"></i><span id="t-qaWhatsapp">WhatsApp Catalog</span></button>
         <button class="quick-btn" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-qaExhibition">Exhibition Mode</span></button>
         <button class="quick-btn" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-qaPeople">Message Customer</span></button>
       </div>
-      <div class="field-label" id="t-needsAttention" style="margin-bottom:8px">Needs Attention</div>
-      <div class="attention-scroll" id="attentionScroll"></div>
     </div>
 
     <!-- ADD / INTAKE -->
@@ -517,38 +530,18 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Reserved For</div>
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
-    <div class="field-label" id="t-generateContent">Generate Content</div>
-    <div class="content-btns">
-      <button class="content-btn" onclick="generateWhatsAppCard()"><i class="ti ti-brand-whatsapp"></i><span>WhatsApp</span></button>
-      <button class="content-btn" onclick="generateDetailCaption()"><i class="ti ti-brand-instagram"></i><span>Caption</span></button>
-      <button class="content-btn" id="detailModelBtn" onclick="generateDetailModelPhoto()"><i class="ti ti-user"></i><span>Model Photo</span></button>
-    </div>
-    <div id="whatsappCardOutput" style="display:none">
-      <div class="whatsapp-box" id="whatsappCardText"></div>
-      <button class="copy-btn" onclick="copyWhatsAppCard()"><i class="ti ti-copy" style="font-size:15px"></i> Copy message</button>
-    </div>
-    <div id="captionDetailOutput" style="display:none">
-      <div id="captionDetailList"></div>
-      <div class="result-box" style="margin-top:8px" id="hashtagDetailBox" style="display:none">
-        <div class="result-label">Hashtags</div>
-        <div id="hashtagDetailText" style="font-size:12px;line-height:1.8"></div>
+    <div id="marketingPackageSection">
+      <button class="btn btn-gold" id="createPkgBtn" onclick="generateMarketingPackage()">
+        <i class="ti ti-package"></i> Create Marketing Package
+      </button>
+      <div id="marketingPackageOutput" style="display:none"></div>
+      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-top:8px">
+        <i class="ti ti-user"></i> Generate AI Model Photo
+      </button>
+      <div id="detailModelOutput" style="display:none;margin-top:10px">
+        <img id="detailModelImg" class="preview-img" src="" alt="">
+        <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
       </div>
-      <div class="refine-panel">
-        <div class="refine-title">Refine Caption</div>
-        <div class="refine-chips">
-          <div class="refine-chip" onclick="selectRefineChip(this,'Make it shorter')">Shorter</div>
-          <div class="refine-chip" onclick="selectRefineChip(this,'More poetic')">More poetic</div>
-          <div class="refine-chip" onclick="selectRefineChip(this,'Add call to action')">Add CTA</div>
-          <div class="refine-chip" onclick="selectRefineChip(this,'More formal')">Formal</div>
-        </div>
-        <input type="text" id="refineCustomInput" class="field-input" placeholder="Custom instruction..." style="margin-bottom:8px;font-size:13px">
-        <button class="btn btn-secondary btn-sm" onclick="refineCaption()" id="refineCaptionBtn">Refine</button>
-        <div class="refined-output" id="refinedOutput"></div>
-      </div>
-    </div>
-    <div id="detailModelOutput" style="display:none;margin-top:10px">
-      <img id="detailModelImg" class="preview-img" src="" alt="">
-      <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download</button>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
       <div class="field-label">Price</div>
@@ -846,11 +839,8 @@ function toggleLang() {
 function applyTranslations() {
   const t = T[lang];
   const map = {
-    't-statAvail': t.statAvail, 't-statRes': t.statRes, 't-statSold': t.statSold,
-    't-todayActions': t.todayActions,
     't-qaAdd': t.qaAdd, 't-qaWhatsapp': t.qaWhatsapp,
     't-qaExhibition': t.qaExhibition, 't-qaPeople': t.qaPeople,
-    't-needsAttention': t.needsAttention,
     't-addTitle': t.addTitle, 't-seasonLabel': t.seasonLabel,
     't-collectionLabel': t.collectionLabel, 't-priceLabel': t.priceLabel,
     't-costLabel': t.costLabel, 't-nextStep': t.nextStep,
@@ -868,7 +858,7 @@ function applyTranslations() {
     't-peopleTitle': t.peopleTitle, 't-showTitle': t.showTitle,
     't-settingsTitle': t.settingsTitle, 't-claudeKeyNote': t.claudeKeyNote,
     't-saveSettings': t.saveSettings, 't-updateStatus': t.updateStatus,
-    't-generateContent': t.generateContent, 't-addCustomer': t.addCustomer,
+    't-addCustomer': t.addCustomer,
     't-newExhibition': t.newExhibition, 't-exhItems': t.exhItems,
     't-selectToBring': t.selectToBring,
     't-nav-home': t.navHome, 't-nav-add': t.navAdd, 't-nav-stock': t.navStock,
@@ -904,9 +894,7 @@ function saveSettings() {
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function renderHome() {
   renderGreeting();
-  renderStats();
-  renderAttentionScroll();
-  buildActionPlan();
+  buildSmartRecommendations();
 }
 
 function renderGreeting() {
@@ -917,48 +905,82 @@ function renderGreeting() {
   document.getElementById('greetingDate').textContent = new Date().toLocaleDateString(lang === 'ur' ? 'ur-PK' : 'en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function renderStats() {
-  const avail = inventory.filter(p => p.status === 'available').length;
-  const res = inventory.filter(p => p.status === 'reserved').length;
-  const sold = inventory.filter(p => p.status === 'sold').length;
-  document.getElementById('statAvail').textContent = avail;
-  document.getElementById('statRes').textContent = res;
-  document.getElementById('statSold').textContent = sold;
-}
+function buildSmartRecommendations() {
+  const container = document.getElementById('smartRecommendations');
+  const recs = [];
 
-function renderAttentionScroll() {
-  const scroll = document.getElementById('attentionScroll');
-  const needsPrice = inventory.filter(p => !p.price);
-  if (!needsPrice.length) { scroll.innerHTML = '<span style="font-size:12px;color:var(--muted)">All good ✓</span>'; return; }
-  scroll.innerHTML = needsPrice.slice(0, 10).map(p => `
-    <div class="attention-card" onclick="openProductDetail('${p.id}')">
-      <div class="attention-thumb">${p.photo ? `<img src="${p.photo}" alt="">` : '<i class="ti ti-hanger" style="font-size:28px;color:var(--gold-light)"></i>'}</div>
-      <div class="attention-info">
-        <div class="attention-sku">${p.sku}</div>
-        <div class="attention-name">${p.name}</div>
-        <div class="attention-issue">No price set</div>
-      </div>
-    </div>`).join('');
-}
-
-async function buildActionPlan() {
-  const list = document.getElementById('actionPlanList');
-  if (!inventory.length && !exhibitions.length) {
-    list.innerHTML = '<div class="action-item"><div class="action-dot"></div>Add your first piece to get started</div>';
+  if (!inventory.length) {
+    container.innerHTML = `<div class="rec-all-good"><i class="ti ti-hanger"></i><p>Add your first piece to get started.</p></div>`;
     return;
   }
-  const noPrice = inventory.filter(p => !p.price).length;
-  const upcoming = exhibitions.filter(e => e.status === 'upcoming');
-  const actions = [];
-  if (noPrice > 0) actions.push(`Set prices for ${noPrice} unprice item${noPrice > 1 ? 's' : ''}`);
-  if (upcoming.length) actions.push(`Prepare for ${upcoming[0].name}${upcoming[0].date ? ' on ' + upcoming[0].date : ''}`);
-  const avail = inventory.filter(p => p.status === 'available');
-  if (avail.length > 0) actions.push(`Share ${Math.min(3, avail.length)} pieces on WhatsApp`);
-  if (!actions.length) actions.push('You\'re all caught up — keep adding new pieces!');
-  list.innerHTML = actions.map(a => `<div class="action-item"><div class="action-dot"></div>${a}</div>`).join('');
-}
 
-function refreshActionPlan() { buildActionPlan(); showToast('Refreshed'); }
+  // URGENT: items without prices
+  const noPrice = inventory.filter(p => p.status !== 'sold' && !p.price);
+  if (noPrice.length) {
+    recs.push({ type: 'urgent', icon: '💰', title: `${noPrice.length} item${noPrice.length > 1 ? 's' : ''} still need${noPrice.length === 1 ? 's' : ''} a price`, sub: 'Set prices so customers know what to expect', action: () => { showScreen('stock'); filterStock('needs-price', document.querySelector('#stockFilterPills .tab-pill:last-child')); } });
+  }
+
+  // URGENT: items with no marketing package
+  const noPackage = inventory.filter(p => p.status === 'available' && !p.caption_en);
+  if (noPackage.length) {
+    recs.push({ type: 'urgent', icon: '📦', title: `${noPackage.length} piece${noPackage.length > 1 ? 's' : ''} ${noPackage.length > 1 ? 'have' : 'has'} no marketing content`, sub: 'Open each piece and tap "Create Marketing Package"', action: () => showScreen('stock') });
+  }
+
+  // INFO: upcoming exhibitions
+  const upcoming = exhibitions.filter(e => e.status === 'upcoming');
+  upcoming.forEach(e => {
+    const daysAway = e.date ? Math.round((new Date(e.date) - new Date()) / 86400000) : null;
+    if (daysAway !== null && daysAway >= 0 && daysAway <= 14) {
+      recs.push({ type: 'urgent', icon: '🏪', title: `${e.name} is in ${daysAway === 0 ? 'today' : daysAway + ' day' + (daysAway > 1 ? 's' : '')}`, sub: 'Open Exhibition Mode to prepare your packing list', action: () => { showScreen('show'); setTimeout(() => openExhibitionDetail(e.id), 100); } });
+    } else if (daysAway !== null && daysAway > 14) {
+      recs.push({ type: 'info', icon: '📅', title: `${e.name} is coming up`, sub: e.date + (e.location ? ' · ' + e.location : ''), action: () => showScreen('show') });
+    }
+  });
+
+  // INFO: active exhibitions
+  const active = exhibitions.filter(e => e.status === 'active');
+  if (active.length) {
+    recs.push({ type: 'urgent', icon: '🔴', title: `${active[0].name} is happening now`, sub: 'Tap to mark sales in real time', action: () => { showScreen('show'); setTimeout(() => openExhibitionDetail(active[0].id), 100); } });
+  }
+
+  // INFO: seasonal awareness
+  const month = new Date().getMonth() + 1;
+  const seasonHints = { 3: 'Eid season is approaching', 4: 'Eid season — your busiest time', 5: 'Wedding season starts now', 6: 'Peak wedding season', 9: 'Eid al-Adha season', 10: 'Fall wedding season', 11: 'Formal season — think parties and mehndi' };
+  if (seasonHints[month]) {
+    recs.push({ type: 'info', icon: '🌸', title: seasonHints[month], sub: 'Make sure your best pieces are listed and priced', action: () => showScreen('stock') });
+  }
+
+  // INFO: old available pieces (>45 days unsold)
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 45);
+  const oldPieces = inventory.filter(p => p.status === 'available' && new Date(p.created_at) < cutoff);
+  if (oldPieces.length) {
+    recs.push({ type: 'info', icon: '🔄', title: `${oldPieces.length} older piece${oldPieces.length > 1 ? 's' : ''} could use fresh promotion`, sub: 'Generate new marketing content to re-share on WhatsApp', action: () => showScreen('stock') });
+  }
+
+  // GOOD: just added pieces available
+  const recent = inventory.filter(p => p.status === 'available');
+  if (recent.length > 0 && !noPackage.length && !noPrice.length) {
+    recs.push({ type: 'good', icon: '✅', title: `${recent.length} piece${recent.length > 1 ? 's' : ''} ready to share`, sub: 'All available items are priced and have marketing content', action: () => showScreen('stock') });
+  }
+
+  // Fallback
+  if (!recs.length) {
+    container.innerHTML = `<div class="rec-all-good"><i class="ti ti-sparkles" style="color:var(--gold)"></i><p style="color:var(--ink);font-weight:500">You're all caught up</p><p>Add new pieces or prepare for your next exhibition.</p></div>`;
+    return;
+  }
+
+  container.innerHTML = `<div class="rec-list">${recs.map((r, i) => `
+    <div class="rec-card ${r.type}" onclick="_recActions[${i}]()">
+      <div class="rec-icon">${r.icon}</div>
+      <div class="rec-body">
+        <div class="rec-title">${r.title}</div>
+        ${r.sub ? `<div class="rec-sub">${r.sub}</div>` : ''}
+      </div>
+      <i class="ti ti-chevron-right rec-arrow"></i>
+    </div>`).join('')}</div>`;
+  // Store actions on window to avoid inline handler issues
+  window._recActions = recs.map(r => r.action);
+}
 
 // ─── ADD / INTAKE ─────────────────────────────────────────────────────────────
 const PHOTO_SLOTS = {
@@ -1415,9 +1437,8 @@ function openProductDetail(id) {
   document.getElementById('detailDesc').textContent = p.description_en || '';
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
-  document.getElementById('whatsappCardOutput').style.display = 'none';
-  document.getElementById('captionDetailOutput').style.display = 'none';
   document.getElementById('detailModelOutput').style.display = 'none';
+  renderMarketingPackageCache(p);
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
   document.getElementById('reservedForInput').value = p.reserved_for || '';
   ['available','reserved','sold'].forEach(s => {
@@ -1473,68 +1494,112 @@ async function deleteProduct() {
   } catch(e) { showToast('Error: ' + e.message); }
 }
 
-async function generateWhatsAppCard() {
-  if (!currentProduct) return;
-  const p = currentProduct;
-  const prompt = `Create a short WhatsApp message for this Pakistani garment listing. Keep it under 200 words. Use emojis sparingly. Include the SKU, name, key colors, occasion, and price (if set). Be warm and conversational, not formal.\n\nSKU: ${p.sku}\nName: ${p.name}\nColors: ${p.colors || 'N/A'}\nOccasion: ${p.occasion || 'N/A'}\nPrice: ${p.price ? '$' + p.price : 'Price on request'}\nDescription: ${p.description_en || ''}`;
-  const output = document.getElementById('whatsappCardOutput');
-  const textEl = document.getElementById('whatsappCardText');
-  output.style.display = 'block';
-  textEl.textContent = 'Generating...';
-  try {
-    const msg = await callClaude([{ role: 'user', content: prompt }]);
-    textEl.textContent = msg;
-  } catch(e) { textEl.textContent = 'Error: ' + e.message; }
+// ─── MARKETING PACKAGE ───────────────────────────────────────────────────────
+function renderMarketingPackageCache(p) {
+  const output = document.getElementById('marketingPackageOutput');
+  const btn = document.getElementById('createPkgBtn');
+  if (p.caption_en) {
+    btn.innerHTML = '<i class="ti ti-package"></i> Regenerate Marketing Package';
+    output.style.display = 'block';
+    output.innerHTML = buildPackageHTML(p);
+  } else {
+    btn.innerHTML = '<i class="ti ti-package"></i> Create Marketing Package';
+    output.style.display = 'none';
+  }
 }
 
-function copyWhatsAppCard() {
-  const text = document.getElementById('whatsappCardText').textContent;
+function buildPackageHTML(p) {
+  const sections = [];
+  if (p.caption_en) sections.push({ label: 'Instagram Caption (English)', key: 'caption_en', text: p.caption_en, cls: '' });
+  if (p.caption_ur) sections.push({ label: 'Instagram Caption (Urdu)', key: 'caption_ur', text: p.caption_ur, cls: 'urdu' });
+  if (p.hashtags) sections.push({ label: 'Hashtags', key: 'hashtags', text: p.hashtags, cls: '' });
+  if (p.whatsapp_listing) sections.push({ label: 'WhatsApp Message', key: 'whatsapp_listing', text: p.whatsapp_listing, cls: 'whatsapp' });
+  if (p.story_text) sections.push({ label: 'Story / Short Caption', key: 'story_text', text: p.story_text, cls: '' });
+  if (p.price_card) sections.push({ label: 'Price Card', key: 'price_card', text: p.price_card, cls: '' });
+  if (!sections.length) return '';
+  return `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Package saved</div>` +
+    sections.map(s => `
+      <div class="pkg-section">
+        <div class="pkg-label">${s.label}
+          <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)})" title="Copy"><i class="ti ti-copy"></i></button>
+        </div>
+        <div class="pkg-text ${s.cls}">${s.text}</div>
+      </div>`).join('');
+}
+
+function copyPkgField(text) {
   navigator.clipboard.writeText(text).then(() => showToast('Copied!'));
 }
 
-async function generateDetailCaption() {
+async function generateMarketingPackage() {
   if (!currentProduct) return;
   const p = currentProduct;
-  const prompt = `Write 2 Instagram captions for this Pakistani garment. Make them poetic and evocative. First one is longer (3-4 lines). Second is short and punchy (1 line). Also add 15 relevant hashtags. Format as JSON: {"captions":[{"tag":"Full","body":"..."},{"tag":"Short","body":"..."}],"hashtags":"..."}`;
-  const output = document.getElementById('captionDetailOutput');
-  const list = document.getElementById('captionDetailList');
+  const btn = document.getElementById('createPkgBtn');
+  const output = document.getElementById('marketingPackageOutput');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
   output.style.display = 'block';
-  list.innerHTML = '<div style="font-size:12px;color:var(--muted)">Generating...</div>';
-  try {
-    const resp = await callClaude([{ role: 'user', content: prompt + '\n\nGarment: ' + p.description_en }]);
-    let parsed;
-    try { parsed = JSON.parse(resp); } catch { parsed = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
-    list.innerHTML = parsed.captions.map((c, i) => `
-      <div class="caption-card ${i === 0 ? 'selected' : ''}" onclick="this.parentNode.querySelectorAll('.caption-card').forEach(x=>x.classList.remove('selected'));this.classList.add('selected')">
-        <div class="caption-tag">${c.tag}</div>
-        <div class="caption-body">${c.body}</div>
-      </div>`).join('');
-    document.getElementById('hashtagDetailText').textContent = parsed.hashtags;
-    document.getElementById('hashtagDetailBox').style.display = 'block';
-  } catch(e) { list.innerHTML = '<div style="font-size:12px;color:red">' + e.message + '</div>'; }
-}
+  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:12px 0">Creating your marketing package — this takes about 15 seconds...</div>';
 
-let selectedRefineChipEl = null;
-function selectRefineChip(el, instruction) {
-  if (selectedRefineChipEl) selectedRefineChipEl.classList.remove('selected');
-  selectedRefineChipEl = el;
-  el.classList.add('selected');
-  document.getElementById('refineCustomInput').value = instruction;
-}
+  const prompt = `You are creating a complete marketing package for a Pakistani clothing boutique called "Meraki by Sam."
 
-async function refineCaption() {
-  const instruction = document.getElementById('refineCustomInput').value.trim();
-  if (!instruction) { showToast('Enter a refinement instruction'); return; }
-  const selected = document.querySelector('#captionDetailList .caption-card.selected .caption-body');
-  if (!selected) { showToast('Select a caption first'); return; }
-  const original = selected.textContent;
-  const output = document.getElementById('refinedOutput');
-  output.style.display = 'block';
-  output.textContent = 'Refining...';
+Garment details:
+- Name: ${p.name}
+- Type: ${p.garment_type || 'garment'}
+- Season/Occasion: ${p.season || 'general'}
+- Colors: ${p.colors || 'not specified'}
+- Occasion: ${p.occasion || 'not specified'}
+- Category: ${p.category || 'not specified'}
+- Description: ${p.description_en || 'traditional Pakistani garment'}
+- Price: ${p.price ? '$' + p.price : 'price on request'}
+- SKU: ${p.sku}
+
+Create all of the following in this EXACT JSON format (no markdown, no extra text):
+{
+  "caption_en": "Instagram caption in English. 3-4 lines, poetic, evocative. Reference the garment's beauty, the occasion it's perfect for, the feeling of wearing it. End with a gentle call to action like 'DM to inquire'.",
+  "caption_short": "One punchy line for Instagram. Under 15 words.",
+  "caption_ur": "Instagram caption in Urdu (Nastaliq script). Same tone as caption_en but natural Urdu expression, not a direct translation. 2-3 lines.",
+  "hashtags": "20 relevant hashtags as a single space-separated string. Mix of Pakistani fashion, occasion-specific, color-specific, and boutique hashtags.",
+  "whatsapp_listing": "WhatsApp listing message. Warm and conversational. Include name, key features, price (or 'DM for price'), and SKU reference. Under 120 words. Use line breaks for readability.",
+  "story_text": "Very short text for an Instagram Story overlay. 1-2 lines maximum. Punchy. Could be a price reveal or a one-line description.",
+  "price_card": "Text for a printable price card. Format: item name on first line, key detail on second line, price on third line. Keep it simple."
+}`;
+
   try {
-    const refined = await callClaude([{ role: 'user', content: `Refine this Instagram caption: "${original}"\n\nInstruction: ${instruction}\n\nReturn only the refined caption, no extra text.` }]);
-    output.textContent = refined;
-  } catch(e) { output.textContent = 'Error: ' + e.message; }
+    const resp = await callClaude([{ role: 'user', content: prompt }], '', 1500);
+    let pkg;
+    try { pkg = JSON.parse(resp); }
+    catch { pkg = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
+
+    // Merge caption_en + caption_short into one full caption field
+    const captionFull = pkg.caption_en + (pkg.caption_short ? '\n\n' + pkg.caption_short : '');
+
+    // Save to DB
+    const update = {
+      caption_en: captionFull,
+      caption_ur: pkg.caption_ur || null,
+      hashtags: pkg.hashtags || null,
+      whatsapp_listing: pkg.whatsapp_listing || null,
+      story_text: pkg.story_text || null,
+      price_card: pkg.price_card || null,
+    };
+    await db('update', 'products', { id: p.id, data: update });
+
+    // Update in-memory record
+    const idx = inventory.findIndex(x => x.id === p.id);
+    Object.assign(inventory[idx], update);
+    currentProduct = inventory[idx];
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-package"></i> Regenerate Marketing Package';
+    output.innerHTML = buildPackageHTML(currentProduct);
+    showToast('Package saved ✓');
+    buildSmartRecommendations();
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-package"></i> Create Marketing Package';
+    output.innerHTML = '<div style="font-size:12px;color:var(--burgundy);padding:8px 0">Error: ' + e.message + '</div>';
+  }
 }
 
 async function generateDetailModelPhoto() {
