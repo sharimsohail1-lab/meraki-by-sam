@@ -202,6 +202,24 @@ textarea.field-input { min-height: 80px; resize: vertical; }
 .status-btn.available { border-color: #2E7D32; color: #2E7D32; background: #E8F5E9; }
 .status-btn.reserved { border-color: #E65100; color: #E65100; background: #FFF8E1; }
 .status-btn.sold { border-color: #B71C1C; color: #B71C1C; background: #FFEBEE; }
+.feedback-panel { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 14px; }
+.feedback-step { margin-bottom: 16px; }
+.feedback-step-title { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+.zone-chip { padding: 8px 14px; background: white; border: 2px solid var(--border); border-radius: 20px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); transition: all 0.15s; }
+.zone-chip.selected { background: var(--burgundy); color: white; border-color: var(--burgundy); }
+.problem-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.problem-btn { padding: 14px 8px; background: white; border: 2px solid var(--border); border-radius: var(--radius); font-size: 12px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); display: flex; flex-direction: column; align-items: center; gap: 6px; transition: all 0.15s; }
+.problem-btn .problem-icon { font-size: 24px; }
+.problem-btn.selected { background: var(--gold-pale); border-color: var(--gold); }
+.ref-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }
+.ref-scroll::-webkit-scrollbar { display: none; }
+.ref-thumb { width: 70px; height: 90px; border-radius: 8px; border: 2px solid var(--border); object-fit: cover; cursor: pointer; flex-shrink: 0; transition: border-color 0.15s; }
+.ref-thumb.selected { border-color: var(--burgundy); border-width: 3px; }
+.ref-thumb-empty { width: 70px; height: 90px; border-radius: 8px; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--gold-light); font-size: 24px; flex-shrink: 0; }
+.voice-btn { width: 100%; padding: 14px; border: 2px solid var(--border); border-radius: var(--radius); background: white; font-size: 14px; cursor: pointer; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink); transition: all 0.2s; }
+.voice-btn.recording { background: #FFEBEE; border-color: #B71C1C; color: #B71C1C; animation: pulse-border 1s infinite; }
+@keyframes pulse-border { 0%,100%{border-color:#B71C1C} 50%{border-color:#EF9A9A} }
+.voice-transcript { font-size: 13px; color: var(--muted); line-height: 1.6; margin-top: 8px; padding: 10px 12px; background: var(--gold-pale); border-radius: 8px; min-height: 40px; display: none; }
 </style>
 </head>
 <body>
@@ -287,6 +305,59 @@ textarea.field-input { min-height: 80px; resize: vertical; }
               </button>
               <button class="btn btn-secondary" onclick="downloadModelPhoto()">
                 <i class="ti ti-download"></i> Download
+              </button>
+            </div>
+            <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Something not right? Tell me what to fix:</div>
+              <button class="btn btn-secondary" style="margin-bottom:0" onclick="document.getElementById('feedbackPanel').style.display=document.getElementById('feedbackPanel').style.display==='none'?'block':'none'">
+                <i class="ti ti-adjustments"></i> Fix this photo
+              </button>
+            </div>
+            <div class="feedback-panel" id="feedbackPanel" style="display:none">
+
+              <!-- Step 1: Zone selection -->
+              <div class="feedback-step">
+                <div class="feedback-step-title">① Tap the areas that are wrong (select all that apply)</div>
+                <div class="chip-row" id="zoneChipRow" style="flex-wrap:wrap;gap:8px"></div>
+              </div>
+
+              <!-- Step 2: Problem type -->
+              <div class="feedback-step" id="problemStep" style="display:none">
+                <div class="feedback-step-title">② What is wrong with them?</div>
+                <div class="problem-grid">
+                  <button class="problem-btn" id="prob-color" onclick="toggleProblem('color',this)">
+                    <span class="problem-icon">🎨</span><span>Wrong Color</span>
+                  </button>
+                  <button class="problem-btn" id="prob-embroidery" onclick="toggleProblem('embroidery',this)">
+                    <span class="problem-icon">✨</span><span>Wrong Embroidery</span>
+                  </button>
+                  <button class="problem-btn" id="prob-shape" onclick="toggleProblem('shape',this)">
+                    <span class="problem-icon">📐</span><span>Wrong Shape / Cut</span>
+                  </button>
+                  <button class="problem-btn" id="prob-wrong" onclick="toggleProblem('wrong',this)">
+                    <span class="problem-icon">❌</span><span>Completely Wrong</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Step 3: Reference photo -->
+              <div class="feedback-step" id="refStep" style="display:none">
+                <div class="feedback-step-title">③ Which photo shows what it should look like? (tap to select)</div>
+                <div class="ref-scroll" id="refPhotoRow"></div>
+              </div>
+
+              <!-- Step 4: Voice note -->
+              <div class="feedback-step">
+                <div class="feedback-step-title">④ Add a voice note in Urdu or English (optional)</div>
+                <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">
+                  <i class="ti ti-microphone" style="font-size:20px"></i> Tap to speak
+                </button>
+                <div class="voice-transcript" id="voiceTranscript"></div>
+              </div>
+
+              <!-- Regenerate -->
+              <button class="btn btn-primary" id="regenBtn" onclick="regenerateWithFeedback()">
+                <i class="ti ti-refresh"></i> Regenerate with Corrections
               </button>
             </div>
           </div>
@@ -521,6 +592,12 @@ let generatedHashtags = '';
 let currentItemId = null;
 let selectedRefineInstruction = '';
 let generatedModelPhotoDataUrl = null; // watermarked PNG data URL
+let feedbackZones = new Set();
+let feedbackProblems = new Set();
+let feedbackRefPhoto = null;
+let feedbackVoiceText = '';
+let voiceRecognition = null;
+let isRecording = false;
 
 const T = {
   en: {
@@ -894,6 +971,7 @@ async function generateModelPhoto() {
     generatedModelPhotoDataUrl = watermarkedDataUrl;
     document.getElementById('modelPhotoImg').src = watermarkedDataUrl;
     document.getElementById('modelPhotoOutput').style.display = 'block';
+    initFeedbackPanel();
   } catch(e) { showToast('Error: ' + e.message); }
   finally { setLoading('genModelBtn', false); }
 }
@@ -925,6 +1003,157 @@ function downloadModelPhoto() {
   a.href = generatedModelPhotoDataUrl;
   a.download = 'meraki-model-photo.png';
   a.click();
+}
+
+const GARMENT_ZONES = {
+  'full-suit': ['Neckline','Bodice Front','Bodice Back','Left Sleeve','Right Sleeve','Hem / Border','Dupatta','Colors Overall','Overall Shape'],
+  'kameez':    ['Neckline','Bodice Front','Bodice Back','Left Sleeve','Right Sleeve','Hem / Border','Colors Overall','Overall Shape'],
+  'lehenga':   ['Neckline / Blouse','Bodice','Skirt / Lehenga','Hem / Border','Dupatta','Colors Overall','Overall Shape'],
+  'dupatta':   ['Overall Pattern','Border','Embroidery Detail','Colors','Overall Shape'],
+  'other':     ['Top Section','Middle Section','Bottom Section','Sleeves','Colors Overall','Overall Shape'],
+};
+
+function initFeedbackPanel() {
+  feedbackZones.clear(); feedbackProblems.clear(); feedbackRefPhoto = null; feedbackVoiceText = '';
+  document.getElementById('feedbackPanel').style.display = 'none';
+  document.getElementById('voiceTranscript').style.display = 'none';
+  document.getElementById('voiceTranscript').textContent = '';
+  document.getElementById('problemStep').style.display = 'none';
+  document.getElementById('refStep').style.display = 'none';
+  document.querySelectorAll('.problem-btn').forEach(b => b.classList.remove('selected'));
+
+  // Render zone chips
+  const zones = GARMENT_ZONES[garmentType] || GARMENT_ZONES['other'];
+  document.getElementById('zoneChipRow').innerHTML = zones.map(z =>
+    `<button class="zone-chip" onclick="toggleZone('${z}',this)">${z}</button>`
+  ).join('');
+
+  // Render reference photos
+  const row = document.getElementById('refPhotoRow');
+  const photos = Object.values(uploadedPhotos).filter(Boolean);
+  if (photos.length === 0) {
+    row.innerHTML = '<div style="font-size:12px;color:var(--muted)">No reference photos uploaded</div>';
+  } else {
+    row.innerHTML = photos.map((p,i) => `
+      <div style="text-align:center;flex-shrink:0">
+        <img class="ref-thumb" src="data:${p.type};base64,${p.b64}"
+          onclick="selectRefPhoto(this,'${p.label}')"
+          title="${p.label}">
+        <div style="font-size:9px;color:var(--muted);margin-top:3px;width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function toggleZone(zone, el) {
+  if (feedbackZones.has(zone)) { feedbackZones.delete(zone); el.classList.remove('selected'); }
+  else { feedbackZones.add(zone); el.classList.add('selected'); }
+  document.getElementById('problemStep').style.display = feedbackZones.size > 0 ? 'block' : 'none';
+  document.getElementById('refStep').style.display = feedbackZones.size > 0 ? 'block' : 'none';
+}
+
+function toggleProblem(type, el) {
+  if (feedbackProblems.has(type)) { feedbackProblems.delete(type); el.classList.remove('selected'); }
+  else { feedbackProblems.add(type); el.classList.add('selected'); }
+}
+
+function selectRefPhoto(el, label) {
+  document.querySelectorAll('.ref-thumb').forEach(t => t.classList.remove('selected'));
+  el.classList.add('selected');
+  feedbackRefPhoto = { src: el.src, label };
+}
+
+function toggleVoice() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast('Voice not supported on this browser. Try Chrome or Safari.');
+    return;
+  }
+  if (isRecording) {
+    voiceRecognition?.stop();
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  voiceRecognition = new SR();
+  voiceRecognition.lang = 'ur-PK';
+  voiceRecognition.continuous = false;
+  voiceRecognition.interimResults = true;
+  const btn = document.getElementById('voiceBtn');
+  const transcript = document.getElementById('voiceTranscript');
+  voiceRecognition.onstart = () => {
+    isRecording = true;
+    btn.classList.add('recording');
+    btn.innerHTML = '<i class="ti ti-microphone" style="font-size:20px"></i> Recording... tap to stop';
+    transcript.style.display = 'block';
+    transcript.textContent = '...';
+  };
+  voiceRecognition.onresult = (e) => {
+    const text = Array.from(e.results).map(r => r[0].transcript).join(' ');
+    transcript.textContent = text;
+    if (e.results[e.results.length-1].isFinal) feedbackVoiceText = text;
+  };
+  voiceRecognition.onend = () => {
+    isRecording = false;
+    btn.classList.remove('recording');
+    btn.innerHTML = '<i class="ti ti-microphone" style="font-size:20px"></i> Tap to speak';
+  };
+  voiceRecognition.onerror = () => {
+    isRecording = false;
+    btn.classList.remove('recording');
+    btn.innerHTML = '<i class="ti ti-microphone" style="font-size:20px"></i> Tap to speak';
+    showToast('Could not hear clearly. Try again.');
+  };
+  voiceRecognition.start();
+  isRecording = true;
+}
+
+async function regenerateWithFeedback() {
+  if (feedbackZones.size === 0 && feedbackProblems.size === 0 && !feedbackVoiceText) {
+    showToast('Please select at least one area or problem to fix');
+    return;
+  }
+  setLoading('regenBtn', true);
+  try {
+    const problemLabels = { color: 'wrong colors', embroidery: 'wrong or missing embroidery detail', shape: 'wrong shape or cut', wrong: 'completely inaccurate' };
+    const zoneList = feedbackZones.size > 0 ? `Areas that are wrong: ${[...feedbackZones].join(', ')}.` : '';
+    const probList = feedbackProblems.size > 0 ? `Problems: ${[...feedbackProblems].map(p => problemLabels[p]).join(', ')}.` : '';
+    const voiceNote = feedbackVoiceText ? `Sam's voice note (may be in Urdu): "${feedbackVoiceText}".` : '';
+    const refNote = feedbackRefPhoto ? `The reference photo labeled "${feedbackRefPhoto.label}" shows what this area should look like — use it as the source of truth for that zone.` : '';
+
+    // Build correction messages
+    const messages = [{
+      role: 'user',
+      content: [
+        ...(feedbackRefPhoto ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: feedbackRefPhoto.src.split(',')[1] } }] : []),
+        { type: 'text', text: `You are generating a corrected Ideogram image prompt for a Pakistani garment.
+
+Original prompt:
+${currentIdeogramPrompt}
+
+Corrections needed:
+${zoneList}
+${probList}
+${refNote}
+${voiceNote}
+
+${feedbackRefPhoto ? 'The image above is the reference photo Sam selected to show what the wrong area should look like. Study it carefully and incorporate those specific details.' : ''}
+
+Rewrite the Ideogram prompt with these corrections applied. Be even more precise about the corrected zones. Keep all the correct parts of the original prompt. Return ONLY the corrected prompt, nothing else.` }
+      ]
+    }];
+
+    const correctedPrompt = await callClaude(messages, null, 800);
+    currentIdeogramPrompt = correctedPrompt;
+    document.getElementById('feedbackPanel').style.display = 'none';
+
+    const data = await callIdeogram(correctedPrompt);
+    const imageUrl = data.data[0].url;
+    const watermarkedDataUrl = await applyWatermark(imageUrl);
+    generatedModelPhotoDataUrl = watermarkedDataUrl;
+    document.getElementById('modelPhotoImg').src = watermarkedDataUrl;
+    showToast('Photo regenerated!');
+    initFeedbackPanel();
+  } catch(e) { showToast('Error: ' + e.message); }
+  finally { setLoading('regenBtn', false); }
 }
 
 function saveToPortfolio() {
