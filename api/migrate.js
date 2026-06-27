@@ -18,46 +18,73 @@ export default async function handler(req, res) {
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
+  const log = [];
 
   try {
-    // Ensure migrations table exists first (bootstrap)
-    await supabase.rpc('run_sql', {
+    // Bootstrap migrations table
+    const { error: bootErr } = await supabase.rpc('run_sql', {
       query: `CREATE TABLE IF NOT EXISTS migrations (
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE NOT NULL,
         run_at TIMESTAMPTZ DEFAULT NOW()
       )`
     });
+    if (bootErr) {
+      return res.status(500).json({ error: 'Bootstrap failed: ' + bootErr.message, log });
+    }
 
     // Get already-run migrations
-    const { data: ran } = await supabase.from('migrations').select('name');
+    const { data: ran, error: ranErr } = await supabase.from('migrations').select('name');
+    if (ranErr) {
+      return res.status(500).json({ error: 'Could not read migrations table: ' + ranErr.message, log });
+    }
     const ranNames = new Set((ran || []).map(r => r.name));
 
     // Read migration files in order
     const migrationsDir = join(process.cwd(), 'migrations');
     const files = (await readdir(migrationsDir)).filter(f => f.endsWith('.sql')).sort();
 
-    const results = [];
     for (const file of files) {
       if (ranNames.has(file)) {
-        results.push({ file, status: 'skipped (already run)' });
+        log.push({ file, status: 'skipped (already run)' });
         continue;
       }
+
       const sql = await readFile(join(migrationsDir, file), 'utf8');
-      // Split on semicolons and run each statement
       const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
+      let fileOk = true;
+
       for (const stmt of statements) {
-        await supabase.rpc('run_sql', { query: stmt });
+        const { error: stmtErr } = await supabase.rpc('run_sql', { query: stmt });
+        if (stmtErr) {
+          log.push({ file, status: 'error', statement: stmt.slice(0, 120), error: stmtErr.message });
+          fileOk = false;
+          break;
+        }
       }
-      await supabase.from('migrations').insert({ name: file });
-      results.push({ file, status: 'applied' });
+
+      if (fileOk) {
+        const { error: insertErr } = await supabase.from('migrations').insert({ name: file });
+        if (insertErr) {
+          log.push({ file, status: 'sql ok but tracking failed: ' + insertErr.message });
+        } else {
+          log.push({ file, status: 'applied' });
+        }
+      }
     }
 
-    // Always reload PostgREST schema cache so new columns are immediately visible
-    await supabase.rpc('run_sql', { query: `NOTIFY pgrst, 'reload schema'` });
+    // Always attempt schema cache reload — failure here is non-fatal
+    const { error: notifyErr } = await supabase.rpc('run_sql', { query: `NOTIFY pgrst, 'reload schema'` });
+    if (notifyErr) {
+      log.push({ file: 'schema reload', status: 'warning: ' + notifyErr.message });
+    } else {
+      log.push({ file: 'schema reload', status: 'sent' });
+    }
 
-    return res.status(200).json({ success: true, results });
+    const hasErrors = log.some(l => l.status?.startsWith('error'));
+    return res.status(hasErrors ? 500 : 200).json({ success: !hasErrors, log });
+
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message, log });
   }
 }
