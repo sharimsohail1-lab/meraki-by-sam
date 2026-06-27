@@ -182,3 +182,79 @@ to verify the log output during each test.
 **Test 6 — Exhibition**
 1. Add products to an exhibition
 2. Exhibition item list should show garment photos (unchanged, intentional)
+
+---
+
+## 2026-06-27 — Regression fix: restore model generation
+
+### What broke
+
+The composite reference image (grid of all uploaded zone photos sent to Ideogram)
+caused Ideogram to reproduce the flat-lay grid instead of generating a model.
+High image_weight (0.95 default) reinforced this — Ideogram interpreted the
+instruction as "recreate this reference" rather than "dress a model using this
+garment as reference."
+
+### What changed
+
+**1. Composite no longer sent to Ideogram**
+
+Ideogram now receives only the front photo (or first uploaded) as the image
+reference. This is the same single-photo behaviour as before the composite was
+introduced, except the source is now guaranteed to be the original garment photo
+(not an AI image — canonical fix from previous commit remains in place).
+
+The composite is still built when multiple photos are uploaded, but is used only
+for the "View reference" debug preview. It is never sent to Ideogram.
+
+`viewReferenceImage()` now shows the composite when multiple zones are uploaded,
+with a tooltip clarifying: "Ideogram only receives the front photo."
+
+**2. Default image_weight changed from 0.95 to 0.60**
+
+0.95 was suppressing model generation — the reference dominated and Ideogram
+preserved the flat-lay pose. 0.60 gives Ideogram more creative latitude to place
+the garment on a model while still using the photo as a colour/pattern reference.
+Slider range unchanged (20–95%). Sam can still adjust.
+
+**3. ideogramPrompt instruction strengthened**
+
+The Claude instruction for generating `ideogramPrompt` now:
+- Requires the prompt to START with "Full-length professional fashion photograph
+  of a Pakistani woman model wearing"
+- Ends with explicit avoidance: "Not a flat-lay. Not a product photo. Not a
+  collage or grid."
+- Marks these requirements as CRITICAL in the instruction
+
+**4. Fallback weight in callIdeogram updated**
+
+The hardcoded fallback (used when no slider is visible) changed from 0.95 to
+0.60 to match the new default.
+
+### Why composite broke generation
+
+Ideogram's remix endpoint takes one reference image and uses it primarily as a
+structural/style template. A labelled grid of 4 photos looks like a product
+reference sheet. At high image_weight, Ideogram tries to reproduce that structure
+— it creates a product collage, not a model photo.
+
+At lower weights (< 0.5) a composite might work as a loose colour reference, but
+at those weights the prompt matters more than the reference anyway, making the
+composite mostly redundant.
+
+### Risks remaining
+
+The single-photo approach gives Ideogram less garment detail than the composite
+would have (if composite had worked). Neckline embroidery, sleeve detail, and
+dupatta patterns are still conveyed only through the text prompt (written by
+Claude from the photos during analysis). Accuracy improvement from multi-photo
+information is now entirely prompt-dependent.
+
+Composite remains available as a future option if Ideogram adds dedicated
+multi-reference support, or if low-weight experiments show the composite can
+improve colour accuracy without breaking model generation.
+
+### What to test
+
+Same 9 tests from previous matrix. Core confirmation: output must be a full-length
+model wearing the garment — not a grid, not a flat-lay, not a hanger image.

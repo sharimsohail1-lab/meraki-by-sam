@@ -553,9 +553,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div id="modelPhotoSection" style="margin-top:14px">
             <div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-                <span>Garment accuracy</span><span id="imageWeightLabel">95%</span>
+                <span>Garment accuracy</span><span id="imageWeightLabel">60%</span>
               </div>
-              <input type="range" id="imageWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
+              <input type="range" id="imageWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
               <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
             </div>
             <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
@@ -790,9 +790,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
       <div style="margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-          <span>Garment accuracy</span><span id="detailWeightLabel">95%</span>
+          <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
         </div>
-        <input type="range" id="detailWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
+        <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
       </div>
       <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
@@ -1116,7 +1116,7 @@ async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3', imageB64 = null)
     const intakeSlider = document.getElementById('imageWeightSlider');
     const detailSlider = document.getElementById('detailWeightSlider');
     const sliderVal = (intakeSlider?.offsetParent ? intakeSlider : detailSlider)?.value;
-    payload.image_weight = sliderVal ? parseInt(sliderVal) / 100 : 0.95;
+    payload.image_weight = sliderVal ? parseInt(sliderVal) / 100 : 0.60;
   }
   const r = await fetch('/api/ideogram', {
     method: 'POST',
@@ -1481,7 +1481,7 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
   "colors": "comma-separated list of main colors",
   "occasion": "best occasion for this garment",
   "category": "Formal/Semi-Formal/Casual/Bridal",
-  "ideogramPrompt": "Write a precise Ideogram v4 fashion prompt. Begin with: 'Professional fashion photograph, Pakistani woman model wearing'. Then describe these zones in order — GARMENT: full garment type and silhouette. FABRIC: texture and drape. COLORS: each zone (kameez body, neckline, sleeves, cuffs, hemline, dupatta, trouser). EMBROIDERY: exact placement per zone (e.g. dense gold zari embroidery on neckline extending 4 inches down chest, floral mirror work on sleeve cuffs only, plain hemline). STYLING: model pose, studio white background, editorial fashion lighting, full-length shot, 8k. Do NOT invent details not visible in the photos — write blank for zones you cannot see."
+  "ideogramPrompt": "Write an Ideogram v4 fashion prompt. CRITICAL: The output must be a real Pakistani woman model wearing this garment — not a flat-lay, not a product grid, not a hanger image, not a mannequin, not a collage. Start the prompt with: 'Full-length professional fashion photograph of a Pakistani woman model wearing'. Then describe: GARMENT TYPE and silhouette. FABRIC texture and drape. COLORS zone by zone (kameez body, neckline, sleeves, cuffs, hemline, dupatta, trouser). EMBROIDERY exact placement per visible zone (e.g. dense gold zari embroidery on neckline extending 4 inches down, mirror work on sleeve cuffs, plain hemline). End with: 'Model is wearing the full outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot showing complete outfit, sharp focus, 8k. Not a flat-lay. Not a product photo. Not a collage or grid.' Do NOT invent details for zones not visible in photos."
 }` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
@@ -1729,30 +1729,36 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   setLoading(btnId, true, '');
   try {
-    const hasUploads = Object.keys(uploadedPhotos).length > 0;
     const uploadCount = Object.keys(uploadedPhotos).length;
-    const isComposite = hasUploads && uploadCount > 1;
-    const garmentPhoto = hasUploads
-      ? (await buildGarmentComposite(uploadedPhotos))
-      : (currentAnalysis._uploadedPhotoB64 || null);
+    // Use the front photo (or first available) as the Ideogram reference.
+    // Sending a composite grid breaks model generation — Ideogram recreates the
+    // grid layout instead of dressing a model. Composite is built separately for
+    // the debug "View reference" preview only.
+    const singleRef = uploadedPhotos['front']?.dataUrl
+      || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl
+      || currentAnalysis._uploadedPhotoB64
+      || null;
 
-    // Store so "View Reference" button can display it
-    currentAnalysis._referencePhoto = garmentPhoto;
+    // Build composite only for the debug view — never sent to Ideogram.
+    const debugComposite = uploadCount > 1
+      ? await buildGarmentComposite(uploadedPhotos)
+      : singleRef;
+    currentAnalysis._referencePhoto = debugComposite || singleRef;
 
     const intakeSlider = document.getElementById('imageWeightSlider');
     const detailSlider = document.getElementById('detailWeightSlider');
     const sliderEl = intakeSlider?.offsetParent ? intakeSlider : detailSlider;
-    const imageWeight = sliderEl ? parseInt(sliderEl.value) / 100 : 0.95;
+    const imageWeight = sliderEl ? parseInt(sliderEl.value) / 100 : 0.60;
 
     console.group('[Meraki] Model photo generation');
-    console.log('Source:', isComposite ? `composite (${uploadCount} zones)` : (hasUploads ? 'single upload' : 'saved garment photo'));
+    console.log('Ideogram reference:', singleRef ? (uploadCount > 1 ? `front photo (${uploadCount} zones uploaded; composite shown in debug view only)` : 'single upload') : 'saved garment photo');
     console.log('Image weight:', imageWeight);
     console.log('Prompt length:', currentAnalysis.ideogramPrompt?.length, 'chars');
     console.log('Prompt preview:', currentAnalysis.ideogramPrompt?.slice(0, 200));
-    console.log('Reference image size:', garmentPhoto ? Math.round(garmentPhoto.length / 1024) + ' KB' : 'none');
+    console.log('Reference image size:', singleRef ? Math.round(singleRef.length / 1024) + ' KB' : 'none');
     console.groupEnd();
 
-    const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', garmentPhoto);
+    const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', singleRef);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
     img.src = watermarked;
@@ -1769,7 +1775,8 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
     const refBtns = document.querySelectorAll('.js-view-ref-btn');
     refBtns.forEach(b => {
       b.style.display = 'inline-flex';
-      b.title = isComposite ? `Composite (${uploadCount} zones)` : 'Single garment photo';
+      b.textContent = uploadCount > 1 ? `View reference (${uploadCount} zones)` : 'View reference';
+      b.title = uploadCount > 1 ? 'Shows all uploaded zones. Ideogram only receives the front photo.' : 'The garment photo sent to Ideogram.';
     });
   } catch(e) {
     showToast('Photo generation failed: ' + e.message);
