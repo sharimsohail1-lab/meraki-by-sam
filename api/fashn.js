@@ -37,7 +37,7 @@ export default async function handler(req, res) {
 
   // ── POST: start prediction ────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { model_image, garment_image, category, mode, garment_photo_type, prompt } = req.body;
+    const { model_image, garment_image, category, mode, garment_photo_type } = req.body;
 
     if (!model_image || !garment_image) {
       return res.status(400).json({ error: 'model_image and garment_image are required' });
@@ -54,8 +54,6 @@ export default async function handler(req, res) {
       segmentation_free: true,
       num_samples: 1
     };
-    if (prompt) inputs.prompt = prompt;
-
     const payload = {
       model_name: 'tryon-v1.6',
       inputs
