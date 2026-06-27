@@ -43,20 +43,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'model_image and garment_image are required' });
     }
 
-    // Pakistani kameez = long top, not a Western one-piece dress.
-    // long_top: true  → tells FASHN the garment extends below the waist (kameez/tunic length)
-    // restore_clothes: true → shows trousers/shalwar below the kameez instead of bare legs
+    // category: tops preserves kameez as a long tunic, not a Western one-piece dress
+    const resolvedCategory = category || 'tops';
     const payload = {
       model_name: 'tryon-v1.6',
       inputs: {
         model_image: model_image,
         garment_image: garment_image,
-        category: category || 'tops',
-        garment_photo_type: garment_photo_type || 'auto',
+        category: resolvedCategory === 'auto' ? 'tops' : resolvedCategory,
+        garment_photo_type: garment_photo_type || 'flat-lay',
         mode: mode || 'balanced',
         segmentation_free: true,
-        long_top: true,
-        restore_clothes: true,
         num_samples: 1
       }
     };
