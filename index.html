@@ -551,6 +551,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div id="analysisText" style="white-space:pre-wrap"></div>
           </div>
           <div id="modelPhotoSection" style="margin-top:14px">
+            <div style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+                <span>Garment accuracy</span><span id="imageWeightLabel">95%</span>
+              </div>
+              <input type="range" id="imageWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
+            </div>
             <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
               <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
             </button>
@@ -778,6 +785,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+          <span>Garment accuracy</span><span id="detailWeightLabel">95%</span>
+        </div>
+        <input type="range" id="detailWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
+      </div>
       <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:10px">
         <i class="ti ti-user"></i> Generate AI Model Photo
       </button>
@@ -1092,7 +1106,11 @@ async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3', imageB64 = null)
   const payload = { text_prompt: prompt, aspect_ratio: aspectRatio };
   if (imageB64) {
     payload.image_b64 = imageB64;
-    payload.image_weight = 0.7; // high weight so Ideogram closely follows the actual garment
+    // Read slider value if visible, otherwise use default
+    const intakeSlider = document.getElementById('imageWeightSlider');
+    const detailSlider = document.getElementById('detailWeightSlider');
+    const sliderVal = (intakeSlider?.offsetParent ? intakeSlider : detailSlider)?.value;
+    payload.image_weight = sliderVal ? parseInt(sliderVal) / 100 : 0.95;
   }
   const r = await fetch('/api/ideogram', {
     method: 'POST',

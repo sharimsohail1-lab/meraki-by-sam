@@ -78,7 +78,7 @@ export default async function handler(req, res) {
 }
 
 function buildRemixMultipart({ boundary, text_prompt, aspect_ratio, imageBuffer, mimeType, ext, weight }) {
-  const weightVal = weight ?? 0.7;
+  const weightVal = weight ?? 0.95;
   const textPart = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}\r\n`);
   const weightPart = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image_weight"\r\n\r\n${weightVal}\r\n`);
   const aspectPart = aspect_ratio
@@ -91,7 +91,7 @@ function buildRemixMultipart({ boundary, text_prompt, aspect_ratio, imageBuffer,
 
 async function tryRemixV4({ apiKey, text_prompt, aspect_ratio, imageBuffer, mimeType, ext, image_weight }) {
   try {
-    const weight = image_weight ?? 0.7;
+    const weight = image_weight ?? 0.95;
     // v4 remix expects JSON with base64 image, not multipart
     const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/remix', {
       method: 'POST',
@@ -118,7 +118,7 @@ async function tryRemixV2({ apiKey, text_prompt, aspect_ratio, imageBuffer, mime
     const imageRequest = JSON.stringify({
       prompt: text_prompt,
       aspect_ratio: aspect_ratio || 'ASPECT_2_3',
-      image_weight: Math.round((image_weight ?? 0.7) * 100), // v2 uses 0-100
+      image_weight: Math.round((image_weight ?? 0.95) * 100), // v2 uses 0-100
       model: 'V_2'
     });
     const reqPart = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image_request"\r\n\r\n${imageRequest}\r\n`);
