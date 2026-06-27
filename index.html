@@ -1475,7 +1475,7 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
   "colors": "comma-separated list of main colors",
   "occasion": "best occasion for this garment",
   "category": "Formal/Semi-Formal/Casual/Bridal",
-  "ideogramPrompt": "SURGICAL Ideogram v4 prompt for Pakistani fashion model photo. Format: 'Professional fashion photograph, Pakistani model wearing [garment type]. FABRIC: [exact fabric description]. COLORS: [precise colors zone by zone]. EMBROIDERY: [exact placement — e.g. heavily embroidered neckline extending 3 inches down chest in gold thread, mirror work on sleeves cuffs, plain hemline]. SILHOUETTE: [cut and shape]. STYLE: editorial lighting, white seamless background, full length shot, sharp focus, 8k'"
+  "ideogramPrompt": "Write a precise Ideogram v4 fashion prompt. Begin with: 'Professional fashion photograph, Pakistani woman model wearing'. Then describe these zones in order — GARMENT: full garment type and silhouette. FABRIC: texture and drape. COLORS: each zone (kameez body, neckline, sleeves, cuffs, hemline, dupatta, trouser). EMBROIDERY: exact placement per zone (e.g. dense gold zari embroidery on neckline extending 4 inches down chest, floral mirror work on sleeve cuffs only, plain hemline). STYLING: model pose, studio white background, editorial fashion lighting, full-length shot, 8k. Do NOT invent details not visible in the photos — write blank for zones you cannot see."
 }` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
@@ -1511,8 +1511,9 @@ async function saveProduct() {
 
   const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
   const modelPhoto = currentAnalysis._modelPhotoUrl || null;
-  // If AI model photo was generated, use it as the primary display photo
-  const photo = modelPhoto || uploadedPhoto;
+  // Always store original garment photo in products.photo so future regenerations
+  // reference the real garment, never an AI image. Display uses model_photo || photo.
+  const photo = uploadedPhoto;
   const price = parseInt(document.getElementById('priceInput').value) || null;
   const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
@@ -1656,16 +1657,77 @@ function resetIntake() {
   goToStep(1);
 }
 
+// Build a labelled multi-zone composite image from all uploaded garment photos.
+// Sending every zone to Ideogram significantly increases fidelity vs. front-only.
+async function buildGarmentComposite(photos) {
+  const entries = Object.entries(photos).filter(([, v]) => v?.dataUrl);
+  if (!entries.length) return null;
+  if (entries.length === 1) return entries[0][1].dataUrl;
+
+  const loadImg = url => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = url;
+  });
+
+  const loaded = (await Promise.all(
+    entries.map(([id, p]) => loadImg(p.dataUrl).then(img => img ? { id, label: p.label || id, img } : null))
+  )).filter(Boolean);
+  if (!loaded.length) return null;
+  if (loaded.length === 1) return entries[0][1].dataUrl;
+
+  // Layout: primary (front) fills left column full-height; others stack on right.
+  const CELL_W = 300, CELL_H = 400, LABEL_H = 22;
+  const primary = loaded.find(x => x.id === 'front') || loaded[0];
+  const rest = loaded.filter(x => x !== primary);
+  const rightH = rest.length ? (CELL_H + LABEL_H) / rest.length : 0;
+  const totalH = CELL_H + LABEL_H;
+  const totalW = rest.length ? CELL_W * 2 : CELL_W;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = totalW;
+  canvas.height = totalH;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, totalW, totalH);
+
+  // Primary photo (left column, full height minus label)
+  ctx.drawImage(primary.img, 0, 0, CELL_W, CELL_H);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, CELL_H, CELL_W, LABEL_H);
+  ctx.fillStyle = '#fff';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(primary.label || 'Front', CELL_W / 2, CELL_H + 15);
+
+  // Right column: stack remaining photos with labels
+  rest.forEach((item, i) => {
+    const y = Math.round(i * rightH);
+    const h = Math.round(rightH - LABEL_H);
+    ctx.drawImage(item.img, CELL_W, y, CELL_W, h);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(CELL_W, y + h, CELL_W, LABEL_H);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(item.label || item.id, CELL_W + CELL_W / 2, y + h + 15);
+  });
+
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
 // ─── MODEL PHOTO / IDEOGRAM ───────────────────────────────────────────────────
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   setLoading(btnId, true, '');
   try {
-    // Pass the front photo (or first available) so Ideogram sees the actual garment
-    const garmentPhoto = uploadedPhotos['front']?.dataUrl
-      || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl
-      || currentAnalysis._uploadedPhotoB64
-      || null;
+    // Build a multi-zone composite if multiple photos were uploaded, otherwise fall
+    // back to single photo. This gives Ideogram every garment zone at once.
+    const hasUploads = Object.keys(uploadedPhotos).length > 0;
+    const garmentPhoto = hasUploads
+      ? (await buildGarmentComposite(uploadedPhotos))
+      : (currentAnalysis._uploadedPhotoB64 || null);
     const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', garmentPhoto);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
@@ -1944,7 +2006,7 @@ function renderCollections() {
   let html = '';
   for (const [name, items] of collections) {
     const thumbs = items.slice(0, 3).map(p =>
-      p.photo ? `<img class="collection-thumb" src="${p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
+      (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
     ).join('');
     const hasPkg = items.some(p => p.caption_en);
     const available = items.filter(p => p.status === 'available').length;
@@ -2015,8 +2077,9 @@ function openCollectionDetail(name) {
     itemsEl.innerHTML = items.map((p, i) => {
       const idx = idxBase + i;
       window._collItemActions[idx] = p.id;
-      const photoHTML = p.photo
-        ? `<div class="catalog-item-photo"><img src="${p.photo}" alt="${p.name}"></div>`
+      const _dPhoto = p.model_photo || p.photo;
+      const photoHTML = _dPhoto
+        ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
         : `<div class="catalog-item-photo">👗</div>`;
       const meta = [p.garment_type, p.season, p.colors].filter(Boolean).join(' · ');
       return `<div class="catalog-item" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${idx}]),200)">
@@ -2310,7 +2373,7 @@ function renderInventory() {
   grid.innerHTML = items.map(p => `
     <div class="product-card">
       <div class="product-thumb" onclick="openProductDetail('${p.id}')">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
+        ${(p.model_photo||p.photo) ? `<img src="${p.model_photo||p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
       <div class="product-info" onclick="openProductDetail('${p.id}')">
@@ -2337,8 +2400,9 @@ function openProductDetail(id) {
   currentProduct = inventory.find(p => p.id === id);
   if (!currentProduct) return;
   const p = currentProduct;
-  document.getElementById('detailPhoto').src = p.photo || '';
-  document.getElementById('detailPhoto').style.display = p.photo ? 'block' : 'none';
+  const detailDisplayPhoto = p.model_photo || p.photo;
+  document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
+  document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
   document.getElementById('detailMeta').innerHTML = [p.garment_type, p.season, p.category, p.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
