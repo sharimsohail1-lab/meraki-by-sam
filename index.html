@@ -748,13 +748,15 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 <!-- MODEL TEMPLATE LIBRARY SHEET -->
 <div class="sheet-overlay" id="modelTemplateSheet" onclick="closeSheetOutside(event,'modelTemplateSheet')">
-  <div class="sheet" style="max-height:90vh;overflow-y:auto">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-layout-grid"></i> Model Templates</div>
-      <button class="modal-close" style="position:static" onclick="closeSheet('modelTemplateSheet')"><i class="ti ti-x"></i></button>
+  <div class="sheet" style="padding:0;display:flex;flex-direction:column;max-height:90vh">
+    <div style="padding:20px 20px 12px;flex-shrink:0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-layout-grid"></i> Model Templates</div>
+        <button class="modal-close" style="position:static" onclick="closeSheet('modelTemplateSheet')"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Generate with Ideogram (1 credit each) or upload. Tap Set Active to use for FASHN.</div>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">10 reusable model photos for FASHN virtual try-on. Generate with Ideogram (1 credit each) or upload a photo. Select one to activate it.</div>
-    <div id="modelTemplateGrid" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div id="modelTemplateGrid" style="flex:1;overflow-y:auto;padding:16px 20px 20px;display:flex;flex-direction:column;gap:12px"></div>
   </div>
 </div>
 
