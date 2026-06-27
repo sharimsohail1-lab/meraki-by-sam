@@ -561,7 +561,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
               <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
             </button>
-            <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:-6px;margin-bottom:10px">Uses 1 Ideogram credit — only on tap</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-6px;margin-bottom:10px">
+              <span style="font-size:11px;color:var(--muted)">Uses 1 Ideogram credit — only on tap</span>
+              <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:2px 0;text-decoration:underline">View reference</button>
+            </div>
             <div id="modelPhotoOutput" style="display:none">
               <img id="modelPhotoImg" class="preview-img" src="" alt="Model photo">
               <div id="modelPhotoStockNote" style="display:none;background:#E8F5E9;color:#2E7D32;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:6px;text-align:center">
@@ -792,9 +795,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <input type="range" id="detailWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
       </div>
-      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:10px">
+      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
         <i class="ti ti-user"></i> Generate AI Model Photo
       </button>
+      <div style="text-align:right;margin-bottom:10px">
+        <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
+      </div>
       <div id="detailModelOutput" style="display:none;margin-bottom:10px">
         <img id="detailModelImg" class="preview-img" src="" alt="">
         <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
@@ -1537,6 +1543,7 @@ async function saveProduct() {
       model_photo: modelPhoto,
       collection_name: collection,
     }});
+    console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
     const saved = rows[0];
     inventory.unshift(saved);
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
@@ -1722,25 +1729,60 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   setLoading(btnId, true, '');
   try {
-    // Build a multi-zone composite if multiple photos were uploaded, otherwise fall
-    // back to single photo. This gives Ideogram every garment zone at once.
     const hasUploads = Object.keys(uploadedPhotos).length > 0;
+    const uploadCount = Object.keys(uploadedPhotos).length;
+    const isComposite = hasUploads && uploadCount > 1;
     const garmentPhoto = hasUploads
       ? (await buildGarmentComposite(uploadedPhotos))
       : (currentAnalysis._uploadedPhotoB64 || null);
+
+    // Store so "View Reference" button can display it
+    currentAnalysis._referencePhoto = garmentPhoto;
+
+    const intakeSlider = document.getElementById('imageWeightSlider');
+    const detailSlider = document.getElementById('detailWeightSlider');
+    const sliderEl = intakeSlider?.offsetParent ? intakeSlider : detailSlider;
+    const imageWeight = sliderEl ? parseInt(sliderEl.value) / 100 : 0.95;
+
+    console.group('[Meraki] Model photo generation');
+    console.log('Source:', isComposite ? `composite (${uploadCount} zones)` : (hasUploads ? 'single upload' : 'saved garment photo'));
+    console.log('Image weight:', imageWeight);
+    console.log('Prompt length:', currentAnalysis.ideogramPrompt?.length, 'chars');
+    console.log('Prompt preview:', currentAnalysis.ideogramPrompt?.slice(0, 200));
+    console.log('Reference image size:', garmentPhoto ? Math.round(garmentPhoto.length / 1024) + ' KB' : 'none');
+    console.groupEnd();
+
     const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', garmentPhoto);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
     img.src = watermarked;
     document.getElementById(outputDivId).style.display = 'block';
     currentAnalysis._modelPhotoUrl = watermarked;
+
+    console.log('[Meraki] Generation complete. model_photo and photo will be saved separately on Save.');
+
     // Show indicator that stock will use this photo
     const note = document.getElementById('modelPhotoStockNote');
     if (note) { note.style.display = 'block'; }
+
+    // Update "View Reference" button label to confirm composite used
+    const refBtns = document.querySelectorAll('.js-view-ref-btn');
+    refBtns.forEach(b => {
+      b.style.display = 'inline-flex';
+      b.title = isComposite ? `Composite (${uploadCount} zones)` : 'Single garment photo';
+    });
   } catch(e) {
     showToast('Photo generation failed: ' + e.message);
   }
   setLoading(btnId, false, '<i class="ti ti-user"></i> <span id="t-genModel">' + T[lang].genModel + '</span>');
+}
+
+function viewReferenceImage() {
+  const src = currentAnalysis?._referencePhoto || currentAnalysis?._uploadedPhotoB64 || null;
+  if (!src) { showToast('No reference image available'); return; }
+  const w = window.open('', '_blank');
+  w.document.write(\`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="\${src}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>\`);
+  w.document.close();
 }
 
 async function applyWatermark(imageUrl) {
@@ -2411,6 +2453,7 @@ function openProductDetail(id) {
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = p.collection_name || '';
   document.getElementById('detailModelOutput').style.display = 'none';
+  document.querySelectorAll('.js-view-ref-btn').forEach(b => b.style.display = 'none');
   document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
   renderMarketingPackageCache(p);
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
