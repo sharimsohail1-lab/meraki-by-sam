@@ -32,6 +32,8 @@ body { font-family: 'Inter', sans-serif; background: var(--cream); color: var(--
 .settings-btn { background: none; border: none; color: var(--gold); cursor: pointer; font-size: 22px; padding: 4px; }
 .home-btn { background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.4); color: var(--gold-light); border-radius: 20px; padding: 5px 11px; font-size: 12px; cursor: pointer; font-family: 'Inter', sans-serif; display: none; align-items: center; gap: 4px; white-space: nowrap; }
 .home-btn i { font-size: 14px; }
+.collection-picker-display { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer; min-height: 42px; }
+.collection-picker-display:active { background: var(--gold-pale); }
 
 /* Nav */
 .nav { display: flex; background: white; border-top: 1px solid var(--border); flex-shrink: 0; padding-bottom: max(0px, env(safe-area-inset-bottom)); order: 3; }
@@ -498,28 +500,14 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button class="tab-pill" onclick="setSeason('casual',this)">Casual عام</button>
           <button class="tab-pill" onclick="setSeason('formal',this)">Formal رسمی</button>
         </div>
-        <div class="card">
-          <div class="field-label" id="t-collectionLabel">Collection</div>
-          <div id="existingCollectionChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
-          <div style="display:flex;gap:6px;margin-bottom:6px">
-            <input type="text" id="collectionNameInput" class="field-input" placeholder="e.g. Eid 2026 Collection" style="flex:1;margin-bottom:0" oninput="syncIntakeCollChips()">
-            <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
+        <div class="card" style="margin-top:12px">
+          <div class="field-label" id="t-collectionLabel">Collection <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(Optional)</span></div>
+          <input type="hidden" id="collectionNameInput">
+          <div class="collection-picker-display" onclick="openCollectionPicker()">
+            <i class="ti ti-stack-2" style="color:var(--muted);font-size:16px;flex-shrink:0"></i>
+            <span id="collectionPickerLabel" style="flex:1;font-size:14px;color:var(--muted)">Choose or create collection...</span>
+            <i class="ti ti-chevron-right" style="color:var(--muted);font-size:14px;flex-shrink:0"></i>
           </div>
-          <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
-          <div class="field-label" style="margin-top:14px">Sizes Available</div>
-          <div class="size-stepper-grid" id="intakeSizeGrid"></div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="intakeSizeTotalNote"></div>
-          <div class="field-label" style="margin-top:12px" id="t-priceLabel">Price (USD)</div>
-          <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150">
-          <div class="field-label" style="margin-top:12px" id="t-costLabel">Your Cost (Optional)</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="number" id="costInput" class="field-input" placeholder="e.g. 80" style="flex:1;margin-bottom:0">
-            <div class="tab-pills" style="margin:0;flex-shrink:0">
-              <button class="tab-pill active" id="costUsdBtn" onclick="setCostCurrency('usd',this)" style="padding:6px 10px;font-size:11px">USD</button>
-              <button class="tab-pill" id="costPkrBtn" onclick="setCostCurrency('pkr',this)" style="padding:6px 10px;font-size:11px">PKR</button>
-            </div>
-          </div>
-          <div id="costConversionNote" style="display:none;font-size:10px;color:var(--muted);margin-top:4px"></div>
         </div>
         <button class="btn btn-primary" onclick="goToStep(2)"><span id="t-nextStep">Next: Add Photos →</span></button>
       </div>
@@ -642,6 +630,22 @@ textarea.field-input { min-height: 70px; resize: vertical; }
                 <button class="btn btn-primary" id="regenBtn" onclick="regenerateWithFeedback()"><i class="ti ti-refresh"></i> Regenerate with Corrections</button>
               </div>
             </div>
+          </div>
+          <div class="card" style="margin-top:4px">
+            <div class="field-label" id="t-priceLabel">Price (USD)</div>
+            <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150">
+            <div class="field-label" style="margin-top:12px" id="t-costLabel">Your Cost (Optional)</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="number" id="costInput" class="field-input" placeholder="e.g. 80" style="flex:1;margin-bottom:0">
+              <div class="tab-pills" style="margin:0;flex-shrink:0">
+                <button class="tab-pill active" id="costUsdBtn" onclick="setCostCurrency('usd',this)" style="padding:6px 10px;font-size:11px">USD</button>
+                <button class="tab-pill" id="costPkrBtn" onclick="setCostCurrency('pkr',this)" style="padding:6px 10px;font-size:11px">PKR</button>
+              </div>
+            </div>
+            <div id="costConversionNote" style="display:none;font-size:10px;color:var(--muted);margin-top:4px"></div>
+            <div class="field-label" style="margin-top:14px">Sizes Available</div>
+            <div class="size-stepper-grid" id="intakeSizeGrid"></div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="intakeSizeTotalNote"></div>
           </div>
           <button class="btn btn-green" id="saveProductBtn" onclick="saveProduct()"><i class="ti ti-device-floppy"></i><span id="t-saveProduct">Save to Inventory</span></button>
           <div id="saveSuccess" style="display:none"></div>
@@ -962,6 +966,32 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div id="sizeSoldBtnRow" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
     <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('sizeSoldSheet')">Cancel</button>
+  </div>
+</div>
+
+<!-- COLLECTION PICKER SHEET -->
+<div class="sheet-overlay" id="collectionPickerSheet" onclick="closeSheetOutside(event,'collectionPickerSheet')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-weight:600;font-size:16px;font-family:'Playfair Display',serif;color:var(--burgundy)">Choose Collection</div>
+      <button onclick="closeSheet('collectionPickerSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="collPickerExisting"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="field-label" style="margin-bottom:0">Suggested Names</div>
+      <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="padding:4px 10px;margin-bottom:0"><i class="ti ti-sparkles"></i> Suggest</button>
+    </div>
+    <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+    <div class="field-label">Create New</div>
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      <input type="text" id="collPickerNewInput" class="field-input" placeholder="Type collection name..." style="flex:1;margin-bottom:0">
+      <button class="btn btn-secondary btn-sm" onclick="applyCollPickerNew()" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary" style="flex:1;margin-bottom:0" onclick="clearCollectionPicker()">Clear</button>
+      <button class="btn btn-primary" style="flex:1;margin-bottom:0" onclick="closeSheet('collectionPickerSheet')">Done</button>
+    </div>
   </div>
 </div>
 
@@ -1713,7 +1743,7 @@ function showScreen(name) {
   if (homeBtn) homeBtn.style.display = name === 'home' ? 'none' : 'flex';
   if (name === 'home') renderHome();
   if (name === 'stock') { if (stockView === 'collections') renderCollections(); else renderInventory(); }
-  if (name === 'add') { renderExistingCollectionChips(); if (!window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers(); }
+  if (name === 'add') { updateCollectionPickerDisplay(); }
   if (name === 'people') renderCustomers();
   if (name === 'show') renderExhibitions();
 }
@@ -1965,8 +1995,8 @@ function goToStep(n) {
     dot.classList.toggle('done', i < n);
     if (i < 3) document.getElementById('step-line-' + i).classList.toggle('done', i < n);
   }
-  if (n === 1 && !window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers();
   if (n === 2 && !document.getElementById('photoSlotGrid').innerHTML) renderPhotoSlots();
+  if (n === 3 && !window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers();
 }
 
 function generateSKU() {
@@ -2299,8 +2329,10 @@ function resetIntake() {
   garmentType = 'full-suit';
   currentAnalysis = null;
   document.getElementById('collectionNameInput').value = '';
+  const collPickerNew = document.getElementById('collPickerNewInput');
+  if (collPickerNew) collPickerNew.value = '';
   document.getElementById('collectionSuggestions').style.display = 'none';
-  renderExistingCollectionChips();
+  updateCollectionPickerDisplay();
   document.getElementById('priceInput').value = '';
   document.getElementById('costInput').value = '';
   costCurrency = 'usd';
@@ -2945,45 +2977,77 @@ function allCollectionNames() {
 }
 
 function renderExistingCollectionChips() {
-  const names = allCollectionNames();
-  const container = document.getElementById('existingCollectionChips');
-  if (!container) return;
-  if (!names.length) { container.style.display = 'none'; return; }
-  container.style.display = 'flex';
-  window._intakeCollNames = names;
-  container.innerHTML = names.map((n, i) =>
-    `<div class="coll-suggestion" id="intakeCollChip-${i}" onclick="toggleIntakeCollChip(${i})">${n}</div>`
-  ).join('');
-  // Re-highlight any already in the input
-  syncIntakeCollChips();
+  updateCollectionPickerDisplay();
 }
 
-function toggleIntakeCollChip(i) {
-  const name = window._intakeCollNames[i];
+function syncIntakeCollChips() {}
+
+function applyCollSuggestion(el, name) {
+  document.getElementById('collectionNameInput').value = name;
+  updateCollectionPickerDisplay();
+  document.querySelectorAll('#collectionSuggestions .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
+  el.style.background = '#F5D78A';
+  el.style.borderColor = 'var(--gold)';
+  closeSheet('collectionPickerSheet');
+}
+
+function openCollectionPicker() {
+  const names = allCollectionNames();
+  const current = (document.getElementById('collectionNameInput').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  window._collPickerNames = names;
+  const container = document.getElementById('collPickerExisting');
+  if (names.length) {
+    container.innerHTML = `
+      <div class="field-label" style="margin-bottom:6px">Existing Collections</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${
+        names.map((n, i) => {
+          const active = current.includes(n);
+          return `<div class="coll-suggestion" id="collPickerChip-${i}" style="${active ? 'background:#F5D78A;border-color:var(--gold)' : ''}" onclick="toggleCollPickerChip(${i})">${n}</div>`;
+        }).join('')
+      }</div>`;
+  } else {
+    container.innerHTML = '';
+  }
+  // Pre-fill new input if current value isn't an existing collection
+  const typed = (document.getElementById('collectionNameInput').value || '').trim();
+  const isExisting = names.some(n => current.includes(n));
+  document.getElementById('collPickerNewInput').value = (!isExisting && typed) ? typed : '';
+  openSheet('collectionPickerSheet');
+}
+
+function toggleCollPickerChip(i) {
+  const name = window._collPickerNames[i];
   const input = document.getElementById('collectionNameInput');
   const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
   const idx = current.indexOf(name);
-  if (idx >= 0) current.splice(idx, 1);
-  else current.push(name);
+  if (idx >= 0) current.splice(idx, 1); else current.push(name);
   input.value = current.join(', ');
-  syncIntakeCollChips();
+  updateCollectionPickerDisplay();
+  const chip = document.getElementById('collPickerChip-' + i);
+  if (chip) { chip.style.background = current.includes(name) ? '#F5D78A' : ''; chip.style.borderColor = current.includes(name) ? 'var(--gold)' : ''; }
 }
 
-function syncIntakeCollChips() {
-  const input = document.getElementById('collectionNameInput');
-  const active = input.value.split(',').map(s => s.trim()).filter(Boolean);
-  (window._intakeCollNames || []).forEach((n, i) => {
-    const chip = document.getElementById('intakeCollChip-' + i);
-    if (chip) chip.style.background = active.includes(n) ? '#F5D78A' : '';
-  });
+function applyCollPickerNew() {
+  const val = document.getElementById('collPickerNewInput').value.trim();
+  if (!val) return;
+  document.getElementById('collectionNameInput').value = val;
+  updateCollectionPickerDisplay();
+  closeSheet('collectionPickerSheet');
 }
 
-function applyCollSuggestion(el, name) {
-  const input = document.getElementById('collectionNameInput');
-  input.value = name;
-  syncIntakeCollChips();
-  document.querySelectorAll('#collectionSuggestions .coll-suggestion').forEach(c => c.style.background = '');
-  el.style.background = '#F5D78A';
+function clearCollectionPicker() {
+  document.getElementById('collectionNameInput').value = '';
+  document.getElementById('collPickerNewInput').value = '';
+  updateCollectionPickerDisplay();
+  closeSheet('collectionPickerSheet');
+}
+
+function updateCollectionPickerDisplay() {
+  const val = (document.getElementById('collectionNameInput')?.value || '').trim();
+  const label = document.getElementById('collectionPickerLabel');
+  if (!label) return;
+  label.textContent = val || 'Choose or create collection...';
+  label.style.color = val ? 'var(--ink)' : 'var(--muted)';
 }
 
 async function suggestCollectionNames() {
