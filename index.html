@@ -2132,10 +2132,9 @@ function syncIntakeCollChips() {
 
 function applyCollSuggestion(el, name) {
   const input = document.getElementById('collectionNameInput');
-  const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
-  if (!current.includes(name)) current.push(name);
-  input.value = current.join(', ');
+  input.value = name;
   syncIntakeCollChips();
+  document.querySelectorAll('#collectionSuggestions .coll-suggestion').forEach(c => c.style.background = '');
   el.style.background = '#F5D78A';
 }
 
