@@ -304,6 +304,58 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .pkg-text.whatsapp { background: #E8F5E9; border-color: #A5D6A7; font-family: monospace; }
 .pkg-text.urdu { font-family: 'Noto Nastaliq Urdu', Arial, serif; direction: rtl; text-align: right; font-size: 14px; line-height: 2.2; background: #F3E5F5; border-color: #CE93D8; }
 .pkg-saved-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; background: #E8F5E9; color: #2E7D32; border-radius: 20px; padding: 3px 9px; margin-bottom: 10px; }
+.pkg-edit-btn { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 15px; padding: 0 0 0 4px; }
+.pkg-field-editor { display:none; margin-top:6px; }
+.pkg-field-editor textarea { width:100%; font-size:12px; line-height:1.7; padding:8px 10px; border:1px solid var(--gold-light); border-radius:8px; font-family:'Inter',sans-serif; background:white; resize:vertical; min-height:60px; box-sizing:border-box; }
+.pkg-field-editor .pkg-save-edit { font-size:11px; background:var(--emerald); color:white; border:none; border-radius:6px; padding:5px 12px; cursor:pointer; margin-top:4px; }
+
+/* Catalog overlay — fullscreen, on top of everything */
+.catalog-overlay { position:fixed; inset:0; background:white; z-index:2000; display:flex; flex-direction:column; overflow:hidden; }
+.catalog-overlay.hidden { display:none; }
+.catalog-toolbar { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #e0e0e0; background:white; flex-shrink:0; }
+.catalog-toolbar-title { font-size:13px; font-weight:600; color:var(--ink); }
+.catalog-body { flex:1; overflow-y:auto; background:#f5f5f0; }
+
+/* Selection screen */
+.catalog-sel-item { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); background:white; }
+.catalog-sel-item:last-child { border-bottom:none; }
+.catalog-sel-thumb { width:52px; height:68px; border-radius:6px; object-fit:cover; background:var(--gold-pale); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:22px; overflow:hidden; }
+.catalog-sel-thumb img { width:100%; height:100%; object-fit:cover; }
+.catalog-sel-info { flex:1; min-width:0; }
+.catalog-sel-name { font-size:13px; font-weight:500; color:var(--ink); }
+.catalog-sel-meta { font-size:11px; color:var(--muted); margin-top:2px; }
+.catalog-sel-price { font-size:12px; font-weight:600; color:var(--emerald-mid); margin-top:2px; }
+.catalog-sel-check { width:24px; height:24px; border-radius:6px; border:2px solid var(--border); background:white; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.catalog-sel-check.on { background:var(--emerald); border-color:var(--emerald); color:white; }
+.catalog-sel-warning { font-size:10px; color:#E65100; margin-top:2px; }
+
+/* Catalog preview / print */
+.catalog-preview { padding:0; }
+.cat-cover { background:#1a1a1a; min-height:100vw; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 30px; text-align:center; }
+.cat-cover-logo { height:44px; width:auto; object-fit:contain; filter:brightness(0) invert(1); opacity:0.9; margin-bottom:32px; }
+.cat-cover-divider { width:40px; height:1px; background:rgba(255,255,255,0.3); margin:20px auto; }
+.cat-cover-name { font-family:'Playfair Display',serif; font-size:28px; color:white; letter-spacing:1px; line-height:1.3; }
+.cat-cover-sub { font-size:11px; color:rgba(255,255,255,0.5); letter-spacing:3px; text-transform:uppercase; margin-top:12px; }
+.cat-product-page { background:white; margin:12px 16px; border-radius:4px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+.cat-product-img { width:100%; aspect-ratio:3/4; object-fit:cover; display:block; }
+.cat-product-img-placeholder { width:100%; aspect-ratio:3/4; background:#f0ede8; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#aaa; font-size:13px; gap:8px; }
+.cat-product-info { padding:18px 20px 22px; border-top:1px solid #f0ede8; }
+.cat-product-sku { font-size:9px; letter-spacing:2px; text-transform:uppercase; color:#bbb; margin-bottom:8px; }
+.cat-product-name { font-family:'Playfair Display',serif; font-size:20px; color:#1a1a1a; margin-bottom:6px; line-height:1.3; }
+.cat-product-blurb { font-size:12px; color:#666; line-height:1.7; margin-bottom:14px; }
+.cat-product-price { font-size:16px; font-weight:600; color:#1a1a1a; letter-spacing:0.5px; }
+.cat-product-noprice { font-size:11px; color:#E65100; }
+.cat-warning-bar { background:#FFF3E0; border-left:3px solid #FF9800; padding:12px 16px; margin:12px 16px; border-radius:4px; font-size:12px; color:#E65100; }
+
+/* Print styles — hides app chrome, shows only catalog */
+@media print {
+  body > * { display: none !important; }
+  .catalog-overlay { display: flex !important; position: fixed; inset: 0; z-index: 99999; }
+  .catalog-toolbar { display: none !important; }
+  .catalog-body { overflow: visible; }
+  .cat-cover { min-height: 100vh; page-break-after: always; }
+  .cat-product-page { page-break-inside: avoid; margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid #eee; }
+}
 
 /* Model photo */
 .preview-img { width: 100%; max-height: 280px; object-fit: cover; border-radius: 10px; margin-bottom: 12px; }
@@ -608,6 +660,41 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 </div>
 
+<!-- CATALOG BUILDER OVERLAY -->
+<div class="catalog-overlay hidden" id="catalogBuilderOverlay">
+  <!-- Step 1: Selection -->
+  <div id="catalogSelScreen" style="display:flex;flex-direction:column;height:100%">
+    <div class="catalog-toolbar">
+      <button onclick="closeCatalogBuilder()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
+      <div class="catalog-toolbar-title" id="catalogSelTitle">Select Items</div>
+      <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Preview →</button>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:white;border-bottom:1px solid var(--border);flex-shrink:0">
+      <span id="catalogSelCount" style="font-size:12px;color:var(--muted)"></span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="setCatalogSelAll(true)">All</button>
+        <button class="btn btn-secondary btn-sm" onclick="setCatalogSelAll(false)">None</button>
+      </div>
+    </div>
+    <div id="catalogSelList" style="flex:1;overflow-y:auto;background:#fafaf8"></div>
+  </div>
+  <!-- Step 2: Preview -->
+  <div id="catalogPreviewScreen" style="display:none;flex-direction:column;height:100%">
+    <div class="catalog-toolbar">
+      <button onclick="goToCatalogSelection()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
+      <div class="catalog-toolbar-title">Catalog Preview</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="printCatalog()" style="padding:0 10px"><i class="ti ti-printer"></i></button>
+        <button class="btn btn-primary btn-sm" onclick="shareCatalogWhatsApp()" style="padding:0 10px"><i class="ti ti-brand-whatsapp"></i></button>
+      </div>
+    </div>
+    <div id="catalogWarnings" style="display:none"></div>
+    <div class="catalog-body" id="catalogPreviewBody">
+      <div class="catalog-preview" id="catalogPreviewContent"></div>
+    </div>
+  </div>
+</div>
+
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsModal" onclick="closeModalOutside(event,'settingsModal')">
   <div class="modal">
@@ -638,9 +725,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="coll-cover-sub" id="collCoverSub"></div>
     </div>
     <!-- Actions bar -->
-    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
-      <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()" style="flex:1;margin:0"><i class="ti ti-package"></i> Collection Marketing Package</button>
-      <button class="btn btn-secondary btn-sm" onclick="toggleCollRename()" style="padding:0 12px;height:38px" title="Rename"><i class="ti ti-pencil"></i></button>
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()" style="flex:1;margin:0"><i class="ti ti-package"></i> Marketing Package</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleCollRename()" style="padding:0 12px;height:38px" title="Rename"><i class="ti ti-pencil"></i></button>
+      </div>
+      <button class="btn btn-primary" onclick="openCatalogBuilder(currentCollection)" style="margin:0"><i class="ti ti-book"></i> Create Collection Catalog</button>
     </div>
     <div id="collRenameRow" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);gap:6px;flex-direction:row">
       <input type="text" id="collRenameInput" class="field-input" style="flex:1;margin-bottom:0;font-size:13px" placeholder="Collection name...">
@@ -1465,6 +1555,13 @@ function renderNextSteps(product) {
     });
   }
 
+  if (p.collection_name) {
+    steps.push({
+      icon: '📖', title: 'Create Collection Catalog', sub: `Build a shareable lookbook for "${p.collection_name}"`,
+      action: () => openCatalogBuilder(p.collection_name)
+    });
+  }
+
   steps.push({
     icon: '✨', title: 'Add another piece', sub: 'Keep adding while you have them out',
     action: () => resetIntake()
@@ -2188,7 +2285,7 @@ function renderMarketingPackageCache(p) {
 
 function buildPackageHTML(p) {
   const sections = [];
-  if (p.sharing_angle) sections.push({ label: '💡 Best Shared As', key: 'sharing_angle', text: p.sharing_angle, cls: 'angle' });
+  if (p.sharing_angle) sections.push({ label: 'Best Shared As', key: 'sharing_angle', text: p.sharing_angle, cls: 'angle' });
   if (p.caption_en) sections.push({ label: 'Instagram Caption (English)', key: 'caption_en', text: p.caption_en, cls: '' });
   if (p.caption_ur) sections.push({ label: 'Instagram Caption (Urdu)', key: 'caption_ur', text: p.caption_ur, cls: 'urdu' });
   if (p.story_text) sections.push({ label: 'Story Text', key: 'story_text', text: p.story_text, cls: '' });
@@ -2197,18 +2294,197 @@ function buildPackageHTML(p) {
   if (p.catalog_blurb) sections.push({ label: 'Catalog Entry', key: 'catalog_blurb', text: p.catalog_blurb, cls: '' });
   if (p.price_card) sections.push({ label: 'Price Card', key: 'price_card', text: p.price_card, cls: '' });
   if (!sections.length) return '';
-  return `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Package saved — tap any section to copy</div>` +
-    sections.map(s => `
-      <div class="pkg-section">
+  const pid = p.id;
+  return `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Saved — copy or edit any field</div>` +
+    sections.map((s, i) => {
+      const edId = `pkg-ed-${i}`;
+      return `<div class="pkg-section">
         <div class="pkg-label">${s.label}
-          <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)})" title="Copy"><i class="ti ti-copy"></i></button>
+          <span style="display:flex;gap:2px">
+            <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)})" title="Copy"><i class="ti ti-copy"></i></button>
+            <button class="pkg-edit-btn" onclick="togglePkgEdit('${edId}')" title="Edit"><i class="ti ti-pencil"></i></button>
+          </span>
         </div>
-        <div class="pkg-text ${s.cls}">${s.text}</div>
-      </div>`).join('');
+        <div class="pkg-text ${s.cls}" id="pkg-text-${edId}">${s.text}</div>
+        <div class="pkg-field-editor" id="${edId}">
+          <textarea rows="3">${s.text}</textarea>
+          <button class="pkg-save-edit" onclick="savePkgEdit('${edId}','${s.key}','${pid}')">Save</button>
+        </div>
+      </div>`;
+    }).join('');
 }
 
 function copyPkgField(text) {
   navigator.clipboard.writeText(text).then(() => showToast('Copied!'));
+}
+
+function togglePkgEdit(edId) {
+  const ed = document.getElementById(edId);
+  const isOpen = ed.style.display === 'block';
+  ed.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) ed.querySelector('textarea').focus();
+}
+
+async function savePkgEdit(edId, key, productId) {
+  const textarea = document.getElementById(edId).querySelector('textarea');
+  const newVal = textarea.value.trim();
+  if (!newVal) return;
+  try {
+    await db('update', 'products', { id: productId, data: { [key]: newVal } });
+    const idx = inventory.findIndex(p => p.id === productId);
+    if (idx >= 0) { inventory[idx][key] = newVal; currentProduct = inventory[idx]; }
+    document.getElementById('pkg-text-' + edId).textContent = newVal;
+    document.getElementById(edId).style.display = 'none';
+    showToast('Saved');
+  } catch(e) { showToast('Save failed: ' + e.message); }
+}
+
+// ─── COLLECTION CATALOG ───────────────────────────────────────────────────────
+let catalogCollection = null;
+let catalogSelected = new Set();
+let catalogItems = [];
+
+function openCatalogBuilder(collectionName) {
+  catalogCollection = collectionName;
+  catalogItems = collectionName === null
+    ? inventory.filter(p => !p.collection_name)
+    : inventory.filter(p => p.collection_name === collectionName);
+
+  // Default: include available + reserved, exclude sold
+  catalogSelected = new Set(catalogItems.filter(p => p.status !== 'sold').map(p => p.id));
+
+  document.getElementById('catalogSelTitle').textContent = collectionName || 'Select Items';
+  goToCatalogSelection();
+  document.getElementById('catalogBuilderOverlay').classList.remove('hidden');
+  // Close collection sheet underneath
+  closeSheet('collectionDetailSheet');
+}
+
+function closeCatalogBuilder() {
+  document.getElementById('catalogBuilderOverlay').classList.add('hidden');
+}
+
+function goToCatalogSelection() {
+  document.getElementById('catalogSelScreen').style.display = 'flex';
+  document.getElementById('catalogPreviewScreen').style.display = 'none';
+  renderCatalogSelection();
+}
+
+function goToCatalogPreview() {
+  if (catalogSelected.size === 0) { showToast('Select at least one item'); return; }
+  document.getElementById('catalogSelScreen').style.display = 'none';
+  document.getElementById('catalogPreviewScreen').style.display = 'flex';
+  renderCatalogPreview();
+}
+
+function renderCatalogSelection() {
+  const count = catalogSelected.size;
+  document.getElementById('catalogSelCount').textContent = `${count} of ${catalogItems.length} selected`;
+
+  const list = document.getElementById('catalogSelList');
+  if (!catalogItems.length) {
+    list.innerHTML = '<div class="empty" style="padding:40px 20px"><i class="ti ti-hanger"></i><p>No items in this collection.</p></div>';
+    return;
+  }
+
+  list.innerHTML = '<div style="background:white">' + catalogItems.map((p, i) => {
+    const on = catalogSelected.has(p.id);
+    const img = p.model_photo || p.photo;
+    const hasModel = !!p.model_photo;
+    const noPrice = !p.price;
+    return `<div class="catalog-sel-item" onclick="toggleCatalogItem('${p.id}',${i})">
+      <div class="catalog-sel-thumb">${img ? `<img src="${img}" alt="">` : '👗'}</div>
+      <div class="catalog-sel-info">
+        <div class="catalog-sel-name">${p.name}</div>
+        <div class="catalog-sel-meta">${[p.garment_type, p.season].filter(Boolean).join(' · ')}
+          ${!hasModel ? '<br><span style="color:#E65100;font-size:10px">No model photo</span>' : '<br><span style="color:#2E7D32;font-size:10px">✓ Model photo</span>'}
+        </div>
+        <div class="catalog-sel-price ${noPrice ? 'no-price' : ''}">${p.price ? '$' + p.price : 'No price'}</div>
+        ${p.status === 'sold' ? '<span style="font-size:10px;color:var(--muted)">Sold — excluded by default</span>' : ''}
+      </div>
+      <div class="catalog-sel-check ${on ? 'on' : ''}" id="cat-chk-${p.id}">
+        ${on ? '<i class="ti ti-check" style="font-size:14px"></i>' : ''}
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+function toggleCatalogItem(id, idx) {
+  if (catalogSelected.has(id)) catalogSelected.delete(id);
+  else catalogSelected.add(id);
+  // Update just the checkbox
+  const chk = document.getElementById('cat-chk-' + id);
+  const on = catalogSelected.has(id);
+  chk.className = 'catalog-sel-check' + (on ? ' on' : '');
+  chk.innerHTML = on ? '<i class="ti ti-check" style="font-size:14px"></i>' : '';
+  document.getElementById('catalogSelCount').textContent = `${catalogSelected.size} of ${catalogItems.length} selected`;
+}
+
+function setCatalogSelAll(val) {
+  if (val) catalogItems.forEach(p => catalogSelected.add(p.id));
+  else catalogSelected.clear();
+  renderCatalogSelection();
+}
+
+function renderCatalogPreview() {
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const noPrice = selected.filter(p => !p.price);
+  const noModel = selected.filter(p => !p.model_photo);
+
+  // Warnings
+  const warnEl = document.getElementById('catalogWarnings');
+  const warns = [];
+  if (noPrice.length) warns.push(`${noPrice.length} item${noPrice.length > 1 ? 's' : ''} missing a price — will show "Price on request".`);
+  if (noModel.length) warns.push(`${noModel.length} item${noModel.length > 1 ? 's' : ''} have no model photo — product photo will be used instead.`);
+  if (warns.length) {
+    warnEl.style.display = 'block';
+    warnEl.innerHTML = warns.map(w => `<div class="cat-warning-bar">${w}</div>`).join('');
+  } else {
+    warnEl.style.display = 'none';
+  }
+
+  const logoSrc = 'data:image/png;base64,' + LOGO_B64;
+  const collName = catalogCollection || 'Collection';
+  const season = [...new Set(selected.map(p => p.season).filter(Boolean))].join(' · ');
+  const year = new Date().getFullYear();
+
+  const coverHTML = `<div class="cat-cover">
+    <img class="cat-cover-logo" src="${logoSrc}" alt="Meraki by Sam">
+    <div class="cat-cover-divider"></div>
+    <div class="cat-cover-name">${collName}</div>
+    ${season ? `<div class="cat-cover-sub">${season} · ${year}</div>` : `<div class="cat-cover-sub">${year}</div>`}
+  </div>`;
+
+  const pagesHTML = selected.map(p => {
+    const img = p.model_photo || p.photo;
+    const imgHTML = img
+      ? `<img class="cat-product-img" src="${img}" alt="${p.name}">`
+      : `<div class="cat-product-img-placeholder"><i class="ti ti-hanger" style="font-size:40px"></i><span>Model image not created yet</span></div>`;
+    return `<div class="cat-product-page">
+      ${imgHTML}
+      <div class="cat-product-info">
+        <div class="cat-product-sku">${p.sku}</div>
+        <div class="cat-product-name">${p.name}</div>
+        ${p.catalog_blurb ? `<div class="cat-product-blurb">${p.catalog_blurb}</div>` : ''}
+        <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Price on request'}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('catalogPreviewContent').innerHTML = coverHTML + pagesHTML;
+}
+
+function printCatalog() {
+  window.print();
+}
+
+function shareCatalogWhatsApp() {
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const collName = catalogCollection || 'Collection';
+  const lines = selected.map(p => `• ${p.name} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
+  const msg = `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
+  const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
+  window.open(url, '_blank');
 }
 
 async function generateMarketingPackage() {
