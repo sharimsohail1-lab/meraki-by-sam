@@ -249,10 +249,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .product-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .product-thumb i { font-size: 36px; color: var(--gold-light); }
 .product-sku { position: absolute; top: 6px; left: 6px; background: rgba(107,30,58,0.85); color: var(--gold-light); font-size: 9px; padding: 2px 6px; border-radius: 10px; font-weight: 600; letter-spacing: 0.5px; }
-.product-info { padding: 8px 10px 10px; }
+.product-info { padding: 8px 10px 6px; }
 .product-name { font-size: 12px; font-weight: 500; color: var(--ink); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .product-price { font-size: 12px; color: var(--emerald-mid); font-weight: 500; }
 .product-price.no-price { color: #E65100; }
+.card-pkg-btn { display: block; width: 100%; background: var(--gold-pale); border: none; border-top: 1px solid var(--border); padding: 7px 10px; font-size: 11px; font-weight: 500; color: #8B6914; cursor: pointer; text-align: center; }
+.card-pkg-btn.has-pkg { background: #E8F5E9; color: #2E7D32; border-top-color: #C8E6C9; }
+.card-pkg-btn:active { opacity: 0.8; }
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
 .empty i { font-size: 44px; color: var(--gold-light); }
 .empty p { font-size: 13px; margin-top: 10px; line-height: 1.6; }
@@ -629,7 +632,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="detail-sku" id="detailSKU"></div>
     <div class="detail-name" id="detailName"></div>
     <div class="detail-meta" id="detailMeta"></div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:14px" id="detailDesc"></div>
+    <div id="marketingPackageSection">
+      <button class="btn btn-gold" id="createPkgBtn" onclick="generateMarketingPackage()">
+        <i class="ti ti-package"></i> Create Marketing Package
+      </button>
+      <div id="marketingPackageOutput" style="display:none"></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 10px" id="detailDesc"></div>
     <div class="field-label" id="t-updateStatus">Update Status</div>
     <div class="status-row">
       <button class="status-btn" id="statusBtnAvail" onclick="updateProductStatus('available')">Available</button>
@@ -640,20 +649,14 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Reserved For</div>
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
-    <div id="marketingPackageSection">
-      <button class="btn btn-gold" id="createPkgBtn" onclick="generateMarketingPackage()">
-        <i class="ti ti-package"></i> Create Marketing Package
-      </button>
-      <div id="marketingPackageOutput" style="display:none"></div>
-      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-top:8px">
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:10px">
         <i class="ti ti-user"></i> Generate AI Model Photo
       </button>
-      <div id="detailModelOutput" style="display:none;margin-top:10px">
+      <div id="detailModelOutput" style="display:none;margin-bottom:10px">
         <img id="detailModelImg" class="preview-img" src="" alt="">
         <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
       </div>
-    </div>
-    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
       <div class="field-label">Notes</div>
@@ -2008,17 +2011,20 @@ function renderInventory() {
     return;
   }
   grid.innerHTML = items.map(p => `
-    <div class="product-card" onclick="openProductDetail('${p.id}')">
-      <div class="product-thumb">
+    <div class="product-card">
+      <div class="product-thumb" onclick="openProductDetail('${p.id}')">
         ${p.photo ? `<img src="${p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
-      <div class="product-info">
+      <div class="product-info" onclick="openProductDetail('${p.id}')">
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
         ${productNudge(p)}
       </div>
+      <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="openProductDetail('${p.id}');setTimeout(()=>{ if(!document.getElementById('marketingPackageOutput').innerHTML) generateMarketingPackage(); },300)" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
+        <i class="ti ti-package"></i>${p.caption_en ? ' Package ✓' : ' Market'}
+      </button>
     </div>`).join('');
 }
 
