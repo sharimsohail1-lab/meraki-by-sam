@@ -1104,7 +1104,20 @@ async function callClaude(messages, system = '', maxTokens = 1024) {
     })
   });
   const json = await r.json();
-  if (json.error) throw new Error(typeof json.error === 'object' ? json.error.message : json.error);
+  if (json.error) {
+    // Log full API error before rethrowing so the console shows origin
+    console.error('[Meraki] callClaude API error — HTTP', r.status);
+    console.error('  raw json.error:', JSON.stringify(json.error));
+    console.error('  json.type:', json.type);
+    // Log media_types of any image blocks in the request to spot unsupported formats
+    const imageBlocks = messages.flatMap(m => Array.isArray(m.content) ? m.content : [])
+      .filter(b => b.type === 'image');
+    if (imageBlocks.length) {
+      console.error('  image block media_types:', imageBlocks.map(b => b.source?.media_type));
+      console.error('  image block data lengths:', imageBlocks.map(b => b.source?.data?.length));
+    }
+    throw new Error(typeof json.error === 'object' ? json.error.message : json.error);
+  }
   return json.content[0].text;
 }
 
@@ -1462,7 +1475,14 @@ async function analyzePhoto() {
   document.getElementById('analysisLoading').style.display = 'block';
   document.getElementById('analysisResult').style.display = 'none';
 
+  let _stage = 'init';
   try {
+    _stage = 'collect-photos';
+    console.group('[Meraki] analyzePhoto()');
+    console.log('MERAKI_ANALYSIS_STAGE: collect-photos');
+    console.log('uploadedPhotos keys:', Object.keys(uploadedPhotos));
+    console.log('garmentType:', garmentType, '| intakeSeason:', intakeSeason);
+
     // Build interleaved photo+label content, structural photos first then detail.
     // Each photo is preceded by a text label so Claude knows its role.
     const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
@@ -1475,22 +1495,36 @@ async function analyzePhoto() {
       .filter(([id]) => slotMap[id]?.role === 'detail')
       .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
 
+    console.log('structuralPhotos:', structuralPhotos.map(([id, p]) => ({ id, type: p.file?.type, dataUrlLen: p.dataUrl?.length, hasComma: p.dataUrl?.includes(',') })));
+    console.log('detailPhotos:', detailPhotos.map(([id, p]) => ({ id, type: p.file?.type, dataUrlLen: p.dataUrl?.length, hasComma: p.dataUrl?.includes(',') })));
+
+    _stage = 'build-payload';
+    console.log('MERAKI_ANALYSIS_STAGE: build-payload');
     const photoContent = [];
     if (structuralPhotos.length) {
       photoContent.push({ type: 'text', text: '=== STRUCTURAL PHOTOS (define garment layout, silhouette, proportions) ===' });
       structuralPhotos.forEach(([id, p]) => {
+        const b64 = p.dataUrl.split(',')[1];
+        const mediaType = p.file?.type || 'image/jpeg';
+        console.log('  structural slot:', id, '| mediaType:', mediaType, '| b64 length:', b64?.length, '| b64 defined:', !!b64);
         photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — STRUCTURAL]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] } });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } });
       });
     }
     if (detailPhotos.length) {
       photoContent.push({ type: 'text', text: '=== DETAIL PHOTOS (close-up references only — extract embroidery/texture info; do NOT use to redefine garment structure or layout) ===' });
       detailPhotos.forEach(([id, p]) => {
+        const b64 = p.dataUrl.split(',')[1];
+        const mediaType = p.file?.type || 'image/jpeg';
+        console.log('  detail slot:', id, '| mediaType:', mediaType, '| b64 length:', b64?.length, '| b64 defined:', !!b64);
         photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — DETAIL REFERENCE]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] } });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } });
       });
     }
+    console.log('photoContent blocks:', photoContent.length);
 
+    _stage = 'claude-request';
+    console.log('MERAKI_ANALYSIS_STAGE: claude-request');
     const response = await callClaude(
       [{ role: 'user', content: [
         ...photoContent,
@@ -1531,36 +1565,61 @@ Return only the JSON object. No explanation, no markdown fences.` }
       2400
     );
 
+    _stage = 'claude-response';
+    console.log('MERAKI_ANALYSIS_STAGE: claude-response');
+    console.log('response type:', typeof response, '| length:', response?.length);
+    console.log('response preview:', response?.slice(0, 200));
+
+    _stage = 'json-parse';
+    console.log('MERAKI_ANALYSIS_STAGE: json-parse');
     let parsed;
     try {
-      // Try direct parse first
       parsed = JSON.parse(response);
-    } catch {
-      // Strip markdown fences and retry
+      console.log('  direct JSON.parse: success');
+    } catch (e1) {
+      console.log('  direct JSON.parse failed:', e1.message);
       let clean = response.replace(/```json|```/g, '').trim();
       try {
         parsed = JSON.parse(clean);
-      } catch {
-        // Extract first {...} block in case Claude added surrounding text
+        console.log('  stripped-fences parse: success');
+      } catch (e2) {
+        console.log('  stripped-fences parse failed:', e2.message);
         const match = clean.match(/\{[\s\S]*\}/);
         if (!match) throw new Error('Could not extract JSON from analysis response');
         parsed = JSON.parse(match[0]);
+        console.log('  regex-extract parse: success');
       }
     }
-    // motifs is optional — default to empty array if Claude omitted it or returned null
     if (!Array.isArray(parsed.motifs)) parsed.motifs = [];
+    console.log('parsed fields:', Object.keys(parsed));
 
+    _stage = 'state-update';
+    console.log('MERAKI_ANALYSIS_STAGE: state-update');
     const sku = generateSKU();
     const primaryPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
+    console.log('primaryPhoto defined:', !!primaryPhoto, '| length:', primaryPhoto?.length);
     currentAnalysis = { sku, ...parsed, _uploadedPhotoB64: primaryPhoto };
 
+    _stage = 'ui-render';
+    console.log('MERAKI_ANALYSIS_STAGE: ui-render');
     document.getElementById('generatedSKU').textContent = sku;
     document.getElementById('itemNameInput').value = parsed.name || '';
     document.getElementById('analysisText').textContent = parsed.description || '';
     document.getElementById('analysisLoading').style.display = 'none';
     document.getElementById('analysisResult').style.display = 'block';
+
+    _stage = 'feedback-panel';
+    console.log('MERAKI_ANALYSIS_STAGE: feedback-panel');
     initFeedbackPanel();
+
+    console.log('MERAKI_ANALYSIS_STAGE: complete');
+    console.groupEnd();
   } catch(e) {
+    console.error('[Meraki] analyzePhoto FAILED at stage:', _stage);
+    console.error('  error name:', e?.name);
+    console.error('  error message:', e?.message);
+    console.error('  error stack:', e?.stack);
+    console.groupEnd();
     document.getElementById('analysisLoading').style.display = 'none';
     showToast('Analysis failed: ' + e.message);
     goToStep(2);
