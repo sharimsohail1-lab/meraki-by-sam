@@ -985,7 +985,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
     <div class="field-label">Create New</div>
     <div style="display:flex;gap:6px;margin-bottom:16px">
-      <input type="text" id="collPickerNewInput" class="field-input" placeholder="Type collection name..." style="flex:1;margin-bottom:0">
+      <input type="text" id="collPickerNewInput" class="field-input" placeholder="Type collection name for ideas..." style="flex:1;margin-bottom:0">
       <button class="btn btn-secondary btn-sm" onclick="applyCollPickerNew()" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
     </div>
     <div style="display:flex;gap:8px">
@@ -3060,7 +3060,7 @@ async function suggestCollectionNames() {
 
   const season = intakeSeason;
   const type = garmentType;
-  const seed = document.getElementById('collectionNameInput').value.trim();
+  const seed = (document.getElementById('collPickerNewInput')?.value || document.getElementById('collectionNameInput').value || '').trim();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
