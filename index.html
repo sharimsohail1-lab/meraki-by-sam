@@ -1274,22 +1274,17 @@ registerImageGenProvider('fashn', {
       throw new Error('No garment photo available for FASHN.');
     }
 
-    // Strip data URL prefix — FASHN API expects raw base64
-    const stripPrefix = s => s.replace(/^data:image\/\w+;base64,/, '');
-    const garmentRaw = stripPrefix(garmentB64);
-    const modelRaw = stripPrefix(modelPhoto);
-
     console.group('[Meraki] FASHN virtual try-on');
-    console.log('Garment base64 length:', garmentRaw.length);
-    console.log('Model base64 length:', modelRaw.length);
+    console.log('Garment base64 length:', garmentB64.length);
+    console.log('Model base64 length:', modelPhoto.length);
     console.log('PAID API CALL: starting FASHN prediction');
 
     const runRes = await fetch('/api/fashn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model_image: modelRaw,
-        garment_image: garmentRaw,
+        model_image: modelPhoto,
+        garment_image: garmentB64,
         category: 'one-pieces',
         garment_photo_type: 'flat-lay',
         mode: 'balanced'
@@ -1298,7 +1293,7 @@ registerImageGenProvider('fashn', {
     const runData = await runRes.json();
     if (!runRes.ok || runData.error) {
       console.error('[FASHN] run failed — HTTP', runRes.status, JSON.stringify(runData));
-      console.error('[FASHN] model_image length:', modelRaw.length, '| garment_image length:', garmentRaw.length);
+      console.error('[FASHN] model_image length:', modelPhoto.length, '| garment_image length:', garmentB64.length);
       console.groupEnd();
       throw new Error(runData.error || 'FASHN prediction failed to start');
     }

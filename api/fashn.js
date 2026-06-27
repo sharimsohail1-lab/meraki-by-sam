@@ -43,14 +43,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'model_image and garment_image are required' });
     }
 
-    // Strip data URL prefix if caller sent a full dataUrl
-    const stripPrefix = (s) => s?.replace(/^data:image\/\w+;base64,/, '') ?? s;
-
     const payload = {
       model_name: 'tryon-v1.6',
       inputs: {
-        model_image: stripPrefix(model_image),
-        garment_image: stripPrefix(garment_image),
+        model_image: model_image,
+        garment_image: garment_image,
         category: category || 'one-pieces',         // Pakistani full suits → one-pieces
         garment_photo_type: garment_photo_type || 'flat-lay',
         mode: mode || 'balanced',
