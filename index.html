@@ -1497,10 +1497,14 @@ async function analyzePhoto() {
         { type: 'text', text: `You are analyzing a Pakistani garment for Meraki by Sam, a clothing boutique.
 Garment type: ${garmentType}, Season/Occasion: ${intakeSeason}.
 
-IMPORTANT PHOTO HIERARCHY:
-- STRUCTURAL photos define the garment. Use them to understand silhouette, overall layout, garment proportions, and embroidery placement across the whole garment.
-- DETAIL photos are close-up references. Extract embroidery texture, stitch type, and local color from them — but do NOT let them redefine the garment's structure, silhouette, or overall layout.
-- If a detail photo shows birds or floral motifs, describe WHERE on the garment they appear (from the structural photo) and HOW MANY, not just that they exist.
+PHOTO HIERARCHY — follow strictly:
+- STRUCTURAL photos define garment shape, silhouette, proportions, and overall layout. Use them as the primary source.
+- DETAIL photos are close-up references only. Extract embroidery type, stitch quality, motif appearance, and local color from them. Do NOT let detail photos override the garment's structure or layout established by structural photos.
+
+MOTIF DETECTION — identify every distinctive decorative element visible across all photos:
+- Look for: birds, animals, florals, vines, paisley, geometric patterns, mirror work, zari, sequins, beadwork, appliqué, medallions, borders, lace, printed artwork, or any unique recurring motif.
+- For each motif: determine where it appears on the garment from the STRUCTURAL photos. Use DETAIL photos only to understand its appearance (colors, style, stitch type).
+- If a motif appears only once or twice, note it explicitly as non-repeating.
 
 Respond in EXACTLY this JSON format (no markdown, no extra text):
 {
@@ -1509,11 +1513,24 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
   "colors": "comma-separated list of main colors",
   "occasion": "best occasion for this garment",
   "category": "Formal/Semi-Formal/Casual/Bridal",
-  "ideogramPrompt": "Write an Ideogram v4 prompt following this EXACT structure. The output must be a full-length model photo — not a flat-lay, not a collage, not a mannequin. BEGIN WITH: 'Full-length professional fashion photograph of a Pakistani woman model wearing [garment type].' THEN in order: (1) SILHOUETTE: overall shape and cut. (2) FABRIC: texture and drape. (3) BASE COLORS: body color zone by zone. (4) NECKLINE: describe exactly — shape, embroidery type, depth, density, color. (5) FRONT PANELS: any motifs — specify count, exact placement, orientation (e.g. two embroidered birds symmetrically placed on upper front chest panels, one on each side, birds do not repeat elsewhere). (6) SLEEVES: length, embroidery if any, cuff detail. (7) BORDERS/HEMLINE: describe or state plain. (8) DUPATTA: color, edge treatment, any motifs. (9) TROUSER/SKIRT: color, any embroidery. END WITH: 'Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. This is not a flat-lay, not a product photo, not a collage.' Only describe zones visible in the photos — leave absent zones blank."
+  "motifs": [
+    {
+      "type": "e.g. bird / floral vine / geometric / mirror work / zari border / etc.",
+      "count": "approximate number visible, or 'continuous' for borders",
+      "placement": "exact location on garment — e.g. upper front panels beneath shoulders, centered on back, along hemline only",
+      "absent_from": "zones where this motif does NOT appear — e.g. sleeves, trouser, neckline",
+      "colors": "dominant color(s) of the motif itself",
+      "surrounding": "what surrounds or frames the motif — e.g. floral vine fill, plain field, geometric border",
+      "repeats": false,
+      "symmetrical": true,
+      "style_notes": "brief visual description of the motif's appearance — pose, form, stitch style"
+    }
+  ],
+  "ideogramPrompt": "Write an Ideogram v4 fashion prompt. Use the motifs array above to describe decorative elements with EXACT placement. Priority order: (1) MODEL: begin with 'Full-length professional fashion photograph of a Pakistani woman model wearing [garment type].' (2) SILHOUETTE: overall shape and cut. (3) FABRIC: texture and drape. (4) BASE COLORS: color blocking zone by zone. (5) NECKLINE: shape, embroidery depth and density. (6) MOTIFS: for each motif in the array, state type + exact count + exact placement + colors + whether it repeats — e.g. 'two embroidered birds symmetrically placed on upper front chest panels, one per side, integrated into floral vine embroidery, birds do not appear on sleeves or trouser.' (7) SLEEVES: length and any embroidery. (8) BORDERS/HEMLINE: describe or state plain. (9) DUPATTA: color, edge, any motifs. (10) TROUSER/SKIRT: color and embroidery if any. END WITH: 'Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. Not a flat-lay. Not a product photo. Not a collage.' Omit zones not visible in photos. Keep motifs proportional — they should enhance, not dominate, the overall garment description."
 }` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
-      1400
+      1800
     );
 
     let parsed;
