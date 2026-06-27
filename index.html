@@ -734,16 +734,27 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </select>
       <p class="key-note">Switch providers here once a new provider is benchmarked and approved.</p>
     </div>
-    <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
-      <div class="field-label">FASHN Model Photo</div>
-      <div id="fashnModelPhotoPreview" style="margin-bottom:8px"></div>
-      <input type="file" accept="image/*" id="fashnModelPhotoInput" style="display:none" onchange="saveFashnModelPhoto(this)">
-      <button class="btn" onclick="document.getElementById('fashnModelPhotoInput').click()" style="width:100%;background:var(--sand-light);color:var(--ink)"><i class="ti ti-upload"></i> Upload model photo</button>
-      <p class="key-note" style="margin-top:6px">Required for FASHN virtual try-on. Full-length photo of a Pakistani/South Asian woman, neutral standing pose, studio background.</p>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+      <div class="field-label">Active Model Template</div>
+      <div id="activeTemplatePreview" style="margin-bottom:8px"></div>
+      <button class="btn" onclick="closeModal('settingsModal');openModelTemplateSheet()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-layout-grid"></i> Manage Templates</button>
+      <p class="key-note" style="margin-top:6px">Model photos used as FASHN virtual try-on inputs. Generate with Ideogram or upload your own.</p>
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
     </div>
+  </div>
+</div>
+
+<!-- MODEL TEMPLATE LIBRARY SHEET -->
+<div class="sheet-overlay" id="modelTemplateSheet" onclick="closeSheetOutside(event,'modelTemplateSheet')">
+  <div class="sheet" style="max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-layout-grid"></i> Model Templates</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('modelTemplateSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">10 reusable model photos for FASHN virtual try-on. Generate with Ideogram (1 credit each) or upload a photo. Select one to activate it.</div>
+    <div id="modelTemplateGrid" style="display:flex;flex-direction:column;gap:12px"></div>
   </div>
 </div>
 
@@ -1332,7 +1343,7 @@ function setLoading(btnId, loading, originalHTML) {
 
 function openModal(id) {
   document.getElementById(id).classList.add('open');
-  if (id === 'settingsModal') { _populateProviderSelect(); _renderFashnModelPhotoPreview(); }
+  if (id === 'settingsModal') { _populateProviderSelect(); _renderActiveTemplatePreview(); }
 }
 function _populateProviderSelect() {
   const sel = document.getElementById('imageGenProviderSelect');
@@ -3693,6 +3704,232 @@ function removeFashnModelPhoto() {
   localStorage.removeItem('fashnModelPhoto');
   showToast('Model photo removed');
   _renderFashnModelPhotoPreview();
+}
+
+// ─── MODEL TEMPLATE LIBRARY ───────────────────────────────────────────────────
+
+let modelTemplates = [];
+let activeModelTemplateId = localStorage.getItem('activeModelTemplateId') || null;
+
+const MODEL_TEMPLATE_DEFS = [
+  {
+    defId: 'front-1',
+    name: 'Classic Front Stand',
+    category: 'front-facing',
+    poseNotes: 'Arms at sides, looking directly at camera',
+    prompt: 'Full-body studio photo of a Pakistani woman, 25 years old, medium skin tone, black hair, standing straight facing camera, arms relaxed at sides, neutral expression, plain white seamless background, soft studio lighting, fashion photography, full length shot showing feet, wearing simple plain light-colored shalwar kameez with no embroidery, 4K'
+  },
+  {
+    defId: 'front-2',
+    name: 'Hands Clasped Front',
+    category: 'front-facing',
+    poseNotes: 'Hands clasped loosely at waist',
+    prompt: 'Full-body studio photo of a Pakistani woman, 28 years old, medium-fair skin tone, dark brown hair, standing facing camera, hands clasped loosely at waist, slight natural smile, plain off-white seamless background, natural daylight studio lighting, fashion editorial, full length including feet, wearing simple solid-color modest outfit with no patterns, 4K'
+  },
+  {
+    defId: 'front-3',
+    name: 'One Hand on Hip',
+    category: 'front-facing',
+    poseNotes: 'Right hand on hip, relaxed confident stance',
+    prompt: 'Full-body studio photo of a South Asian woman, 24 years old, warm medium skin tone, shoulder-length black hair, standing facing camera, right hand on hip, relaxed confident stance, neutral light grey background, soft diffused studio lighting, full length fashion shot, wearing plain modest clothing with no embroidery or print, 4K'
+  },
+  {
+    defId: 'three-quarter-1',
+    name: 'Three-Quarter Left',
+    category: 'three-quarter',
+    poseNotes: 'Body turned slightly left, face toward camera',
+    prompt: 'Full-body studio photo of a Pakistani woman, 26 years old, medium skin tone, long black hair, three-quarter turn to the left, face angled toward camera, arms relaxed, white seamless studio background, elegant fashion photography, full length shot, soft lighting, plain modest base clothing, 4K'
+  },
+  {
+    defId: 'three-quarter-2',
+    name: 'Three-Quarter Right',
+    category: 'three-quarter',
+    poseNotes: 'Body turned slightly right, face toward camera',
+    prompt: 'Full-body studio photo of a Pakistani woman, 27 years old, warm skin tone, dark wavy hair, three-quarter turn to the right, face looking at camera, natural elegant posture, plain cream seamless background, studio fashion lighting, full body visible, modest plain outfit, 4K'
+  },
+  {
+    defId: 'dupatta-1',
+    name: 'Dupatta Drape Classic',
+    category: 'dupatta-friendly',
+    poseNotes: 'Arms slightly extended to show fabric drape',
+    prompt: 'Full-body studio photo of a Pakistani woman, 25 years old, medium skin tone, black hair, standing facing camera with arms slightly extended outward, neutral expression, plain white seamless background, bright even studio lighting designed to showcase fabric detail and drape, full length fashion shot, plain base outfit ready for virtual try-on, 4K'
+  },
+  {
+    defId: 'dupatta-2',
+    name: 'Dupatta Walking Pose',
+    category: 'dupatta-friendly',
+    poseNotes: 'Slight walking motion, one foot forward',
+    prompt: 'Full-body studio photo of a Pakistani woman, 26 years old, medium-fair skin tone, long dark hair, mid-stride walking pose, one foot slightly forward, slight movement to show fabric flow, plain white studio background, natural studio lighting, full length visible, fashion editorial style, plain modest clothing, 4K'
+  },
+  {
+    defId: 'formal-1',
+    name: 'Formal Straight',
+    category: 'formal',
+    poseNotes: 'Very upright, formal wedding/event ready stance',
+    prompt: 'Full-body studio photo of a Pakistani woman, 28 years old, fair-medium skin tone, hair neatly set, standing in a formal upright posture for wedding or formal event, hands at sides, dignified neutral expression, seamless white background, professional fashion photography lighting, full length including feet clearly visible, plain base outfit, 4K'
+  },
+  {
+    defId: 'formal-2',
+    name: 'Formal Angled',
+    category: 'formal',
+    poseNotes: 'Slight body angle, hands folded gracefully',
+    prompt: 'Full-body studio photo of a Pakistani woman, 30 years old, medium skin tone, upswept dark hair, slight body angle to camera, hands folded gracefully in front, formal fashion posture suitable for occasion wear, ivory seamless background, soft professional studio lighting, full body visible, plain modest base outfit, 4K'
+  },
+  {
+    defId: 'neutral-1',
+    name: 'Neutral Base',
+    category: 'neutral',
+    poseNotes: 'Most versatile — works with any garment type',
+    prompt: 'Full-body studio photo of a Pakistani woman, 25 years old, medium neutral skin tone, straight black hair, standing perfectly straight facing camera, arms at sides, completely neutral expression, plain white background, flat even studio lighting, no shadows, maximally neutral pose for garment visualization, full length from head to feet, plain white or light grey base outfit, 4K'
+  }
+];
+
+async function openModelTemplateSheet() {
+  openSheet('modelTemplateSheet');
+  await loadModelTemplates();
+}
+
+async function loadModelTemplates() {
+  const rows = await db('select', 'model_templates', {}) || [];
+  modelTemplates = rows;
+  renderModelTemplates();
+}
+
+function renderModelTemplates() {
+  const el = document.getElementById('modelTemplateGrid');
+  if (!el) return;
+  el.innerHTML = MODEL_TEMPLATE_DEFS.map(def => {
+    const row = modelTemplates.find(r => r.def_id === def.defId);
+    const img = row?.image || null;
+    const isActive = activeModelTemplateId === def.defId;
+    const borderStyle = isActive ? 'border:2px solid var(--emerald-mid)' : 'border:2px solid transparent';
+    const thumb = img
+      ? `<img src="${img}" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)">`
+      : `<div style="width:56px;height:72px;border-radius:6px;flex-shrink:0;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted);text-align:center;padding:4px">Not<br>generated</div>`;
+    const activeTag = isActive
+      ? `<span style="font-size:10px;background:var(--emerald-mid);color:white;border-radius:4px;padding:2px 6px;font-weight:600">✓ Active</span>`
+      : '';
+    const categoryLabel = `<span style="font-size:10px;background:var(--sand-light);color:var(--muted);border-radius:4px;padding:2px 6px">${def.category}</span>`;
+    const actionBtns = `
+      <button class="btn" style="font-size:11px;padding:4px 8px" onclick="generateModelTemplate('${def.defId}')"><i class="ti ti-photo-ai"></i> Generate</button>
+      <label class="btn" style="font-size:11px;padding:4px 8px;cursor:pointer"><i class="ti ti-upload"></i> Upload<input type="file" accept="image/*" style="display:none" onchange="uploadModelTemplate('${def.defId}',this)"></label>
+      ${img ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 8px" onclick="_selectModelTemplateById('${def.defId}')"><i class="ti ti-check"></i> Set Active</button>` : ''}
+      ${row ? `<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--error,#c0392b)" onclick="deleteModelTemplate('${row.id}','${def.defId}')"><i class="ti ti-trash"></i></button>` : ''}
+    `;
+    return `<div style="background:white;border-radius:10px;padding:12px;display:flex;gap:10px;align-items:flex-start;${borderStyle}">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">${def.name}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${categoryLabel}${activeTag}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${def.poseNotes}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${actionBtns}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function generateModelTemplate(defId) {
+  const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
+  if (!def) return;
+  showToast('Generating — uses 1 Ideogram credit…');
+  try {
+    const r = await fetch('/api/ideogram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_prompt: def.prompt, aspect_ratio: 'ASPECT_2_3' })
+    });
+    const json = await r.json();
+    if (json.error) throw new Error(json.error);
+    const rawUrl = json.data?.[0]?.url || json.url;
+    if (!rawUrl) throw new Error('No URL returned');
+    const proxied = '/api/ideogram?url=' + encodeURIComponent(rawUrl);
+    const imgEl = await loadImg(proxied);
+    const canvas = document.createElement('canvas');
+    canvas.width = imgEl.naturalWidth; canvas.height = imgEl.naturalHeight;
+    canvas.getContext('2d').drawImage(imgEl, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const existing = modelTemplates.find(r => r.def_id === defId);
+    if (existing) await db('delete', 'model_templates', { id: existing.id });
+    await db('insert', 'model_templates', { data: {
+      def_id: defId,
+      name: def.name,
+      category: def.category,
+      pose_notes: def.poseNotes,
+      image: dataUrl,
+      source_provider: 'ideogram',
+      is_default: false
+    }});
+    showToast('Generated — tap Set Active to use it');
+    await loadModelTemplates();
+  } catch(e) {
+    showToast('Generation failed: ' + e.message);
+  }
+}
+
+function uploadModelTemplate(defId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
+  if (!def) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const dataUrl = e.target.result;
+    const existing = modelTemplates.find(r => r.def_id === defId);
+    if (existing) await db('delete', 'model_templates', { id: existing.id });
+    await db('insert', 'model_templates', { data: {
+      def_id: defId,
+      name: def.name,
+      category: def.category,
+      pose_notes: def.poseNotes,
+      image: dataUrl,
+      source_provider: 'upload',
+      is_default: false
+    }});
+    showToast('Uploaded');
+    await loadModelTemplates();
+  };
+  reader.readAsDataURL(file);
+}
+
+function _selectModelTemplateById(defId) {
+  const row = modelTemplates.find(r => r.def_id === defId);
+  if (!row?.image) { showToast('No image for this template'); return; }
+  activeModelTemplateId = defId;
+  localStorage.setItem('activeModelTemplateId', defId);
+  localStorage.setItem('fashnModelPhoto', row.image);
+  showToast('Active template set');
+  renderModelTemplates();
+  _renderActiveTemplatePreview();
+}
+
+async function deleteModelTemplate(dbId, defId) {
+  await db('delete', 'model_templates', { id: dbId });
+  if (activeModelTemplateId === defId) {
+    activeModelTemplateId = null;
+    localStorage.removeItem('activeModelTemplateId');
+    localStorage.removeItem('fashnModelPhoto');
+    _renderActiveTemplatePreview();
+  }
+  showToast('Deleted');
+  await loadModelTemplates();
+}
+
+function _renderActiveTemplatePreview() {
+  const el = document.getElementById('activeTemplatePreview');
+  if (!el) return;
+  const img = localStorage.getItem('fashnModelPhoto');
+  if (img && activeModelTemplateId) {
+    const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === activeModelTemplateId);
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:10px">
+      <img src="${img}" style="width:48px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--emerald-mid)">✓ ${def ? def.name : 'Template active'}</div>
+        <div style="font-size:11px;color:var(--muted)">${def ? def.category : ''}</div>
+      </div>
+    </div>`;
+  } else {
+    el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:4px 0">No active template. Tap Manage Templates to select one.</div>';
+  }
 }
 
 // ─── PROVIDER LAB & BENCHMARKS ───────────────────────────────────────────────
