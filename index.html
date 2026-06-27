@@ -1130,42 +1130,86 @@ let customers = [];
 let exhibitions = [];
 
 // ─── SIZE INVENTORY HELPERS ───────────────────────────────────────────────────
+// Single source of truth for all availability logic.
+// Products WITHOUT size_inventory fall back to the status field so old data never breaks.
+
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 
+// Parse size_inventory safely; always returns a plain object with only numeric values, or null.
 function getSizeInventory(p) {
-  if (!p.size_inventory) return null;
-  return typeof p.size_inventory === 'string' ? JSON.parse(p.size_inventory) : p.size_inventory;
+  if (!p || !p.size_inventory) return null;
+  try {
+    const raw = typeof p.size_inventory === 'string' ? JSON.parse(p.size_inventory) : p.size_inventory;
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+    return raw;
+  } catch { return null; }
 }
 
-// Total available units across all sizes. Falls back to status field for old products.
-function getTotalAvailable(p) {
+// Ensure every SIZE_ORDER key exists and is a non-negative integer. Safe to call on untrusted data.
+function normalizeSizeInventory(inv) {
+  const out = {};
+  SIZE_ORDER.forEach(s => out[s] = Math.max(0, parseInt(inv?.[s] || 0, 10) || 0));
+  return out;
+}
+
+// Total available units. Falls back to 1 (available) or 0 (sold/reserved) for old products.
+function getTotalAvailableQuantity(p) {
   const inv = getSizeInventory(p);
   if (!inv) return p.status === 'available' ? 1 : 0;
-  return SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
+  return SIZE_ORDER.reduce((sum, s) => sum + Math.max(0, inv[s] || 0), 0);
 }
 
-// True if product has any available unit
+// True if product has at least one available unit (size-aware).
 function isProductAvailable(p) {
   const inv = getSizeInventory(p);
   if (!inv) return p.status === 'available';
   return SIZE_ORDER.some(s => (inv[s] || 0) > 0);
 }
 
-// Returns array of size strings with count > 0, in canonical order
-function getAvailableSizes(p) {
+// True if product is definitively sold out (size-aware).
+function isProductSoldOut(p) {
+  if (p.status === 'reserved') return false;
+  const inv = getSizeInventory(p);
+  if (!inv) return p.status === 'sold';
+  return !SIZE_ORDER.some(s => (inv[s] || 0) > 0);
+}
+
+// Size labels with stock > 0, in canonical order.
+function getAvailableSizeLabels(p) {
   const inv = getSizeInventory(p);
   if (!inv) return [];
   return SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
 }
 
-// Human-readable size summary for stock cards
-function sizeSummaryText(p) {
+// "S ×1 · M ×2" summary for stock cards, or null if no size_inventory.
+function getAvailableSizeSummary(p) {
   const inv = getSizeInventory(p);
   if (!inv) return null;
-  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
-  if (!available.length) return 'Sold Out';
-  return available.map(s => `${s} ×${inv[s]}`).join(' · ');
+  const sizes = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  if (!sizes.length) return 'Sold Out';
+  return sizes.map(s => `${s} ×${inv[s]}`).join(' · ');
 }
+
+// Decrement one size by 1 (never below 0). Returns new inventory object; does not mutate p.
+function decrementSizeInventory(p, size) {
+  const inv = normalizeSizeInventory(getSizeInventory(p));
+  inv[size] = Math.max(0, (inv[size] || 0) - 1);
+  return inv;
+}
+
+// Derive what status should be given the current size totals and existing status.
+// Reserved status is always preserved — only available↔sold transitions happen here.
+function deriveStatusFromInventory(p, inv) {
+  if (p.status === 'reserved') return p.status;
+  const total = SIZE_ORDER.reduce((sum, s) => sum + Math.max(0, inv[s] || 0), 0);
+  if (total === 0) return 'sold';
+  return 'available';
+}
+
+// ─── LEGACY ALIASES (keep old call-sites working) ────────────────────────────
+const getTotalAvailable = getTotalAvailableQuantity;
+const getAvailableSizes = getAvailableSizeLabels;
+const sizeSummaryText   = getAvailableSizeSummary;
 
 // ─── SIZE STEPPER COMPONENT ───────────────────────────────────────────────────
 // Renders size steppers into a container. sizeState is a plain object mutated in place.
@@ -1696,13 +1740,13 @@ function buildSmartRecommendations() {
   }
 
   // URGENT: items without prices
-  const noPrice = inventory.filter(p => p.status !== 'sold' && !p.price);
+  const noPrice = inventory.filter(p => isProductAvailable(p) && !p.price);
   if (noPrice.length) {
     recs.push({ type: 'urgent', icon: '💰', title: `${noPrice.length} item${noPrice.length > 1 ? 's' : ''} still need${noPrice.length === 1 ? 's' : ''} a price`, sub: 'Set prices so customers know what to expect', action: () => { showScreen('stock'); filterStock('needs-price', document.querySelector('#stockFilterPills .tab-pill:last-child')); } });
   }
 
   // URGENT: items with no marketing package
-  const noPackage = inventory.filter(p => p.status === 'available' && !p.caption_en);
+  const noPackage = inventory.filter(p => isProductAvailable(p) && !p.caption_en);
   if (noPackage.length) {
     recs.push({ type: 'urgent', icon: '📦', title: `${noPackage.length} piece${noPackage.length > 1 ? 's' : ''} ${noPackage.length > 1 ? 'have' : 'has'} no marketing content`, sub: 'Open each piece and tap "Create Marketing Package"', action: () => showScreen('stock') });
   }
@@ -1733,15 +1777,15 @@ function buildSmartRecommendations() {
 
   // INFO: old available pieces (>45 days unsold)
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 45);
-  const oldPieces = inventory.filter(p => p.status === 'available' && new Date(p.created_at) < cutoff);
+  const oldPieces = inventory.filter(p => isProductAvailable(p) && new Date(p.created_at) < cutoff);
   if (oldPieces.length) {
     recs.push({ type: 'info', icon: '🔄', title: `${oldPieces.length} older piece${oldPieces.length > 1 ? 's' : ''} could use fresh promotion`, sub: 'Generate new marketing content to re-share on WhatsApp', action: () => showScreen('stock') });
   }
 
-  // GOOD: just added pieces available
-  const recent = inventory.filter(p => p.status === 'available');
-  if (recent.length > 0 && !noPackage.length && !noPrice.length) {
-    recs.push({ type: 'good', icon: '✅', title: `${recent.length} piece${recent.length > 1 ? 's' : ''} ready to share`, sub: 'All available items are priced and have marketing content', action: () => showScreen('stock') });
+  // GOOD: pieces available and ready
+  const availableItems = inventory.filter(p => isProductAvailable(p));
+  if (availableItems.length > 0 && !noPackage.length && !noPrice.length) {
+    recs.push({ type: 'good', icon: '✅', title: `${availableItems.length} piece${availableItems.length > 1 ? 's' : ''} ready to share`, sub: 'All available items are priced and have marketing content', action: () => showScreen('stock') });
   }
 
   // Fallback
@@ -2562,7 +2606,8 @@ async function init() {
 
 // ─── NUDGES ───────────────────────────────────────────────────────────────────
 function productNudge(p) {
-  if (p.status === 'sold') return '';
+  if (isProductSoldOut(p)) return '';
+  if (p.status === 'reserved') return '<span class="nudge-chip" style="background:#FFF8E1;color:#E65100">Reserved</span>';
   if (!p.price) return '<span class="nudge-chip nudge-price">💰 Needs price</span>';
   if (!p.caption_en) return '<span class="nudge-chip nudge-pkg">📦 No marketing yet</span>';
   const ageDays = Math.floor((Date.now() - new Date(p.created_at)) / 86400000);
@@ -2571,7 +2616,7 @@ function productNudge(p) {
 }
 
 function productDetailNudge(p) {
-  if (p.status === 'sold') return '';
+  if (isProductSoldOut(p)) return '';
   const lines = [];
   if (!p.price) lines.push({ cls: 'nudge-price', text: '💰 Set a price before sharing with customers.' });
   if (p.price && !p.caption_en) lines.push({ cls: 'nudge-pkg', text: '📦 Tap "Create Marketing Package" to generate captions, WhatsApp message, and hashtags.' });
@@ -3053,7 +3098,7 @@ function renderInventory() {
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
-        ${(() => { const s = sizeSummaryText(p); return s ? `<div class="size-summary">${s}</div>` : ''; })()}
+        ${(() => { const s = getAvailableSizeSummary(p); return s ? `<div class="size-summary">${s}</div>` : ''; })()}
         ${productNudge(p)}
       </div>
       <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket('${p.id}')" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
@@ -3166,10 +3211,9 @@ function markSoldWithSizePicker() {
 async function _markSizeAsSold(size) {
   closeSheet('sizeSoldSheet');
   if (!currentProduct) return;
-  const inv = getSizeInventory(currentProduct) || {};
-  inv[size] = Math.max(0, (inv[size] || 0) - 1);
+  const inv = decrementSizeInventory(currentProduct, size);
+  const newStatus = deriveStatusFromInventory(currentProduct, inv);
   const total = SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
-  const newStatus = total === 0 ? 'sold' : currentProduct.status;
   const update = {
     size_inventory: JSON.stringify(inv),
     status: newStatus,
@@ -3195,23 +3239,21 @@ async function saveProductEdits() {
   const notes = document.getElementById('detailNotesInput').value || null;
   const collection_name = document.getElementById('detailCollectionInput').value.trim() || null;
 
-  // Size inventory — save whatever is in the detail steppers
-  const detailSizeState = window._sizeStates['detailSizeGrid'] || {};
-  const hasSizes = SIZE_ORDER.some(s => (detailSizeState[s] || 0) > 0);
-  const size_inventory = hasSizes ? JSON.stringify(detailSizeState) : null;
+  // Size inventory — normalize and save whatever is in the detail steppers
+  const rawSizeState = window._sizeStates['detailSizeGrid'] || {};
+  const detailSizeState = normalizeSizeInventory(rawSizeState);
+  const hasSizes = SIZE_ORDER.some(s => detailSizeState[s] > 0);
+  // Preserve null if size_inventory was never set and Sam didn't enter any sizes
+  const hadSizesBefore = !!getSizeInventory(currentProduct);
+  const size_inventory = (hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null;
 
-  // Auto-set status based on size totals (only when size_inventory is used)
+  // Derive status from size totals when size_inventory is in play
   let status = currentProduct.status;
   let sold_at = currentProduct.sold_at;
   if (size_inventory !== null) {
-    const total = SIZE_ORDER.reduce((sum, s) => sum + (detailSizeState[s] || 0), 0);
-    if (total === 0 && status === 'available') {
-      status = 'sold';
-      sold_at = new Date().toISOString();
-    } else if (total > 0 && status === 'sold') {
-      status = 'available';
-      sold_at = null;
-    }
+    status = deriveStatusFromInventory(currentProduct, detailSizeState);
+    if (status === 'sold' && currentProduct.status !== 'sold') sold_at = new Date().toISOString();
+    if (status === 'available' && currentProduct.status === 'sold') sold_at = null;
   }
 
   try {
@@ -3632,7 +3674,7 @@ function downloadDetailModel() {
 
 // ─── WHATSAPP CATALOG ─────────────────────────────────────────────────────────
 async function generateWhatsAppCatalog() {
-  const avail = inventory.filter(p => p.status === 'available');
+  const avail = inventory.filter(p => isProductAvailable(p));
   if (!avail.length) { showToast('No available items'); return; }
   openSheet('catalogSheet');
   const textEl = document.getElementById('catalogText');
@@ -3740,7 +3782,7 @@ function openCustomerDetail(id) {
 async function suggestItemsForCustomer() {
   if (!currentCustomer) return;
   const c = currentCustomer;
-  const avail = inventory.filter(p => p.status === 'available');
+  const avail = inventory.filter(p => isProductAvailable(p));
   if (!avail.length) { showToast('No available items to suggest'); return; }
   const output = document.getElementById('customerSuggestOutput');
   output.style.display = 'block';
@@ -3756,7 +3798,7 @@ async function suggestItemsForCustomer() {
 async function generateCustomerWhatsApp() {
   if (!currentCustomer) return;
   const c = currentCustomer;
-  const avail = inventory.filter(p => p.status === 'available').slice(0, 5);
+  const avail = inventory.filter(p => isProductAvailable(p)).slice(0, 5);
   const output = document.getElementById('customerWhatsAppOutput');
   const textEl = document.getElementById('customerWhatsAppText');
   output.style.display = 'block';
@@ -4011,7 +4053,7 @@ async function openExhibitionDetail(id) {
   selectDiv.style.display = 'block';
   const grid = document.getElementById('exhSelectGrid');
   const assignedIds = new Set(itemProducts.map(i => i.product.id));
-  const available = inventory.filter(p => p.status !== 'sold');
+  const available = inventory.filter(p => !isProductSoldOut(p));
   grid.innerHTML = available.map(p => `
     <div class="product-card ${assignedIds.has(p.id) ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${assignedIds.has(p.id) ? 'border-color:var(--burgundy);border-width:2px' : ''}">
       <div class="product-thumb">
