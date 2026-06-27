@@ -539,7 +539,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div id="analysisResult" style="display:none">
           <div id="generatedSKU" class="sku-badge"></div>
           <div class="field-label" id="t-itemNameLabel">Item Name</div>
-          <input type="text" id="itemNameInput" class="field-input" style="margin-bottom:12px">
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <input type="text" id="itemNameInput" class="field-input" style="flex:1;margin-bottom:0">
+            <button class="btn btn-secondary btn-sm" onclick="suggestItemNames()" id="suggestItemNameBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
+          </div>
+          <div id="itemNameSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
           <div class="result-box">
             <div class="result-label" id="t-analysisLabel">Garment Analysis</div>
             <div id="analysisText" style="white-space:pre-wrap"></div>
@@ -2198,6 +2202,63 @@ Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki
   }
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-sparkles"></i>';
+}
+
+async function suggestItemNames() {
+  const btn = document.getElementById('suggestItemNameBtn');
+  const sugDiv = document.getElementById('itemNameSuggestions');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading" style="scale:0.6"><span></span><span></span><span></span></div>';
+  sugDiv.style.display = 'flex';
+  sugDiv.innerHTML = '<span style="font-size:11px;color:var(--muted)">Thinking...</span>';
+
+  const current = document.getElementById('itemNameInput').value.trim();
+  const collection = document.getElementById('collectionNameInput').value.trim();
+  const analysis = document.getElementById('analysisText').textContent.trim();
+  const type = garmentType;
+  const season = intakeSeason;
+
+  try {
+    const resp = await callClaude([{ role: 'user', content:
+      `Suggest 5 short product names for a Pakistani clothing boutique called "Meraki by Sam" based in New Jersey.
+
+Garment details:
+- Type: ${type}
+- Occasion/season: ${season}
+${collection ? `- Collection it belongs to: "${collection}"` : ''}
+${current ? `- Sam's current name idea: "${current}" — refine or offer alternatives in this direction` : ''}
+${analysis ? `- Garment analysis: ${analysis.slice(0, 400)}` : ''}
+
+Rules:
+- 2–5 words max
+- Evocative and boutique-feeling, not generic
+- Can blend English + Urdu naturally (not forced)
+- Should feel distinct from each other — range of moods/styles
+${collection ? `- Names should feel like they belong in the "${collection}" collection` : ''}
+${current ? `- At least 2 should feel like refinements of Sam's current idea` : ''}
+- Do NOT use "New", "Collection", "Suit", "Dress" as standalone words unless they add real meaning
+
+Respond with ONLY a JSON array of 5 strings. Example: ["Gulabi Shaam", "Rose Dusk", "Khilta Gulab", "Evening Bloom", "Rosé Twilight"]`
+    }], '', 200);
+    let names;
+    try { names = JSON.parse(resp); }
+    catch { names = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
+
+    window._itemNameSuggs = names;
+    sugDiv.innerHTML = names.map((n, i) =>
+      `<div class="coll-suggestion" onclick="applyItemNameSuggestion(this,window._itemNameSuggs[${i}])">${n}</div>`
+    ).join('');
+  } catch(e) {
+    sugDiv.innerHTML = '<span style="font-size:11px;color:var(--burgundy)">Could not generate suggestions</span>';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-sparkles"></i>';
+}
+
+function applyItemNameSuggestion(el, name) {
+  document.getElementById('itemNameInput').value = name;
+  document.querySelectorAll('#itemNameSuggestions .coll-suggestion').forEach(c => c.style.background = '');
+  el.style.background = '#F5D78A';
 }
 
 function renderInventory() {
