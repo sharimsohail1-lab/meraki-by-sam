@@ -1088,11 +1088,16 @@ async function callClaude(messages, system = '', maxTokens = 1024) {
   return json.content[0].text;
 }
 
-async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3') {
+async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3', imageB64 = null) {
+  const payload = { text_prompt: prompt, aspect_ratio: aspectRatio };
+  if (imageB64) {
+    payload.image_b64 = imageB64;
+    payload.image_weight = 0.4; // follow garment colour/structure but put it on a model
+  }
   const r = await fetch('/api/ideogram', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text_prompt: prompt, aspect_ratio: aspectRatio })
+    body: JSON.stringify(payload)
   });
   const json = await r.json();
   if (json.error) throw new Error(json.error);
@@ -1464,7 +1469,8 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
     catch { parsed = JSON.parse(response.replace(/```json|```/g, '').trim()); }
 
     const sku = generateSKU();
-    currentAnalysis = { sku, ...parsed };
+    const primaryPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
+    currentAnalysis = { sku, ...parsed, _uploadedPhotoB64: primaryPhoto };
 
     document.getElementById('generatedSKU').textContent = sku;
     document.getElementById('itemNameInput').value = parsed.name || '';
@@ -1637,7 +1643,12 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   setLoading(btnId, true, '');
   try {
-    const url = await callIdeogram(currentAnalysis.ideogramPrompt);
+    // Pass the front photo (or first available) so Ideogram sees the actual garment
+    const garmentPhoto = uploadedPhotos['front']?.dataUrl
+      || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl
+      || currentAnalysis._uploadedPhotoB64
+      || null;
+    const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', garmentPhoto);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
     img.src = watermarked;
@@ -2720,7 +2731,12 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
 async function generateDetailModelPhoto() {
   if (!currentProduct?.ideogram_prompt) { showToast('No prompt available for this item'); return; }
   const tempAnalysis = currentAnalysis;
-  currentAnalysis = { ideogramPrompt: currentProduct.ideogram_prompt, sku: currentProduct.sku };
+  // Attach the saved product photo so Ideogram sees the actual garment
+  currentAnalysis = {
+    ideogramPrompt: currentProduct.ideogram_prompt,
+    sku: currentProduct.sku,
+    _uploadedPhotoB64: currentProduct.photo || null
+  };
   await generateModelPhoto('detailModelImg', 'detailModelOutput', 'detailModelBtn');
   currentAnalysis = tempAnalysis;
 }
