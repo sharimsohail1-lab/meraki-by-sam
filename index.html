@@ -513,6 +513,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div class="extras-title" id="t-extraPhotos">Add More Detail Photos (Optional)</div>
           <div class="chip-row" id="extraChips">
             <div class="chip" onclick="addExtraSlot('Side View')">Side View</div>
+            <div class="chip" onclick="addExtraSlot('Sleeves Detail')">Sleeves</div>
             <div class="chip" onclick="addExtraSlot('Lining')">Lining</div>
             <div class="chip" onclick="addExtraSlot('Buttons')">Buttons</div>
             <div class="chip" onclick="addExtraSlot('Mirror Work')">Mirror Work</div>
@@ -1285,6 +1286,7 @@ const PHOTO_SLOTS = {
     { id: 'bottom', label: 'Shalwar / Trouser', required: true },
     { id: 'dupatta', label: 'Dupatta', required: false },
     { id: 'neckline', label: 'Neckline Detail', required: false },
+    { id: 'sleeves', label: 'Sleeves Detail', required: false },
     { id: 'hemline', label: 'Hemline / Border', required: false },
   ],
   'kameez': [
@@ -1297,6 +1299,7 @@ const PHOTO_SLOTS = {
     { id: 'skirt-front', label: 'Skirt Front', required: true },
     { id: 'blouse', label: 'Blouse / Choli', required: true },
     { id: 'dupatta', label: 'Dupatta', required: false },
+    { id: 'sleeves', label: 'Sleeves Detail', required: false },
     { id: 'skirt-detail', label: 'Skirt Detail / Embroidery', required: false },
   ],
   'dupatta': [
