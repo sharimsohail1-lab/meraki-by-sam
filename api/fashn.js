@@ -37,7 +37,7 @@ export default async function handler(req, res) {
 
   // ── POST: start prediction ────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { model_image, garment_image, category, mode, garment_photo_type } = req.body;
+    const { model_image, garment_image, category, mode, garment_photo_type, prompt } = req.body;
 
     if (!model_image || !garment_image) {
       return res.status(400).json({ error: 'model_image and garment_image are required' });
@@ -45,17 +45,20 @@ export default async function handler(req, res) {
 
     // category: tops preserves kameez as a long tunic, not a Western one-piece dress
     const resolvedCategory = category || 'tops';
+    const inputs = {
+      model_image: model_image,
+      garment_image: garment_image,
+      category: resolvedCategory === 'auto' ? 'tops' : resolvedCategory,
+      garment_photo_type: garment_photo_type || 'flat-lay',
+      mode: mode || 'balanced',
+      segmentation_free: true,
+      num_samples: 1
+    };
+    if (prompt) inputs.prompt = prompt;
+
     const payload = {
       model_name: 'tryon-v1.6',
-      inputs: {
-        model_image: model_image,
-        garment_image: garment_image,
-        category: resolvedCategory === 'auto' ? 'tops' : resolvedCategory,
-        garment_photo_type: garment_photo_type || 'flat-lay',
-        mode: mode || 'balanced',
-        segmentation_free: true,
-        num_samples: 1
-      }
+      inputs
     };
 
     try {

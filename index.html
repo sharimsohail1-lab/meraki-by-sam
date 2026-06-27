@@ -1268,6 +1268,11 @@ registerImageGenProvider('ideogram', {
 
 // ─── FASHN PROVIDER ──────────────────────────────────────────────────────────
 // Virtual try-on: garment image + model image → model wearing the garment.
+// South Asian modesty guardrail — appended to every FASHN generation.
+// Prevents FASHN from interpreting decorative plackets/borders as open necklines,
+// and prevents Western silhouette reinterpretation of Pakistani kameez/suits.
+const SOUTH_ASIAN_GUARDRAIL = 'Traditional modest Pakistani kameez. Keep the neckline modest and the chest fully covered. The center front placket and any vertical embroidered border is decorative trim, NOT an open neckline or deep V. Do not create a plunging neckline, deep V neckline, cleavage, low-cut chest, exposed chest, or open front. Preserve the original South Asian kameez structure: long modest tunic silhouette, original sleeve shape, original hemline, original embroidery placement. Do not convert into a Western dress, gown, blouse, skirt, cocktail dress, or fusion outfit. Full-length South Asian boutique catalog photo.';
+
 // Requires a model photo stored in localStorage under 'fashnModelPhoto'.
 // Generation is async — polls /api/fashn?id=xxx until completed or failed.
 // Returns a CDN URL; applyWatermark() proxies and watermarks it.
@@ -1296,7 +1301,8 @@ registerImageGenProvider('fashn', {
         garment_image: garmentB64,
         category: _fashnCategory || 'tops',
         garment_photo_type: 'flat-lay',
-        mode: 'balanced'
+        mode: 'balanced',
+        prompt: SOUTH_ASIAN_GUARDRAIL
       })
     });
     const runData = await runRes.json();
@@ -3782,7 +3788,7 @@ async function saveSetting(key, value) {
 // IMPORTANT: All prompts specify plain solid-color shalwar kameez as base.
 // FASHN try-on replaces the kameez with the uploaded garment while preserving the
 // South Asian silhouette. A Western dress base would cause FASHN to output a Western silhouette.
-const BASE_OUTFIT = 'wearing a plain solid light grey shalwar kameez with no embroidery, no pattern, no dupatta, simple round neckline, straight cut, full length trousers visible, modest South Asian silhouette';
+const BASE_OUTFIT = 'wearing a plain solid light beige shalwar kameez with no embroidery, no pattern, no dupatta, high modest crew neckline (no V-neck, no low cut, fully covered chest), straight modest cut, full length plain trousers visible, modest South Asian silhouette, chest fully covered';
 const MODEL_TEMPLATE_DEFS = [
   {
     defId: 'front-1',
