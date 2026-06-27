@@ -28,73 +28,83 @@ export default async function handler(req, res) {
   try {
     const { text_prompt, aspect_ratio, rendering_speed, image_b64, image_weight } = req.body;
 
-    const boundary = 'boundary' + Date.now();
-
+    // If a garment photo is provided, try remix first, fall back to generate
     if (image_b64) {
-      // Remix mode: send garment photo + text prompt to ideogram-v4 remix endpoint
-      // Strip data URL prefix if present
-      const base64Data = image_b64.replace(/^data:image\/\w+;base64,/, '');
-      const imageBuffer = Buffer.from(base64Data, 'base64');
-
-      // Detect image type from prefix
-      const prefix = image_b64.split(';')[0];
-      const mimeType = prefix.startsWith('data:') ? prefix.slice(5) : 'image/jpeg';
-      const ext = mimeType === 'image/png' ? 'png' : 'jpg';
-
-      const weight = image_weight ?? 0.4;
-
-      // Build multipart body with binary image part
-      const textPart = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}\r\n`
-      );
-      const weightPart = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="image_weight"\r\n\r\n${weight}\r\n`
-      );
-      const aspectPart = aspect_ratio ? Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="aspect_ratio"\r\n\r\n${aspect_ratio}\r\n`
-      ) : Buffer.alloc(0);
-      const imageHeader = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="image_file"; filename="garment.${ext}"\r\nContent-Type: ${mimeType}\r\n\r\n`
-      );
-      const imagePart = imageBuffer;
-      const closing = Buffer.from(`\r\n--${boundary}--\r\n`);
-
-      const bodyBuffer = Buffer.concat([textPart, weightPart, aspectPart, imageHeader, imagePart, closing]);
-
-      const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/remix', {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Api-Key': apiKey
-        },
-        body: bodyBuffer
-      });
-      const data = await response.json();
-      if (!response.ok) return res.status(response.status).json(data);
-      return res.status(200).json(data);
-
-    } else {
-      // Text-only generate (fallback for products without photos)
-      const parts = [];
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}`);
-      if (aspect_ratio) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="aspect_ratio"\r\n\r\n${aspect_ratio}`);
-      if (rendering_speed) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="rendering_speed"\r\n\r\n${rendering_speed}`);
-      const body = parts.join('\r\n') + `\r\n--${boundary}--\r\n`;
-
-      const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Api-Key': apiKey
-        },
-        body
-      });
-      const data = await response.json();
-      if (!response.ok) return res.status(response.status).json(data);
-      return res.status(200).json(data);
+      const remixResult = await tryRemix({ apiKey, text_prompt, aspect_ratio, image_b64, image_weight });
+      if (remixResult.ok) return res.status(200).json(remixResult.data);
+      // Remix failed — fall back to text-only and include a warning
+      console.error('Ideogram remix failed, falling back to generate:', remixResult.error);
     }
+
+    // Text-only generate
+    const data = await textGenerate({ apiKey, text_prompt, aspect_ratio, rendering_speed });
+    return res.status(data.ok ? 200 : 502).json(data.data);
 
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
+}
+
+async function tryRemix({ apiKey, text_prompt, aspect_ratio, image_b64, image_weight }) {
+  try {
+    const base64Data = image_b64.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    const prefix = image_b64.split(';')[0];
+    const mimeType = prefix.startsWith('data:') ? prefix.slice(5) : 'image/jpeg';
+    const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+    const weight = image_weight ?? 0.4;
+
+    const boundary = 'boundary' + Date.now();
+
+    const textPart = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}\r\n`
+    );
+    const weightPart = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="image_weight"\r\n\r\n${weight}\r\n`
+    );
+    const aspectPart = aspect_ratio ? Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="aspect_ratio"\r\n\r\n${aspect_ratio}\r\n`
+    ) : Buffer.alloc(0);
+    const imageHeader = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="image_file"; filename="garment.${ext}"\r\nContent-Type: ${mimeType}\r\n\r\n`
+    );
+    const closing = Buffer.from(`\r\n--${boundary}--\r\n`);
+
+    const bodyBuffer = Buffer.concat([textPart, weightPart, aspectPart, imageHeader, imageBuffer, closing]);
+
+    const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/remix', {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Api-Key': apiKey
+      },
+      body: bodyBuffer
+    });
+
+    const data = await response.json();
+    if (!response.ok) return { ok: false, error: JSON.stringify(data) };
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function textGenerate({ apiKey, text_prompt, aspect_ratio, rendering_speed }) {
+  const boundary = 'boundary' + Date.now();
+  const parts = [];
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="text_prompt"\r\n\r\n${text_prompt}`);
+  if (aspect_ratio) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="aspect_ratio"\r\n\r\n${aspect_ratio}`);
+  if (rendering_speed) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="rendering_speed"\r\n\r\n${rendering_speed}`);
+  const body = parts.join('\r\n') + `\r\n--${boundary}--\r\n`;
+
+  const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Api-Key': apiKey
+    },
+    body
+  });
+  const data = await response.json();
+  return { ok: response.ok, data };
 }
