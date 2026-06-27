@@ -2993,7 +2993,7 @@ function applyCollSuggestion(el, name) {
 
 function openCollectionPicker() {
   const names = allCollectionNames();
-  const current = (document.getElementById('collectionNameInput').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const current = (document.getElementById('collectionNameInput').value || '').trim();
   window._collPickerNames = names;
   const container = document.getElementById('collPickerExisting');
   if (names.length) {
@@ -3001,36 +3001,43 @@ function openCollectionPicker() {
       <div class="field-label" style="margin-bottom:6px">Existing Collections</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${
         names.map((n, i) => {
-          const active = current.includes(n);
+          const active = current === n;
           return `<div class="coll-suggestion" id="collPickerChip-${i}" style="${active ? 'background:#F5D78A;border-color:var(--gold)' : ''}" onclick="toggleCollPickerChip(${i})">${n}</div>`;
         }).join('')
       }</div>`;
   } else {
     container.innerHTML = '';
   }
-  // Pre-fill new input if current value isn't an existing collection
-  const typed = (document.getElementById('collectionNameInput').value || '').trim();
-  const isExisting = names.some(n => current.includes(n));
-  document.getElementById('collPickerNewInput').value = (!isExisting && typed) ? typed : '';
+  // Pre-fill new input only if current value isn't an existing collection
+  const isExisting = names.includes(current);
+  document.getElementById('collPickerNewInput').value = (!isExisting && current) ? current : '';
   openSheet('collectionPickerSheet');
 }
 
 function toggleCollPickerChip(i) {
   const name = window._collPickerNames[i];
   const input = document.getElementById('collectionNameInput');
-  const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
-  const idx = current.indexOf(name);
-  if (idx >= 0) current.splice(idx, 1); else current.push(name);
-  input.value = current.join(', ');
+  const isSelected = input.value.trim() === name;
+  // Single-select: tap selects only this chip; tap again deselects
+  input.value = isSelected ? '' : name;
+  // Clear any typed new name since a chip was chosen
+  const newInput = document.getElementById('collPickerNewInput');
+  if (newInput) newInput.value = '';
   updateCollectionPickerDisplay();
-  const chip = document.getElementById('collPickerChip-' + i);
-  if (chip) { chip.style.background = current.includes(name) ? '#F5D78A' : ''; chip.style.borderColor = current.includes(name) ? 'var(--gold)' : ''; }
+  // Update all chip highlights
+  (window._collPickerNames || []).forEach((_, j) => {
+    const chip = document.getElementById('collPickerChip-' + j);
+    const active = !isSelected && j === i;
+    if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
+  });
 }
 
 function applyCollPickerNew() {
   const val = document.getElementById('collPickerNewInput').value.trim();
   if (!val) return;
+  // Clear any chip selection since a new name is being used
   document.getElementById('collectionNameInput').value = val;
+  document.querySelectorAll('#collPickerExisting .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
   updateCollectionPickerDisplay();
   closeSheet('collectionPickerSheet');
 }
