@@ -26,12 +26,18 @@ export default async function handler(req, res) {
           Object.entries(JSON.parse(filter)).forEach(([k, v]) => { query = query.eq(k, v); });
         }
         break;
-      case 'insert':
-        query = supabase.from(table).insert(data).select();
+      case 'insert': {
+        // Strip null/undefined so unrun migrations don't cause "column not found" errors
+        const insertData = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null && v !== undefined));
+        query = supabase.from(table).insert(insertData).select();
         break;
-      case 'update':
-        query = supabase.from(table).update(data).eq('id', id).select();
+      }
+      case 'update': {
+        // Strip null/undefined so unrun migrations don't cause "column not found" errors
+        const updateData = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null && v !== undefined));
+        query = supabase.from(table).update(updateData).eq('id', id).select();
         break;
+      }
       case 'upsert':
         query = supabase.from(table).upsert(data, { onConflict: 'key' }).select();
         break;
