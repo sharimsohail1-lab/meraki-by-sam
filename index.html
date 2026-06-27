@@ -553,15 +553,18 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div id="modelPhotoSection" style="margin-top:14px">
             <div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-                <span>Garment accuracy</span><span id="imageWeightLabel">95%</span>
+                <span>Garment accuracy</span><span id="imageWeightLabel">60%</span>
               </div>
-              <input type="range" id="imageWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
+              <input type="range" id="imageWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
               <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
             </div>
             <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
               <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
             </button>
-            <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:-6px;margin-bottom:10px">Uses 1 Ideogram credit — only on tap</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-6px;margin-bottom:10px">
+              <span style="font-size:11px;color:var(--muted)">Uses 1 Ideogram credit — only on tap</span>
+              <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:2px 0;text-decoration:underline">View reference</button>
+            </div>
             <div id="modelPhotoOutput" style="display:none">
               <img id="modelPhotoImg" class="preview-img" src="" alt="Model photo">
               <div id="modelPhotoStockNote" style="display:none;background:#E8F5E9;color:#2E7D32;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:6px;text-align:center">
@@ -787,14 +790,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
       <div style="margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-          <span>Garment accuracy</span><span id="detailWeightLabel">95%</span>
+          <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
         </div>
-        <input type="range" id="detailWeightSlider" min="20" max="95" value="95" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
+        <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
       </div>
-      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:10px">
+      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
         <i class="ti ti-user"></i> Generate AI Model Photo
       </button>
+      <div style="text-align:right;margin-bottom:10px">
+        <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
+      </div>
       <div id="detailModelOutput" style="display:none;margin-bottom:10px">
         <img id="detailModelImg" class="preview-img" src="" alt="">
         <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
@@ -1110,7 +1116,7 @@ async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3', imageB64 = null)
     const intakeSlider = document.getElementById('imageWeightSlider');
     const detailSlider = document.getElementById('detailWeightSlider');
     const sliderVal = (intakeSlider?.offsetParent ? intakeSlider : detailSlider)?.value;
-    payload.image_weight = sliderVal ? parseInt(sliderVal) / 100 : 0.95;
+    payload.image_weight = sliderVal ? parseInt(sliderVal) / 100 : 0.60;
   }
   const r = await fetch('/api/ideogram', {
     method: 'POST',
@@ -1475,7 +1481,7 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
   "colors": "comma-separated list of main colors",
   "occasion": "best occasion for this garment",
   "category": "Formal/Semi-Formal/Casual/Bridal",
-  "ideogramPrompt": "SURGICAL Ideogram v4 prompt for Pakistani fashion model photo. Format: 'Professional fashion photograph, Pakistani model wearing [garment type]. FABRIC: [exact fabric description]. COLORS: [precise colors zone by zone]. EMBROIDERY: [exact placement — e.g. heavily embroidered neckline extending 3 inches down chest in gold thread, mirror work on sleeves cuffs, plain hemline]. SILHOUETTE: [cut and shape]. STYLE: editorial lighting, white seamless background, full length shot, sharp focus, 8k'"
+  "ideogramPrompt": "Write an Ideogram v4 fashion prompt. CRITICAL: The output must be a real Pakistani woman model wearing this garment — not a flat-lay, not a product grid, not a hanger image, not a mannequin, not a collage. Start the prompt with: 'Full-length professional fashion photograph of a Pakistani woman model wearing'. Then describe: GARMENT TYPE and silhouette. FABRIC texture and drape. COLORS zone by zone (kameez body, neckline, sleeves, cuffs, hemline, dupatta, trouser). EMBROIDERY exact placement per visible zone (e.g. dense gold zari embroidery on neckline extending 4 inches down, mirror work on sleeve cuffs, plain hemline). End with: 'Model is wearing the full outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot showing complete outfit, sharp focus, 8k. Not a flat-lay. Not a product photo. Not a collage or grid.' Do NOT invent details for zones not visible in photos."
 }` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
@@ -1511,8 +1517,9 @@ async function saveProduct() {
 
   const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
   const modelPhoto = currentAnalysis._modelPhotoUrl || null;
-  // If AI model photo was generated, use it as the primary display photo
-  const photo = modelPhoto || uploadedPhoto;
+  // Always store original garment photo in products.photo so future regenerations
+  // reference the real garment, never an AI image. Display uses model_photo || photo.
+  const photo = uploadedPhoto;
   const price = parseInt(document.getElementById('priceInput').value) || null;
   const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
@@ -1536,6 +1543,7 @@ async function saveProduct() {
       model_photo: modelPhoto,
       collection_name: collection,
     }});
+    console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
     const saved = rows[0];
     inventory.unshift(saved);
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
@@ -1656,29 +1664,132 @@ function resetIntake() {
   goToStep(1);
 }
 
+// Build a labelled multi-zone composite image from all uploaded garment photos.
+// Sending every zone to Ideogram significantly increases fidelity vs. front-only.
+async function buildGarmentComposite(photos) {
+  const entries = Object.entries(photos).filter(([, v]) => v?.dataUrl);
+  if (!entries.length) return null;
+  if (entries.length === 1) return entries[0][1].dataUrl;
+
+  const loadImg = url => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = url;
+  });
+
+  const loaded = (await Promise.all(
+    entries.map(([id, p]) => loadImg(p.dataUrl).then(img => img ? { id, label: p.label || id, img } : null))
+  )).filter(Boolean);
+  if (!loaded.length) return null;
+  if (loaded.length === 1) return entries[0][1].dataUrl;
+
+  // Layout: primary (front) fills left column full-height; others stack on right.
+  const CELL_W = 300, CELL_H = 400, LABEL_H = 22;
+  const primary = loaded.find(x => x.id === 'front') || loaded[0];
+  const rest = loaded.filter(x => x !== primary);
+  const rightH = rest.length ? (CELL_H + LABEL_H) / rest.length : 0;
+  const totalH = CELL_H + LABEL_H;
+  const totalW = rest.length ? CELL_W * 2 : CELL_W;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = totalW;
+  canvas.height = totalH;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, totalW, totalH);
+
+  // Primary photo (left column, full height minus label)
+  ctx.drawImage(primary.img, 0, 0, CELL_W, CELL_H);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, CELL_H, CELL_W, LABEL_H);
+  ctx.fillStyle = '#fff';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(primary.label || 'Front', CELL_W / 2, CELL_H + 15);
+
+  // Right column: stack remaining photos with labels
+  rest.forEach((item, i) => {
+    const y = Math.round(i * rightH);
+    const h = Math.round(rightH - LABEL_H);
+    ctx.drawImage(item.img, CELL_W, y, CELL_W, h);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(CELL_W, y + h, CELL_W, LABEL_H);
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(item.label || item.id, CELL_W + CELL_W / 2, y + h + 15);
+  });
+
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
 // ─── MODEL PHOTO / IDEOGRAM ───────────────────────────────────────────────────
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   setLoading(btnId, true, '');
   try {
-    // Pass the front photo (or first available) so Ideogram sees the actual garment
-    const garmentPhoto = uploadedPhotos['front']?.dataUrl
+    const uploadCount = Object.keys(uploadedPhotos).length;
+    // Use the front photo (or first available) as the Ideogram reference.
+    // Sending a composite grid breaks model generation — Ideogram recreates the
+    // grid layout instead of dressing a model. Composite is built separately for
+    // the debug "View reference" preview only.
+    const singleRef = uploadedPhotos['front']?.dataUrl
       || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl
       || currentAnalysis._uploadedPhotoB64
       || null;
-    const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', garmentPhoto);
+
+    // Build composite only for the debug view — never sent to Ideogram.
+    const debugComposite = uploadCount > 1
+      ? await buildGarmentComposite(uploadedPhotos)
+      : singleRef;
+    currentAnalysis._referencePhoto = debugComposite || singleRef;
+
+    const intakeSlider = document.getElementById('imageWeightSlider');
+    const detailSlider = document.getElementById('detailWeightSlider');
+    const sliderEl = intakeSlider?.offsetParent ? intakeSlider : detailSlider;
+    const imageWeight = sliderEl ? parseInt(sliderEl.value) / 100 : 0.60;
+
+    console.group('[Meraki] Model photo generation');
+    console.log('Ideogram reference:', singleRef ? (uploadCount > 1 ? `front photo (${uploadCount} zones uploaded; composite shown in debug view only)` : 'single upload') : 'saved garment photo');
+    console.log('Image weight:', imageWeight);
+    console.log('Prompt length:', currentAnalysis.ideogramPrompt?.length, 'chars');
+    console.log('Prompt preview:', currentAnalysis.ideogramPrompt?.slice(0, 200));
+    console.log('Reference image size:', singleRef ? Math.round(singleRef.length / 1024) + ' KB' : 'none');
+    console.groupEnd();
+
+    const url = await callIdeogram(currentAnalysis.ideogramPrompt, 'ASPECT_2_3', singleRef);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
     img.src = watermarked;
     document.getElementById(outputDivId).style.display = 'block';
     currentAnalysis._modelPhotoUrl = watermarked;
+
+    console.log('[Meraki] Generation complete. model_photo and photo will be saved separately on Save.');
+
     // Show indicator that stock will use this photo
     const note = document.getElementById('modelPhotoStockNote');
     if (note) { note.style.display = 'block'; }
+
+    // Update "View Reference" button label to confirm composite used
+    const refBtns = document.querySelectorAll('.js-view-ref-btn');
+    refBtns.forEach(b => {
+      b.style.display = 'inline-flex';
+      b.textContent = uploadCount > 1 ? `View reference (${uploadCount} zones)` : 'View reference';
+      b.title = uploadCount > 1 ? 'Shows all uploaded zones. Ideogram only receives the front photo.' : 'The garment photo sent to Ideogram.';
+    });
   } catch(e) {
     showToast('Photo generation failed: ' + e.message);
   }
   setLoading(btnId, false, '<i class="ti ti-user"></i> <span id="t-genModel">' + T[lang].genModel + '</span>');
+}
+
+function viewReferenceImage() {
+  const src = currentAnalysis?._referencePhoto || currentAnalysis?._uploadedPhotoB64 || null;
+  if (!src) { showToast('No reference image available'); return; }
+  const w = window.open('', '_blank');
+  w.document.write(\`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="\${src}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>\`);
+  w.document.close();
 }
 
 async function applyWatermark(imageUrl) {
@@ -1944,7 +2055,7 @@ function renderCollections() {
   let html = '';
   for (const [name, items] of collections) {
     const thumbs = items.slice(0, 3).map(p =>
-      p.photo ? `<img class="collection-thumb" src="${p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
+      (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
     ).join('');
     const hasPkg = items.some(p => p.caption_en);
     const available = items.filter(p => p.status === 'available').length;
@@ -2015,8 +2126,9 @@ function openCollectionDetail(name) {
     itemsEl.innerHTML = items.map((p, i) => {
       const idx = idxBase + i;
       window._collItemActions[idx] = p.id;
-      const photoHTML = p.photo
-        ? `<div class="catalog-item-photo"><img src="${p.photo}" alt="${p.name}"></div>`
+      const _dPhoto = p.model_photo || p.photo;
+      const photoHTML = _dPhoto
+        ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
         : `<div class="catalog-item-photo">👗</div>`;
       const meta = [p.garment_type, p.season, p.colors].filter(Boolean).join(' · ');
       return `<div class="catalog-item" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${idx}]),200)">
@@ -2310,7 +2422,7 @@ function renderInventory() {
   grid.innerHTML = items.map(p => `
     <div class="product-card">
       <div class="product-thumb" onclick="openProductDetail('${p.id}')">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
+        ${(p.model_photo||p.photo) ? `<img src="${p.model_photo||p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
       <div class="product-info" onclick="openProductDetail('${p.id}')">
@@ -2337,8 +2449,9 @@ function openProductDetail(id) {
   currentProduct = inventory.find(p => p.id === id);
   if (!currentProduct) return;
   const p = currentProduct;
-  document.getElementById('detailPhoto').src = p.photo || '';
-  document.getElementById('detailPhoto').style.display = p.photo ? 'block' : 'none';
+  const detailDisplayPhoto = p.model_photo || p.photo;
+  document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
+  document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
   document.getElementById('detailMeta').innerHTML = [p.garment_type, p.season, p.category, p.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
@@ -2347,6 +2460,7 @@ function openProductDetail(id) {
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = p.collection_name || '';
   document.getElementById('detailModelOutput').style.display = 'none';
+  document.querySelectorAll('.js-view-ref-btn').forEach(b => b.style.display = 'none');
   document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
   renderMarketingPackageCache(p);
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
