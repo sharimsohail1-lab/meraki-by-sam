@@ -508,6 +508,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button class="tab-pill" onclick="setGarmentType('dupatta',this)" id="t-gtDupatta">Dupatta</button>
           <button class="tab-pill" onclick="setGarmentType('other',this)" id="t-gtOther">Other</button>
         </div>
+        <div style="font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5">
+          <i class="ti ti-camera" style="color:var(--burgundy)"></i> <strong>Best results:</strong> Take one clean full-front photo on a flat surface for the AI model. Neckline, sleeve, and hem close-ups are saved as detail shots for the catalog.
+        </div>
         <div class="slot-grid" id="photoSlotGrid"></div>
         <div class="extras-section">
           <div class="extras-title" id="t-extraPhotos">Add More Detail Photos (Optional)</div>
@@ -859,6 +862,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeSheet('productDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
+    <div id="detailPhotoInsets" style="display:none;gap:6px;flex-wrap:wrap;margin:8px 0 4px"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
     <div class="detail-name" id="detailName"></div>
@@ -1337,6 +1341,30 @@ function buildFashnPrompt(analysis, gType) {
 // Requires a model photo stored in localStorage under 'fashnModelPhoto'.
 // Generation is async — polls /api/fashn?id=xxx until completed or failed.
 // Returns a CDN URL; applyWatermark() proxies and watermarks it.
+// Returns ONE structural garment image for FASHN. Priority: front > full > first structural > product.photo.
+// Never picks detail slots (neckline, sleeves, hemline, etc.).
+function selectFashnGarmentImage(photos, product) {
+  const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
+  const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
+
+  // Only consider structural slots
+  const structuralIds = new Set(slots.filter(s => s.role === 'structural').map(s => s.id));
+
+  if (photos['front']?.dataUrl) return { src: photos['front'].dataUrl, slot: 'front' };
+  if (photos['full']?.dataUrl) return { src: photos['full'].dataUrl, slot: 'full' };
+
+  // First available structural slot by priority
+  const byPriority = slots
+    .filter(s => s.role === 'structural')
+    .sort((a, b) => b.priority - a.priority);
+  for (const s of byPriority) {
+    if (photos[s.id]?.dataUrl) return { src: photos[s.id].dataUrl, slot: s.id };
+  }
+
+  if (product?.photo) return { src: product.photo, slot: 'saved' };
+  return null;
+}
+
 registerImageGenProvider('fashn', {
   id: 'fashn',
   label: 'FASHN Virtual Try-On',
@@ -1345,12 +1373,18 @@ registerImageGenProvider('fashn', {
     if (!modelPhoto) {
       throw new Error('FASHN needs a model photo. Go to Settings → Provider Lab to upload one.');
     }
-    if (!garmentB64) {
+
+    // Always use a single clean structural image — not a composite, not a detail shot
+    const selected = selectFashnGarmentImage(uploadedPhotos, currentProduct);
+    const fashnGarment = selected?.src || garmentB64;
+    console.log('FASHN_INPUT_IMAGE:', selected ? `slot="${selected.slot}"` : 'fallback from caller');
+
+    if (!fashnGarment) {
       throw new Error('No garment photo available for FASHN.');
     }
 
     console.group('[Meraki] FASHN virtual try-on');
-    console.log('Garment base64 length:', garmentB64.length);
+    console.log('Garment base64 length:', fashnGarment.length);
     console.log('Model base64 length:', modelPhoto.length);
     console.log('PAID API CALL: starting FASHN prediction');
 
@@ -1359,7 +1393,7 @@ registerImageGenProvider('fashn', {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model_image: modelPhoto,
-        garment_image: garmentB64,
+        garment_image: fashnGarment,
         category: _fashnCategory || 'tops',
         garment_photo_type: 'flat-lay',
         mode: 'balanced'
@@ -1368,7 +1402,7 @@ registerImageGenProvider('fashn', {
     const runData = await runRes.json();
     if (!runRes.ok || runData.error) {
       console.error('[FASHN] run failed — HTTP', runRes.status, JSON.stringify(runData));
-      console.error('[FASHN] model_image length:', modelPhoto.length, '| garment_image length:', garmentB64.length);
+      console.error('[FASHN] model_image length:', modelPhoto.length, '| garment_image length:', fashnGarment.length);
       console.groupEnd();
       throw new Error(runData.error || 'FASHN prediction failed to start');
     }
@@ -1918,11 +1952,20 @@ async function saveProduct() {
   btn.disabled = true;
   btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
 
+  // Structural photo for products.photo — front preferred
   const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
   const modelPhoto = currentAnalysis._modelPhotoUrl || null;
   // Always store original garment photo in products.photo so future regenerations
   // reference the real garment, never an AI image. Display uses model_photo || photo.
   const photo = uploadedPhoto;
+
+  // Collect detail-role photos into a JSONB array by slot
+  const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
+  const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
+  const detailPhotosArr = Object.entries(uploadedPhotos)
+    .filter(([id, p]) => slotMap[id]?.role === 'detail' && p.dataUrl)
+    .map(([id, p]) => ({ slot: id, label: slotMap[id].label, image: p.dataUrl }));
+  const detail_photos = detailPhotosArr.length ? JSON.stringify(detailPhotosArr) : null;
   const price = parseInt(document.getElementById('priceInput').value) || null;
   const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
@@ -1948,6 +1991,7 @@ async function saveProduct() {
       status: 'available',
       photo,
       model_photo: modelPhoto,
+      detail_photos: detail_photos,
       collection_name: collection,
     }});
     console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
@@ -2216,6 +2260,15 @@ function viewReferenceImage() {
   if (!src) { showToast('No reference image available'); return; }
   const w = window.open('', '_blank');
   w.document.write('<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="' + src + '" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>');
+  w.document.close();
+}
+
+function _openDetailPhotoLightbox(idx) {
+  const photos = window._detailInsetPhotos || [];
+  const d = photos[idx];
+  if (!d) return;
+  const w = window.open('', '_blank');
+  w.document.write(`<html><body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh"><img src="${d.image}" style="max-width:100%;max-height:90vh;object-fit:contain"><p style="color:#fff;font-family:sans-serif;margin:10px">${d.label}</p></body></html>`);
   w.document.close();
 }
 
@@ -2882,6 +2935,25 @@ function openProductDetail(id) {
   const detailDisplayPhoto = p.model_photo || p.photo;
   document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
   document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
+
+  // Detail photo insets
+  const insetsEl = document.getElementById('detailPhotoInsets');
+  const detailPhotosData = p.detail_photos
+    ? (typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos)
+    : [];
+  if (detailPhotosData.length) {
+    insetsEl.style.display = 'flex';
+    window._detailInsetPhotos = detailPhotosData;
+    insetsEl.innerHTML = detailPhotosData.map((d, i) => `
+      <div onclick="_openDetailPhotoLightbox(${i})" style="cursor:pointer;flex:0 0 auto">
+        <img src="${d.image}" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">${d.label}</div>
+      </div>`).join('');
+  } else {
+    insetsEl.style.display = 'none';
+    insetsEl.innerHTML = '';
+  }
+
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
   document.getElementById('detailMeta').innerHTML = [p.garment_type, p.season, p.category, p.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
@@ -3164,11 +3236,33 @@ async function renderCatalogPreview() {
 
   const coverHTML = buildCoverHTML('&nbsp;');
 
+  // Detail inset priority: neckline > sleeves > hemline > dupatta > embroidery > skirt-detail > border > back
+  const DETAIL_PRIORITY = ['neckline','sleeves','hemline','dupatta','embroidery','skirt-detail','border','back'];
+
   const pagesHTML = selected.map(p => {
     const img = p.model_photo || p.photo;
     const imgHTML = img
       ? `<img class="cat-product-img" src="${img}" alt="${p.name}">`
       : `<div class="cat-product-img-placeholder"><i class="ti ti-hanger" style="font-size:40px"></i><span>Model image not created yet</span></div>`;
+
+    const rawDetails = p.detail_photos
+      ? (typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos)
+      : [];
+    const sortedDetails = [...rawDetails].sort((a, b) => {
+      const ai = DETAIL_PRIORITY.indexOf(a.slot);
+      const bi = DETAIL_PRIORITY.indexOf(b.slot);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    }).slice(0, 4);
+
+    const insetsHTML = sortedDetails.length
+      ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">${
+          sortedDetails.map(d => `<div style="text-align:center">
+            <img src="${d.image}" alt="${d.label}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e0da">
+            <div style="font-size:9px;color:#888;margin-top:2px">${d.label}</div>
+          </div>`).join('')
+        }</div>`
+      : '';
+
     return `<div class="cat-product-page">
       ${imgHTML}
       <div class="cat-product-info">
@@ -3176,6 +3270,7 @@ async function renderCatalogPreview() {
         <div class="cat-product-name">${p.name}</div>
         ${p.catalog_blurb ? `<div class="cat-product-blurb">${p.catalog_blurb}</div>` : ''}
         <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Price on request'}</div>
+        ${insetsHTML}
       </div>
     </div>`;
   }).join('');
