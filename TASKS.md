@@ -132,6 +132,57 @@ Format:
 
 ## Completed
 
+### Add Flow Redesign — 2026-06-27
+
+The Add New Piece flow was intentionally restructured. Do not revert these decisions.
+
+**Step layout:**
+- **Step 1:** Season/Occasion + Collection picker only. No price, no cost, no sizes.
+- **Step 2:** Photo slots (structural + detail). Garment type selector. Unchanged.
+- **Step 3:** AI analysis → item name → model generation → Price → Cost → Sizes Available → Save.
+
+**Collection picker (Step 1):**
+- Tappable field opens a bottom sheet (`collectionPickerSheet`)
+- Sheet sections: Existing collections (from inventory), AI Suggested Names (✨ button, same Claude call), Create New (text input + Use)
+- `collectionNameInput` is a hidden field; all JS reads `.value` as before
+- Selected name shown in `collectionPickerLabel` span
+- Multi-select supported (comma-separated, same as before)
+
+**Price / Cost (moved to Step 3):**
+- IDs unchanged: `priceInput`, `costInput`, `costUsdBtn`, `costPkrBtn`, `costConversionNote`
+- Currency toggle and PKR→USD conversion work identically
+- Translation IDs `t-priceLabel` / `t-costLabel` still in `applyTranslations()` map
+
+**Size inventory (moved to Step 3):**
+- `intakeSizeGrid` and `intakeSizeTotalNote` are in Step 3, inside `analysisResult` div
+- `initIntakeSizeSteppers()` fires when `goToStep(3)` is called, guarded by `!window._sizeStates['intakeSizeGrid']`
+- Size state persists if Sam goes Back to Step 2 and returns to Step 3
+- `resetIntake()` clears state; next add re-inits with M:1 default
+- Editable in Stock via Product Detail sheet (unchanged)
+
+**Navigation guards:**
+- `goHomeFromAdd()` prompts before leaving if photos, collection, item name, or price are set
+- `← Home` button in header hidden on Home screen, visible on all other screens
+
+**Known manual tests (see also INVENTORY_TESTS.md):**
+1. Step 1 shows only Season + Collection. No sizes, price, cost.
+2. Collection picker opens sheet; existing collections appear; tap selects and highlights.
+3. AI suggest generates names; tapping one closes sheet and sets field.
+4. Typing in Create New + Use sets field and closes sheet.
+5. Clear button empties collection and closes sheet.
+6. Step 3 shows price, cost, sizes after analysis completes.
+7. Back (Step 3→2→3) does not reset price/cost/sizes.
+8. Save stores season, collection, price, cost, size_inventory, analysis, photos.
+9. Stock card shows size summary for new product.
+10. Urdu mode: all labels translate; collection picker Urdu not yet added to T map (labels are in English only — acceptable for now).
+
+**Remaining risks / future work:**
+- Urdu labels inside collection picker sheet are hardcoded English. Add to T map if Urdu support is needed there.
+- Draft auto-save (localStorage) would prevent data loss if Sam leaves mid-flow without confirming — still in backlog.
+- `collPickerNewInput` is not cleared when sheet is closed via Done without using the value — minor, not a bug.
+
+---
+
 - [x] Intake wizard: Camera + Gallery buttons per photo slot
 - [x] PKR cost input with live exchange rate → USD conversion
 - [x] AI model photo saves as primary stock photo (priority over flat photo)
@@ -142,12 +193,21 @@ Format:
 - [x] Editable marketing fields (pencil → textarea → save)
 - [x] AI collection name suggestions with Pakistani cultural calendar context
 - [x] Seed-based collection name suggestions (builds on what Sam typed)
-- [x] Existing collection chips in intake (multi-select, toggle)
+- [x] Existing collection chips in intake → replaced by collection picker bottom sheet
 - [x] Collection name field in product detail sheet (editable, comma-separated)
 - [x] Collection rename from stock screen
 - [x] Back buttons throughout
 - [x] Next-steps nudge after saving product
 - [x] Home dashboard nudges and action plan
+- [x] Size-based inventory (size_inventory JSONB, steppers, sold-by-size picker, status sync)
+- [x] INVENTORY_TESTS.md — manual test checklist for size inventory
+- [x] Logo: replaced 440 KB base64 LOGO_B64 with static PNG at /assets/meraki-logo.png
+- [x] ← Home button in header (hidden on Home, visible on all other screens)
+- [x] Add flow restructured: Step 1 = context only, Step 3 = final record (see section above)
+- [x] Collection picker bottom sheet with existing/suggested/new sections
+- [x] db.js: null-strip on insert/update to tolerate unrun migrations gracefully
+- [x] Migration 008: detail_photos JSONB column
+- [x] Migration 009: size_inventory JSONB column
 
 ---
 
