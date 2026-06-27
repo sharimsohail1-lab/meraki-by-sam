@@ -91,12 +91,17 @@ function buildRemixMultipart({ boundary, text_prompt, aspect_ratio, imageBuffer,
 
 async function tryRemixV4({ apiKey, text_prompt, aspect_ratio, imageBuffer, mimeType, ext, image_weight }) {
   try {
-    const boundary = 'boundary' + Date.now();
-    const body = buildRemixMultipart({ boundary, text_prompt, aspect_ratio, imageBuffer, mimeType, ext, weight: image_weight });
+    const weight = image_weight ?? 0.85;
+    // v4 remix expects JSON with base64 image, not multipart
     const response = await fetch('https://api.ideogram.ai/v1/ideogram-v4/remix', {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Api-Key': apiKey },
-      body
+      headers: { 'Content-Type': 'application/json', 'Api-Key': apiKey },
+      body: JSON.stringify({
+        text_prompt,
+        aspect_ratio: aspect_ratio || 'ASPECT_2_3',
+        image_weight: weight,
+        image_file: imageBuffer.toString('base64')
+      })
     });
     const data = await response.json();
     if (!response.ok) return { ok: false, error: `HTTP ${response.status}: ${JSON.stringify(data)}` };
