@@ -53,6 +53,9 @@ export default async function handler(req, res) {
       results.push({ file, status: 'applied' });
     }
 
+    // Always reload PostgREST schema cache so new columns are immediately visible
+    await supabase.rpc('run_sql', { query: `NOTIFY pgrst, 'reload schema'` });
+
     return res.status(200).json({ success: true, results });
   } catch (err) {
     return res.status(500).json({ error: err.message });
