@@ -1808,6 +1808,12 @@ function buildSmartRecommendations() {
     recs.push({ type: 'urgent', icon: '📦', title: `${noPackage.length} piece${noPackage.length > 1 ? 's' : ''} ${noPackage.length > 1 ? 'have' : 'has'} no marketing content`, sub: 'Open each piece and tap "Create Marketing Package"', action: () => showScreen('stock') });
   }
 
+  // INFO: available items with no size data
+  const noSizes = inventory.filter(p => isProductAvailable(p) && !getSizeInventory(p));
+  if (noSizes.length) {
+    recs.push({ type: 'info', icon: '📐', title: `${noSizes.length} item${noSizes.length > 1 ? 's' : ''} missing size info`, sub: 'Open each piece in Stock and add size counts', action: () => showScreen('stock') });
+  }
+
   // INFO: upcoming exhibitions
   const upcoming = exhibitions.filter(e => e.status === 'upcoming');
   upcoming.forEach(e => {
@@ -3196,7 +3202,12 @@ function renderInventory() {
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
-        ${(() => { const s = getAvailableSizeSummary(p); return s ? `<div class="size-summary">${s}</div>` : ''; })()}
+        ${(() => {
+          const s = getAvailableSizeSummary(p);
+          if (s) return `<div class="size-summary">${s}</div>`;
+          if (isProductAvailable(p)) return '<div class="size-summary" style="color:#C08000">No sizes added</div>';
+          return '';
+        })()}
         ${productNudge(p)}
       </div>
       <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket('${p.id}')" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
@@ -3633,7 +3644,7 @@ async function renderCatalogPreview() {
           if (isSoldOut) return '<div style="font-size:10px;color:#B71C1C;font-weight:600;letter-spacing:1px;margin-top:3px;text-transform:uppercase">Sold Out</div>';
           const sizes = getAvailableSizes(p);
           if (sizes.length) return `<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes: ${sizes.join(' · ')}</div>`;
-          return '';
+          return '<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes available on request</div>';
         })()}
         ${insetsHTML}
       </div>
