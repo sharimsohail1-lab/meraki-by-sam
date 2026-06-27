@@ -3786,12 +3786,17 @@ const MODEL_TEMPLATE_DEFS = [
 
 async function openModelTemplateSheet() {
   openSheet('modelTemplateSheet');
+  renderModelTemplates();
   await loadModelTemplates();
 }
 
 async function loadModelTemplates() {
-  const rows = await db('select', 'model_templates', {}) || [];
-  modelTemplates = rows;
+  try {
+    const rows = await db('select', 'model_templates', {}) || [];
+    modelTemplates = rows;
+  } catch(e) {
+    console.warn('[templates] DB not ready:', e.message);
+  }
   renderModelTemplates();
 }
 
