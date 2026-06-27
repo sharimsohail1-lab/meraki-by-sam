@@ -746,6 +746,22 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- FASHN MODEL PICKER SHEET -->
+<div class="sheet-overlay" id="fashnPickerSheet" onclick="closeSheetOutside(event,'fashnPickerSheet')">
+  <div class="sheet" style="height:85vh">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-user-check"></i> Choose Model</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('fashnPickerSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Select the model photo to use for this FASHN generation.</div>
+    <div id="fashnPickerGrid" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <button class="btn" style="flex:1" onclick="closeSheet('fashnPickerSheet')">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" id="fashnPickerConfirmBtn" onclick="_confirmFashnPicker()">Generate with Selected</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODEL TEMPLATE LIBRARY SHEET -->
 <div class="sheet-overlay" id="modelTemplateSheet" onclick="closeSheetOutside(event,'modelTemplateSheet')">
   <div class="sheet" style="height:85vh">
@@ -2035,6 +2051,17 @@ async function buildGarmentComposite(photos) {
 // ─── MODEL PHOTO / IDEOGRAM ───────────────────────────────────────────────────
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
+  if (activeImageGenProvider === 'fashn') {
+    await loadModelTemplates();
+    const hasAny = modelTemplates.some(r => r.image);
+    if (!hasAny) { showToast('No templates generated yet — go to Settings → Manage Templates first'); return; }
+    _openFashnPicker(targetImgId, outputDivId, btnId);
+    return;
+  }
+  await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+}
+
+async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
   setLoading(btnId, true, '');
   try {
     const uploadCount = Object.keys(uploadedPhotos).length;
@@ -2247,6 +2274,7 @@ async function init() {
   }
   renderHome();
   renderProviderPills();
+  loadAppSettings();
 }
 
 // ─── NUDGES ───────────────────────────────────────────────────────────────────
@@ -3711,6 +3739,29 @@ function removeFashnModelPhoto() {
 let modelTemplates = [];
 let activeModelTemplateId = localStorage.getItem('activeModelTemplateId') || null;
 
+async function loadAppSettings() {
+  try {
+    const rows = await db('select', 'settings', {}) || [];
+    const active = rows.find(r => r.key === 'activeModelTemplateId');
+    if (active?.value) {
+      activeModelTemplateId = active.value;
+      localStorage.setItem('activeModelTemplateId', active.value);
+      // sync fashnModelPhoto from DB template if not already in localStorage
+      if (!localStorage.getItem('fashnModelPhoto')) {
+        const tmplRows = await db('select', 'model_templates', {}) || [];
+        const row = tmplRows.find(r => r.def_id === active.value);
+        if (row?.image) localStorage.setItem('fashnModelPhoto', row.image);
+      }
+    }
+  } catch(e) { /* settings table may not exist yet */ }
+}
+
+async function saveSetting(key, value) {
+  try {
+    await db('upsert', 'settings', { data: { key, value, updated_at: new Date().toISOString() } });
+  } catch(e) { console.warn('[settings] save failed:', e.message); }
+}
+
 const MODEL_TEMPLATE_DEFS = [
   {
     defId: 'front-1',
@@ -3896,14 +3947,15 @@ function uploadModelTemplate(defId, input) {
   reader.readAsDataURL(file);
 }
 
-function _selectModelTemplateById(defId) {
+function _selectModelTemplateById(defId, fromPicker) {
   const row = modelTemplates.find(r => r.def_id === defId);
   if (!row?.image) { showToast('No image for this template'); return; }
   activeModelTemplateId = defId;
   localStorage.setItem('activeModelTemplateId', defId);
   localStorage.setItem('fashnModelPhoto', row.image);
+  saveSetting('activeModelTemplateId', defId);
   showToast('Active template set');
-  renderModelTemplates();
+  if (fromPicker) { closeSheet('fashnPickerSheet'); } else { renderModelTemplates(); }
   _renderActiveTemplatePreview();
 }
 
@@ -3913,6 +3965,7 @@ async function deleteModelTemplate(dbId, defId) {
     activeModelTemplateId = null;
     localStorage.removeItem('activeModelTemplateId');
     localStorage.removeItem('fashnModelPhoto');
+    saveSetting('activeModelTemplateId', '');
     _renderActiveTemplatePreview();
   }
   showToast('Deleted');
@@ -3935,6 +3988,62 @@ function _renderActiveTemplatePreview() {
   } else {
     el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:4px 0">No active template. Tap Manage Templates to select one.</div>';
   }
+}
+
+// ─── FASHN MODEL PICKER ───────────────────────────────────────────────────────
+
+let _fashnPickerTarget = null;  // { targetImgId, outputDivId, btnId }
+let _fashnPickerSelected = null;  // defId selected in picker
+
+function _openFashnPicker(targetImgId, outputDivId, btnId) {
+  _fashnPickerTarget = { targetImgId, outputDivId, btnId };
+  _fashnPickerSelected = activeModelTemplateId;
+  _renderFashnPickerGrid();
+  openSheet('fashnPickerSheet');
+}
+
+function _renderFashnPickerGrid() {
+  const el = document.getElementById('fashnPickerGrid');
+  if (!el) return;
+  const available = modelTemplates.filter(r => r.image);
+  if (!available.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">No templates generated yet.<br>Go to Settings → Manage Templates.</div>';
+    return;
+  }
+  el.innerHTML = available.map(row => {
+    const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === row.def_id);
+    const isSelected = _fashnPickerSelected === row.def_id;
+    const border = isSelected ? '2px solid var(--emerald-mid)' : '2px solid var(--border)';
+    return `<div onclick="_fashnPickerSelect('${row.def_id}')" style="display:flex;gap:12px;align-items:center;background:white;border-radius:10px;padding:10px;cursor:pointer;border:${border}">
+      <img src="${row.image}" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">${def?.name || row.def_id}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${def?.category || ''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${def?.poseNotes || ''}</div>
+      </div>
+      ${isSelected ? '<i class="ti ti-circle-check" style="color:var(--emerald-mid);font-size:20px;flex-shrink:0"></i>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function _fashnPickerSelect(defId) {
+  _fashnPickerSelected = defId;
+  _renderFashnPickerGrid();
+}
+
+async function _confirmFashnPicker() {
+  if (!_fashnPickerSelected) { showToast('Select a model first'); return; }
+  const row = modelTemplates.find(r => r.def_id === _fashnPickerSelected);
+  if (!row?.image) { showToast('No image for selected template'); return; }
+  // Set as active
+  activeModelTemplateId = _fashnPickerSelected;
+  localStorage.setItem('activeModelTemplateId', _fashnPickerSelected);
+  localStorage.setItem('fashnModelPhoto', row.image);
+  saveSetting('activeModelTemplateId', _fashnPickerSelected);
+  closeSheet('fashnPickerSheet');
+  // Now run the generation
+  const { targetImgId, outputDivId, btnId } = _fashnPickerTarget;
+  await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
 }
 
 // ─── PROVIDER LAB & BENCHMARKS ───────────────────────────────────────────────

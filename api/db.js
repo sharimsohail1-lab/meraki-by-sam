@@ -32,6 +32,9 @@ export default async function handler(req, res) {
       case 'update':
         query = supabase.from(table).update(data).eq('id', id).select();
         break;
+      case 'upsert':
+        query = supabase.from(table).upsert(data, { onConflict: 'key' }).select();
+        break;
       case 'delete':
         query = supabase.from(table).delete().eq('id', id);
         break;
