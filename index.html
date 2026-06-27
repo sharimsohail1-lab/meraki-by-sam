@@ -116,7 +116,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .action-plan-title { font-size: 13px; font-weight: 600; color: var(--burgundy); margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
 .action-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--ink); line-height: 1.5; margin-bottom: 7px; }
 .action-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; margin-top: 5px; }
-.quick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+.quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
 .quick-btn { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 12px; color: var(--ink); font-weight: 500; }
 .quick-btn i { font-size: 26px; color: var(--burgundy); }
 .attention-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; margin-bottom: 4px; }
@@ -289,6 +289,22 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .status-btn.active-available { border-color: #2E7D32; color: #2E7D32; background: #E8F5E9; }
 .status-btn.active-reserved { border-color: #E65100; color: #E65100; background: #FFF8E1; }
 .status-btn.active-sold { border-color: #B71C1C; color: #B71C1C; background: #FFEBEE; }
+/* Size stepper */
+.size-stepper-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 4px; }
+.size-stepper { display: flex; flex-direction: column; align-items: center; background: var(--gold-pale); border-radius: 10px; padding: 8px 4px 6px; }
+.size-stepper .size-label { font-size: 11px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.size-stepper .size-controls { display: flex; align-items: center; gap: 6px; }
+.size-stepper .size-count { font-size: 16px; font-weight: 700; color: var(--burgundy); min-width: 22px; text-align: center; }
+.size-stepper button { width: 28px; height: 28px; border: none; border-radius: 50%; background: white; color: var(--burgundy); font-size: 18px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.12); line-height: 1; }
+.size-stepper button:active { background: var(--burgundy); color: white; }
+/* Sold stamp on catalog image */
+.cat-sold-stamp { position: absolute; top: 12px; right: 12px; background: rgba(183,28,28,0.88); color: white; font-family: 'Playfair Display', serif; font-size: 13px; font-weight: 700; letter-spacing: 2px; padding: 4px 10px; border-radius: 3px; text-transform: uppercase; pointer-events: none; }
+.cat-product-img-wrap { position: relative; }
+/* Size summary on stock cards */
+.size-summary { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+/* Size sold picker sheet */
+.size-sold-btn { flex: 1; min-width: 70px; padding: 18px 8px; border: 1.5px solid var(--border); border-radius: 10px; background: white; font-size: 18px; font-weight: 700; cursor: pointer; color: var(--ink); font-family: 'Inter', sans-serif; }
+.size-sold-btn:active { background: var(--burgundy); color: white; border-color: var(--burgundy); }
 .content-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
 .content-btn { padding: 12px 6px; background: white; border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; color: var(--ink); display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .content-btn i { font-size: 20px; color: var(--burgundy); }
@@ -447,9 +463,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div id="smartRecommendations" style="margin-bottom:14px"></div>
       <div class="quick-grid">
         <button class="quick-btn" onclick="showScreen('add')"><i class="ti ti-plus"></i><span id="t-qaAdd">Add New Piece</span></button>
+        <button class="quick-btn" onclick="showScreen('stock')"><i class="ti ti-package"></i><span>My Stock</span></button>
+        <button class="quick-btn" onclick="showScreen('stock');setStockView('collections',document.getElementById('stockViewCollections'))"><i class="ti ti-stack-2"></i><span>Collections</span></button>
+        <button class="quick-btn" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-qaExhibition">Exhibition</span></button>
         <button class="quick-btn" onclick="generateWhatsAppCatalog()"><i class="ti ti-brand-whatsapp"></i><span id="t-qaWhatsapp">WhatsApp Catalog</span></button>
-        <button class="quick-btn" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-qaExhibition">Exhibition Mode</span></button>
-        <button class="quick-btn" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-qaPeople">Message Customer</span></button>
+        <button class="quick-btn" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-qaPeople">Customers</span></button>
       </div>
     </div>
 
@@ -483,6 +501,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
           </div>
           <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
+          <div class="field-label" style="margin-top:14px">Sizes Available</div>
+          <div class="size-stepper-grid" id="intakeSizeGrid"></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="intakeSizeTotalNote"></div>
           <div class="field-label" style="margin-top:12px" id="t-priceLabel">Price (USD)</div>
           <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150">
           <div class="field-label" style="margin-top:12px" id="t-costLabel">Your Cost (Optional)</div>
@@ -878,7 +899,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="status-row">
       <button class="status-btn" id="statusBtnAvail" onclick="updateProductStatus('available')">Available</button>
       <button class="status-btn" id="statusBtnRes" onclick="updateProductStatus('reserved')">Reserved</button>
-      <button class="status-btn" id="statusBtnSold" onclick="updateProductStatus('sold')">Sold</button>
+      <button class="status-btn" id="statusBtnSold" onclick="markSoldWithSizePicker()">Sold</button>
     </div>
     <div id="reservedForRow" style="display:none;margin-bottom:12px">
       <div class="field-label">Reserved For</div>
@@ -911,6 +932,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         </div>
         <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
       </div>
+      <div class="field-label" style="margin-top:4px">Sizes</div>
+      <div class="size-stepper-grid" id="detailSizeGrid"></div>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
       <div class="field-label">Collection(s)</div>
@@ -920,6 +944,19 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button class="btn btn-primary" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
       <button class="btn btn-red" onclick="deleteProduct()"><i class="ti ti-trash"></i> Remove from Inventory</button>
     </div>
+  </div>
+</div>
+
+<!-- SIZE SOLD PICKER SHEET -->
+<div class="sheet-overlay" id="sizeSoldSheet" onclick="closeSheetOutside(event,'sizeSoldSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-weight:600;font-size:15px">Which size was sold?</div>
+      <button onclick="closeSheet('sizeSoldSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="sizeSoldBtnRow" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('sizeSoldSheet')">Cancel</button>
   </div>
 </div>
 
@@ -1091,6 +1128,95 @@ let lang = localStorage.getItem('lang') || 'en';
 let inventory = [];
 let customers = [];
 let exhibitions = [];
+
+// ─── SIZE INVENTORY HELPERS ───────────────────────────────────────────────────
+const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+
+function getSizeInventory(p) {
+  if (!p.size_inventory) return null;
+  return typeof p.size_inventory === 'string' ? JSON.parse(p.size_inventory) : p.size_inventory;
+}
+
+// Total available units across all sizes. Falls back to status field for old products.
+function getTotalAvailable(p) {
+  const inv = getSizeInventory(p);
+  if (!inv) return p.status === 'available' ? 1 : 0;
+  return SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
+}
+
+// True if product has any available unit
+function isProductAvailable(p) {
+  const inv = getSizeInventory(p);
+  if (!inv) return p.status === 'available';
+  return SIZE_ORDER.some(s => (inv[s] || 0) > 0);
+}
+
+// Returns array of size strings with count > 0, in canonical order
+function getAvailableSizes(p) {
+  const inv = getSizeInventory(p);
+  if (!inv) return [];
+  return SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+}
+
+// Human-readable size summary for stock cards
+function sizeSummaryText(p) {
+  const inv = getSizeInventory(p);
+  if (!inv) return null;
+  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  if (!available.length) return 'Sold Out';
+  return available.map(s => `${s} ×${inv[s]}`).join(' · ');
+}
+
+// ─── SIZE STEPPER COMPONENT ───────────────────────────────────────────────────
+// Renders size steppers into a container. sizeState is a plain object mutated in place.
+function renderSizeSteppers(containerId, sizeState, onChangeCallback) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = SIZE_ORDER.map(s => {
+    const count = sizeState[s] || 0;
+    return `<div class="size-stepper">
+      <div class="size-label">${s}</div>
+      <div class="size-controls">
+        <button type="button" onclick="_sizeStep('${containerId}','${s}',-1)">&minus;</button>
+        <div class="size-count" id="sz-${containerId}-${s}">${count}</div>
+        <button type="button" onclick="_sizeStep('${containerId}','${s}',1)">+</button>
+      </div>
+    </div>`;
+  }).join('');
+  _updateSizeTotalNote(containerId, sizeState);
+}
+
+window._sizeStates = {};
+
+function _sizeStep(containerId, size, delta) {
+  const state = window._sizeStates[containerId];
+  if (!state) return;
+  state[size] = Math.max(0, (state[size] || 0) + delta);
+  const el = document.getElementById(`sz-${containerId}-${size}`);
+  if (el) el.textContent = state[size];
+  _updateSizeTotalNote(containerId, state);
+}
+
+function _updateSizeTotalNote(containerId, state) {
+  const total = SIZE_ORDER.reduce((sum, s) => sum + (state[s] || 0), 0);
+  const noteId = containerId === 'intakeSizeGrid' ? 'intakeSizeTotalNote' : 'detailSizeTotalNote';
+  const el = document.getElementById(noteId);
+  if (el) el.textContent = total > 0 ? `Total available: ${total}` : 'No sizes added yet';
+}
+
+function initIntakeSizeSteppers() {
+  // Default: M:1
+  window._sizeStates['intakeSizeGrid'] = { XS: 0, S: 0, M: 1, L: 0, XL: 0, XXL: 0 };
+  renderSizeSteppers('intakeSizeGrid', window._sizeStates['intakeSizeGrid']);
+}
+
+function initDetailSizeSteppers(p) {
+  const inv = getSizeInventory(p) || {};
+  const state = {};
+  SIZE_ORDER.forEach(s => state[s] = inv[s] || 0);
+  window._sizeStates['detailSizeGrid'] = state;
+  renderSizeSteppers('detailSizeGrid', state);
+}
 let uploadedPhotos = {}; // { slotId: { file, dataUrl, label } }
 let extraSlots = [];
 let garmentType = 'full-suit';
@@ -1533,7 +1659,7 @@ function showScreen(name) {
   document.getElementById('nav-' + name).classList.add('active');
   if (name === 'home') renderHome();
   if (name === 'stock') { if (stockView === 'collections') renderCollections(); else renderInventory(); }
-  if (name === 'add') renderExistingCollectionChips();
+  if (name === 'add') { renderExistingCollectionChips(); if (!window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers(); }
   if (name === 'people') renderCustomers();
   if (name === 'show') renderExhibitions();
 }
@@ -1767,6 +1893,7 @@ function goToStep(n) {
     dot.classList.toggle('done', i < n);
     if (i < 3) document.getElementById('step-line-' + i).classList.toggle('done', i < n);
   }
+  if (n === 1 && !window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers();
   if (n === 2 && !document.getElementById('photoSlotGrid').innerHTML) renderPhotoSlots();
 }
 
@@ -1966,6 +2093,12 @@ async function saveProduct() {
     .filter(([id, p]) => slotMap[id]?.role === 'detail' && p.dataUrl)
     .map(([id, p]) => ({ slot: id, label: slotMap[id].label, image: p.dataUrl }));
   const detail_photos = detailPhotosArr.length ? JSON.stringify(detailPhotosArr) : null;
+
+  // Collect size inventory from intake steppers (only save if any size > 0)
+  const intakeSizeState = window._sizeStates['intakeSizeGrid'] || {};
+  const hasSizes = SIZE_ORDER.some(s => (intakeSizeState[s] || 0) > 0);
+  const size_inventory = hasSizes ? JSON.stringify(intakeSizeState) : null;
+
   const price = parseInt(document.getElementById('priceInput').value) || null;
   const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
@@ -1992,6 +2125,7 @@ async function saveProduct() {
       photo,
       model_photo: modelPhoto,
       detail_photos: detail_photos,
+      size_inventory: size_inventory,
       collection_name: collection,
     }});
     console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
@@ -2112,6 +2246,12 @@ function resetIntake() {
   document.querySelectorAll('#garmentTypePills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
   document.querySelectorAll('#seasonPills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
   intakeSeason = 'eid';
+  // Reset size steppers to default M:1
+  window._sizeStates['intakeSizeGrid'] = null;
+  const intakeGrid = document.getElementById('intakeSizeGrid');
+  if (intakeGrid) intakeGrid.innerHTML = '';
+  const intakeNote = document.getElementById('intakeSizeTotalNote');
+  if (intakeNote) intakeNote.textContent = '';
   goToStep(1);
 }
 
@@ -2541,7 +2681,7 @@ function renderCollections() {
       (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
     ).join('');
     const hasPkg = items.some(p => p.caption_en);
-    const available = items.filter(p => p.status === 'available').length;
+    const available = items.filter(p => isProductAvailable(p)).length;
     const collIdx = window._collActions.length;
     window._collActions.push(name);
     html += `<div class="collection-card" onclick="openCollectionDetail(window._collActions[${collIdx}])">
@@ -2577,7 +2717,7 @@ function openCollectionDetail(name) {
 
   // Cover
   document.getElementById('collDetailName').textContent = name || 'Uncollected Items';
-  const available = items.filter(p => p.status === 'available').length;
+  const available = items.filter(p => isProductAvailable(p)).length;
   document.getElementById('collDetailMeta').textContent = `${items.length} pieces · ${available} available`;
   document.getElementById('collCoverSub').textContent = `${items.length} piece${items.length !== 1 ? 's' : ''} · ${available} available`;
   document.getElementById('collCoverLogo').src = 'data:image/png;base64,' + LOGO_B64;
@@ -2895,6 +3035,7 @@ function applyItemNameSuggestion(el, name) {
 function renderInventory() {
   let items = inventory;
   if (stockFilter === 'needs-price') items = items.filter(p => !p.price);
+  else if (stockFilter === 'available') items = items.filter(p => isProductAvailable(p));
   else if (stockFilter !== 'all') items = items.filter(p => p.status === stockFilter);
   document.getElementById('stockCount').textContent = items.length + ' items';
   const grid = document.getElementById('inventoryGrid');
@@ -2912,6 +3053,7 @@ function renderInventory() {
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
+        ${(() => { const s = sizeSummaryText(p); return s ? `<div class="size-summary">${s}</div>` : ''; })()}
         ${productNudge(p)}
       </div>
       <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket('${p.id}')" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
@@ -2970,6 +3112,7 @@ function openProductDetail(id) {
   ['available','reserved','sold'].forEach(s => {
     document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
   });
+  initDetailSizeSteppers(p);
   openSheet('productDetailSheet');
 }
 
@@ -2978,6 +3121,10 @@ async function updateProductStatus(status) {
   try {
     const update = { status };
     if (status === 'sold') update.sold_at = new Date().toISOString();
+    if (status === 'available') {
+      // When manually marking available, also clear sold_at
+      update.sold_at = null;
+    }
     if (status === 'reserved') {
       document.getElementById('reservedForRow').style.display = 'block';
       update.reserved_for = document.getElementById('reservedForInput').value || null;
@@ -2995,16 +3142,88 @@ async function updateProductStatus(status) {
   } catch(e) { showToast('Error: ' + e.message); }
 }
 
+// If product has multiple available sizes, ask which size was sold; otherwise mark sold directly.
+function markSoldWithSizePicker() {
+  if (!currentProduct) return;
+  const inv = getSizeInventory(currentProduct);
+  if (!inv) { updateProductStatus('sold'); return; }
+
+  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  if (available.length <= 1) {
+    // Only one (or zero) sizes available — mark sold directly
+    updateProductStatus('sold');
+    return;
+  }
+
+  // Show size picker
+  const row = document.getElementById('sizeSoldBtnRow');
+  row.innerHTML = available.map(s =>
+    `<button class="size-sold-btn" onclick="_markSizeAsSold('${s}')">${s}</button>`
+  ).join('');
+  openSheet('sizeSoldSheet');
+}
+
+async function _markSizeAsSold(size) {
+  closeSheet('sizeSoldSheet');
+  if (!currentProduct) return;
+  const inv = getSizeInventory(currentProduct) || {};
+  inv[size] = Math.max(0, (inv[size] || 0) - 1);
+  const total = SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
+  const newStatus = total === 0 ? 'sold' : currentProduct.status;
+  const update = {
+    size_inventory: JSON.stringify(inv),
+    status: newStatus,
+    sold_at: newStatus === 'sold' ? new Date().toISOString() : currentProduct.sold_at
+  };
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: update });
+    const idx = inventory.findIndex(p => p.id === currentProduct.id);
+    inventory[idx] = { ...inventory[idx], ...update };
+    currentProduct = inventory[idx];
+    // Refresh size steppers and status buttons
+    initDetailSizeSteppers(currentProduct);
+    ['available','reserved','sold'].forEach(s => {
+      document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (newStatus === s ? ' active-' + s : '');
+    });
+    showToast(total === 0 ? 'All sizes sold — marked Sold Out' : `Size ${size} sold · ${total} remaining`);
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
 async function saveProductEdits() {
   if (!currentProduct) return;
   const price = parseInt(document.getElementById('detailPriceInput').value) || null;
   const notes = document.getElementById('detailNotesInput').value || null;
   const collection_name = document.getElementById('detailCollectionInput').value.trim() || null;
+
+  // Size inventory — save whatever is in the detail steppers
+  const detailSizeState = window._sizeStates['detailSizeGrid'] || {};
+  const hasSizes = SIZE_ORDER.some(s => (detailSizeState[s] || 0) > 0);
+  const size_inventory = hasSizes ? JSON.stringify(detailSizeState) : null;
+
+  // Auto-set status based on size totals (only when size_inventory is used)
+  let status = currentProduct.status;
+  let sold_at = currentProduct.sold_at;
+  if (size_inventory !== null) {
+    const total = SIZE_ORDER.reduce((sum, s) => sum + (detailSizeState[s] || 0), 0);
+    if (total === 0 && status === 'available') {
+      status = 'sold';
+      sold_at = new Date().toISOString();
+    } else if (total > 0 && status === 'sold') {
+      status = 'available';
+      sold_at = null;
+    }
+  }
+
   try {
-    await db('update', 'products', { id: currentProduct.id, data: { price, notes, collection_name } });
+    await db('update', 'products', { id: currentProduct.id, data: { price, notes, collection_name, size_inventory, status, sold_at } });
     const idx = inventory.findIndex(p => p.id === currentProduct.id);
-    inventory[idx] = { ...inventory[idx], price, notes, collection_name };
+    inventory[idx] = { ...inventory[idx], price, notes, collection_name, size_inventory, status, sold_at };
     currentProduct = inventory[idx];
+    // Refresh status buttons if status changed
+    ['available','reserved','sold'].forEach(s => {
+      document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (status === s ? ' active-' + s : '');
+    });
+    _updateSizeTotalNote('detailSizeGrid', detailSizeState);
     showToast('Saved');
   } catch(e) { showToast('Error: ' + e.message); }
 }
@@ -3102,8 +3321,8 @@ function openCatalogBuilder(collectionName) {
     ? inventory.filter(p => !p.collection_name)
     : inventory.filter(p => p.collection_name === collectionName);
 
-  // Default: include available + reserved, exclude sold
-  catalogSelected = new Set(catalogItems.filter(p => p.status !== 'sold').map(p => p.id));
+  // Default: include available + reserved, exclude sold/sold-out
+  catalogSelected = new Set(catalogItems.filter(p => isProductAvailable(p) || p.status === 'reserved').map(p => p.id));
 
   document.getElementById('catalogSelTitle').textContent = collectionName || 'Select Items';
   goToCatalogSelection();
@@ -3152,7 +3371,7 @@ function renderCatalogSelection() {
           ${!hasModel ? '<br><span style="color:#E65100;font-size:10px">No model photo</span>' : '<br><span style="color:#2E7D32;font-size:10px">✓ Model photo</span>'}
         </div>
         <div class="catalog-sel-price ${noPrice ? 'no-price' : ''}">${p.price ? '$' + p.price : 'No price'}</div>
-        ${p.status === 'sold' ? '<span style="font-size:10px;color:var(--muted)">Sold — excluded by default</span>' : ''}
+        ${!isProductAvailable(p) ? '<span style="font-size:10px;color:var(--muted)">Sold out — excluded by default</span>' : ''}
       </div>
       <div class="catalog-sel-check ${on ? 'on' : ''}" id="cat-chk-${p.id}">
         ${on ? '<i class="ti ti-check" style="font-size:14px"></i>' : ''}
@@ -3241,8 +3460,9 @@ async function renderCatalogPreview() {
 
   const pagesHTML = selected.map(p => {
     const img = p.model_photo || p.photo;
+    const isSoldOut = !isProductAvailable(p);
     const imgHTML = img
-      ? `<img class="cat-product-img" src="${img}" alt="${p.name}">`
+      ? `<div class="cat-product-img-wrap"><img class="cat-product-img" src="${img}" alt="${p.name}">${isSoldOut ? '<div class="cat-sold-stamp">Sold</div>' : ''}</div>`
       : `<div class="cat-product-img-placeholder"><i class="ti ti-hanger" style="font-size:40px"></i><span>Model image not created yet</span></div>`;
 
     const rawDetails = p.detail_photos
@@ -3270,6 +3490,12 @@ async function renderCatalogPreview() {
         <div class="cat-product-name">${p.name}</div>
         ${p.catalog_blurb ? `<div class="cat-product-blurb">${p.catalog_blurb}</div>` : ''}
         <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Price on request'}</div>
+        ${(() => {
+          if (isSoldOut) return '<div style="font-size:10px;color:#B71C1C;font-weight:600;letter-spacing:1px;margin-top:3px;text-transform:uppercase">Sold Out</div>';
+          const sizes = getAvailableSizes(p);
+          if (sizes.length) return `<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes: ${sizes.join(' · ')}</div>`;
+          return '';
+        })()}
         ${insetsHTML}
       </div>
     </div>`;
