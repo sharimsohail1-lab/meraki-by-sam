@@ -2190,8 +2190,9 @@ Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki
     try { names = JSON.parse(resp); }
     catch { names = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
 
-    sugDiv.innerHTML = names.map(n =>
-      `<div class="coll-suggestion" onclick="applyCollSuggestion(this,${JSON.stringify(n)})">${n}</div>`
+    window._collSuggNames = names;
+    sugDiv.innerHTML = names.map((n, i) =>
+      `<div class="coll-suggestion" onclick="applyCollSuggestion(this,window._collSuggNames[${i}])">${n}</div>`
     ).join('');
   } catch(e) {
     sugDiv.innerHTML = '<span style="font-size:11px;color:var(--burgundy)">Could not generate suggestions</span>';
