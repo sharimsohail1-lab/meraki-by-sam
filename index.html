@@ -1310,35 +1310,35 @@ function buildSmartRecommendations() {
 // ─── ADD / INTAKE ─────────────────────────────────────────────────────────────
 const PHOTO_SLOTS = {
   'full-suit': [
-    { id: 'front', label: 'Front (Kameez)', required: true },
-    { id: 'back', label: 'Back View', required: true },
-    { id: 'bottom', label: 'Shalwar / Trouser', required: true },
-    { id: 'dupatta', label: 'Dupatta', required: false },
-    { id: 'neckline', label: 'Neckline Detail', required: false },
-    { id: 'sleeves', label: 'Sleeves Detail', required: false },
-    { id: 'hemline', label: 'Hemline / Border', required: false },
+    { id: 'front',    label: 'Front (Kameez)',      required: true,  role: 'structural', priority: 100 },
+    { id: 'back',     label: 'Back View',            required: true,  role: 'structural', priority: 90  },
+    { id: 'bottom',   label: 'Shalwar / Trouser',   required: true,  role: 'structural', priority: 85  },
+    { id: 'dupatta',  label: 'Dupatta',              required: false, role: 'structural', priority: 80  },
+    { id: 'neckline', label: 'Neckline Detail',      required: false, role: 'detail',     priority: 60  },
+    { id: 'sleeves',  label: 'Sleeves Detail',       required: false, role: 'detail',     priority: 60  },
+    { id: 'hemline',  label: 'Hemline / Border',     required: false, role: 'detail',     priority: 50  },
   ],
   'kameez': [
-    { id: 'front', label: 'Front', required: true },
-    { id: 'back', label: 'Back', required: true },
-    { id: 'neckline', label: 'Neckline', required: false },
-    { id: 'sleeves', label: 'Sleeves', required: false },
+    { id: 'front',    label: 'Front',                required: true,  role: 'structural', priority: 100 },
+    { id: 'back',     label: 'Back',                 required: true,  role: 'structural', priority: 90  },
+    { id: 'neckline', label: 'Neckline',             required: false, role: 'detail',     priority: 60  },
+    { id: 'sleeves',  label: 'Sleeves',              required: false, role: 'detail',     priority: 60  },
   ],
   'lehenga': [
-    { id: 'skirt-front', label: 'Skirt Front', required: true },
-    { id: 'blouse', label: 'Blouse / Choli', required: true },
-    { id: 'dupatta', label: 'Dupatta', required: false },
-    { id: 'sleeves', label: 'Sleeves Detail', required: false },
-    { id: 'skirt-detail', label: 'Skirt Detail / Embroidery', required: false },
+    { id: 'skirt-front',  label: 'Skirt Front',              required: true,  role: 'structural', priority: 100 },
+    { id: 'blouse',       label: 'Blouse / Choli',           required: true,  role: 'structural', priority: 95  },
+    { id: 'dupatta',      label: 'Dupatta',                  required: false, role: 'structural', priority: 80  },
+    { id: 'sleeves',      label: 'Sleeves Detail',           required: false, role: 'detail',     priority: 60  },
+    { id: 'skirt-detail', label: 'Skirt Detail / Embroidery',required: false, role: 'detail',     priority: 50  },
   ],
   'dupatta': [
-    { id: 'full', label: 'Full Dupatta', required: true },
-    { id: 'border', label: 'Border Detail', required: false },
-    { id: 'embroidery', label: 'Embroidery Close-up', required: false },
+    { id: 'full',       label: 'Full Dupatta',         required: true,  role: 'structural', priority: 100 },
+    { id: 'border',     label: 'Border Detail',        required: false, role: 'detail',     priority: 60  },
+    { id: 'embroidery', label: 'Embroidery Close-up',  required: false, role: 'detail',     priority: 40  },
   ],
   'other': [
-    { id: 'front', label: 'Front', required: true },
-    { id: 'detail', label: 'Detail View', required: false },
+    { id: 'front',  label: 'Front',       required: true,  role: 'structural', priority: 100 },
+    { id: 'detail', label: 'Detail View', required: false, role: 'detail',     priority: 50  },
   ],
 };
 
@@ -1395,7 +1395,8 @@ function handleSlotFile(slotId, input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    uploadedPhotos[slotId] = { file, dataUrl: e.target.result, label: slotId };
+    const _slotDef = (PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other']).find(s => s.id === slotId);
+    uploadedPhotos[slotId] = { file, dataUrl: e.target.result, label: _slotDef?.label || slotId };
     renderPhotoSlots();
     renderExtraSlots();
   };
@@ -1462,17 +1463,44 @@ async function analyzePhoto() {
   document.getElementById('analysisResult').style.display = 'none';
 
   try {
-    const photoContents = allPhotos.map(p => ({
-      type: 'image',
-      source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] }
-    }));
+    // Build interleaved photo+label content, structural photos first then detail.
+    // Each photo is preceded by a text label so Claude knows its role.
+    const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
+    const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
+
+    const structuralPhotos = Object.entries(uploadedPhotos)
+      .filter(([id]) => (slotMap[id]?.role || 'structural') === 'structural')
+      .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
+    const detailPhotos = Object.entries(uploadedPhotos)
+      .filter(([id]) => slotMap[id]?.role === 'detail')
+      .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
+
+    const photoContent = [];
+    if (structuralPhotos.length) {
+      photoContent.push({ type: 'text', text: '=== STRUCTURAL PHOTOS (define garment layout, silhouette, proportions) ===' });
+      structuralPhotos.forEach(([id, p]) => {
+        photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — STRUCTURAL]` });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] } });
+      });
+    }
+    if (detailPhotos.length) {
+      photoContent.push({ type: 'text', text: '=== DETAIL PHOTOS (close-up references only — extract embroidery/texture info; do NOT use to redefine garment structure or layout) ===' });
+      detailPhotos.forEach(([id, p]) => {
+        photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — DETAIL REFERENCE]` });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: p.file.type || 'image/jpeg', data: p.dataUrl.split(',')[1] } });
+      });
+    }
 
     const response = await callClaude(
       [{ role: 'user', content: [
-        ...photoContents,
+        ...photoContent,
         { type: 'text', text: `You are analyzing a Pakistani garment for Meraki by Sam, a clothing boutique.
 Garment type: ${garmentType}, Season/Occasion: ${intakeSeason}.
-Photos provided: ${allPhotos.map(p => p.label).join(', ')}.
+
+IMPORTANT PHOTO HIERARCHY:
+- STRUCTURAL photos define the garment. Use them to understand silhouette, overall layout, garment proportions, and embroidery placement across the whole garment.
+- DETAIL photos are close-up references. Extract embroidery texture, stitch type, and local color from them — but do NOT let them redefine the garment's structure, silhouette, or overall layout.
+- If a detail photo shows birds or floral motifs, describe WHERE on the garment they appear (from the structural photo) and HOW MANY, not just that they exist.
 
 Respond in EXACTLY this JSON format (no markdown, no extra text):
 {
@@ -1481,11 +1509,11 @@ Respond in EXACTLY this JSON format (no markdown, no extra text):
   "colors": "comma-separated list of main colors",
   "occasion": "best occasion for this garment",
   "category": "Formal/Semi-Formal/Casual/Bridal",
-  "ideogramPrompt": "Write an Ideogram v4 fashion prompt. CRITICAL: The output must be a real Pakistani woman model wearing this garment — not a flat-lay, not a product grid, not a hanger image, not a mannequin, not a collage. Start the prompt with: 'Full-length professional fashion photograph of a Pakistani woman model wearing'. Then describe: GARMENT TYPE and silhouette. FABRIC texture and drape. COLORS zone by zone (kameez body, neckline, sleeves, cuffs, hemline, dupatta, trouser). EMBROIDERY exact placement per visible zone (e.g. dense gold zari embroidery on neckline extending 4 inches down, mirror work on sleeve cuffs, plain hemline). End with: 'Model is wearing the full outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot showing complete outfit, sharp focus, 8k. Not a flat-lay. Not a product photo. Not a collage or grid.' Do NOT invent details for zones not visible in photos."
+  "ideogramPrompt": "Write an Ideogram v4 prompt following this EXACT structure. The output must be a full-length model photo — not a flat-lay, not a collage, not a mannequin. BEGIN WITH: 'Full-length professional fashion photograph of a Pakistani woman model wearing [garment type].' THEN in order: (1) SILHOUETTE: overall shape and cut. (2) FABRIC: texture and drape. (3) BASE COLORS: body color zone by zone. (4) NECKLINE: describe exactly — shape, embroidery type, depth, density, color. (5) FRONT PANELS: any motifs — specify count, exact placement, orientation (e.g. two embroidered birds symmetrically placed on upper front chest panels, one on each side, birds do not repeat elsewhere). (6) SLEEVES: length, embroidery if any, cuff detail. (7) BORDERS/HEMLINE: describe or state plain. (8) DUPATTA: color, edge treatment, any motifs. (9) TROUSER/SKIRT: color, any embroidery. END WITH: 'Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. This is not a flat-lay, not a product photo, not a collage.' Only describe zones visible in the photos — leave absent zones blank."
 }` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
-      1200
+      1400
     );
 
     let parsed;
