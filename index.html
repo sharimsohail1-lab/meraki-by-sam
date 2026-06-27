@@ -1683,13 +1683,20 @@ function loadImg(src) {
   });
 }
 
+function triggerDownload(src, filename) {
+  const a = document.createElement('a');
+  a.href = src;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => document.body.removeChild(a), 200);
+}
+
 function downloadModelPhoto() {
   const src = document.getElementById('modelPhotoImg').src;
   if (!src) return;
-  const a = document.createElement('a');
-  a.href = src;
-  a.download = (currentAnalysis?.sku || 'model') + '-model.jpg';
-  a.click();
+  triggerDownload(src, (currentAnalysis?.sku || 'model') + '-model.jpg');
 }
 
 // ─── FEEDBACK PANEL ───────────────────────────────────────────────────────────
@@ -2721,10 +2728,7 @@ async function generateDetailModelPhoto() {
 function downloadDetailModel() {
   const src = document.getElementById('detailModelImg').src;
   if (!src) return;
-  const a = document.createElement('a');
-  a.href = src;
-  a.download = (currentProduct?.sku || 'model') + '-model.jpg';
-  a.click();
+  triggerDownload(src, (currentProduct?.sku || 'model') + '-model.jpg');
 }
 
 // ─── WHATSAPP CATALOG ─────────────────────────────────────────────────────────
