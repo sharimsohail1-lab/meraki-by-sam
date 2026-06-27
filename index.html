@@ -30,6 +30,8 @@ body { font-family: 'Inter', sans-serif; background: var(--cream); color: var(--
 .header-logo { height: 36px; object-fit: contain; }
 .lang-btn { background: rgba(201,168,76,0.2); border: 1px solid var(--gold); color: var(--gold-light); border-radius: 20px; padding: 5px 11px; font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; }
 .settings-btn { background: none; border: none; color: var(--gold); cursor: pointer; font-size: 22px; padding: 4px; }
+.home-btn { background: rgba(201,168,76,0.15); border: 1px solid rgba(201,168,76,0.4); color: var(--gold-light); border-radius: 20px; padding: 5px 11px; font-size: 12px; cursor: pointer; font-family: 'Inter', sans-serif; display: none; align-items: center; gap: 4px; white-space: nowrap; }
+.home-btn i { font-size: 14px; }
 
 /* Nav */
 .nav { display: flex; background: white; border-top: 1px solid var(--border); flex-shrink: 0; padding-bottom: max(0px, env(safe-area-inset-bottom)); order: 3; }
@@ -446,7 +448,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
   <!-- HEADER -->
   <div class="header">
-    <button class="lang-btn" id="langToggle" onclick="toggleLang()">اردو</button>
+    <div style="display:flex;align-items:center;gap:6px">
+      <button class="home-btn" id="headerHomeBtn" onclick="goHomeFromAdd()"><i class="ti ti-chevron-left"></i><span id="t-homeBtn">Home</span></button>
+      <button class="lang-btn" id="langToggle" onclick="toggleLang()">اردو</button>
+    </div>
     <img class="header-logo" id="headerLogo" src="/assets/meraki-logo.png" alt="Meraki by Sam">
     <button class="settings-btn" onclick="openModal('settingsModal')"><i class="ti ti-settings"></i></button>
   </div>
@@ -1314,6 +1319,7 @@ const T = {
     selectToBring: 'Select items to bring',
     navHome: 'Home', navAdd: 'Add', navStock: 'Stock',
     navPeople: 'People', navShow: 'Show',
+    homeBtn: 'Home',
   },
   ur: {
     greeting: 'السلام', greetingName: 'سام ✨',
@@ -1350,6 +1356,7 @@ const T = {
     selectToBring: 'ساتھ لے جانے کی چیزیں چنیں',
     navHome: 'گھر', navAdd: 'شامل', navStock: 'ذخیرہ',
     navPeople: 'لوگ', navShow: 'نمائش',
+    homeBtn: 'گھر',
   }
 };
 
@@ -1687,6 +1694,7 @@ function applyTranslations() {
     't-selectToBring': t.selectToBring,
     't-nav-home': t.navHome, 't-nav-add': t.navAdd, 't-nav-stock': t.navStock,
     't-nav-people': t.navPeople, 't-nav-show': t.navShow,
+    't-homeBtn': t.homeBtn,
   };
   Object.entries(map).forEach(([id, val]) => {
     const el = document.getElementById(id);
@@ -1701,11 +1709,31 @@ function showScreen(name) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   document.getElementById('nav-' + name).classList.add('active');
+  const homeBtn = document.getElementById('headerHomeBtn');
+  if (homeBtn) homeBtn.style.display = name === 'home' ? 'none' : 'flex';
   if (name === 'home') renderHome();
   if (name === 'stock') { if (stockView === 'collections') renderCollections(); else renderInventory(); }
   if (name === 'add') { renderExistingCollectionChips(); if (!window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers(); }
   if (name === 'people') renderCustomers();
   if (name === 'show') renderExhibitions();
+}
+
+function goHomeFromAdd() {
+  const activeScreen = document.querySelector('.screen.active');
+  const isOnAdd = activeScreen && activeScreen.id === 'screen-add';
+  const hasWork = isOnAdd && (
+    Object.keys(uploadedPhotos).some(k => uploadedPhotos[k]?.dataUrl) ||
+    (document.getElementById('priceInput')?.value || '').trim() ||
+    (document.getElementById('collectionNameInput')?.value || '').trim() ||
+    (document.getElementById('itemNameInput')?.value || '').trim()
+  );
+  if (hasWork) {
+    const msg = lang === 'ur'
+      ? 'یہ کپڑا چھوڑ دیں؟ تصویریں اور تفصیلات ضائع ہو سکتی ہیں۔'
+      : 'Leave this item? Unsaved photos and details may be lost.';
+    if (!confirm(msg)) return;
+  }
+  showScreen('home');
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
