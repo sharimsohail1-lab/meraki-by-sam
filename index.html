@@ -978,16 +978,16 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeSheet('collectionPickerSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <div id="collPickerExisting"></div>
+    <div class="field-label">Create New</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input type="text" id="collPickerNewInput" class="field-input" placeholder="Type collection name for ideas..." style="flex:1;margin-bottom:0">
+      <button class="btn btn-secondary btn-sm" onclick="applyCollPickerNew()" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div class="field-label" style="margin-bottom:0">Suggested Names</div>
       <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="padding:4px 10px;margin-bottom:0"><i class="ti ti-sparkles"></i> Suggest</button>
     </div>
     <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
-    <div class="field-label">Create New</div>
-    <div style="display:flex;gap:6px;margin-bottom:16px">
-      <input type="text" id="collPickerNewInput" class="field-input" placeholder="Type collection name for ideas..." style="flex:1;margin-bottom:0">
-      <button class="btn btn-secondary btn-sm" onclick="applyCollPickerNew()" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
-    </div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-secondary" style="flex:1;margin-bottom:0" onclick="clearCollectionPicker()">Clear</button>
       <button class="btn btn-primary" style="flex:1;margin-bottom:0" onclick="closeSheet('collectionPickerSheet')">Done</button>
