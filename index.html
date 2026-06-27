@@ -551,6 +551,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div id="analysisText" style="white-space:pre-wrap"></div>
           </div>
           <div id="modelPhotoSection" style="margin-top:14px">
+                        <div id="intakeProviderPills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+            <div id="intakeFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
+              <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better than Ideogram.
+            </div>
+<div id="intakeWeightRow">
             <div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
                 <span>Garment accuracy</span><span id="imageWeightLabel">60%</span>
@@ -558,11 +563,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
               <input type="range" id="imageWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
               <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
             </div>
+            </div>
             <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
               <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
             </button>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-6px;margin-bottom:10px">
-              <span style="font-size:11px;color:var(--muted)">Uses 1 Ideogram credit — only on tap</span>
+              <span id="intakeCreditNote" style="font-size:11px;color:var(--muted)">Uses 1 Ideogram credit — only on tap</span>
               <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:2px 0;text-decoration:underline">View reference</button>
             </div>
             <div id="modelPhotoOutput" style="display:none">
@@ -729,6 +735,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <p class="key-note">Switch providers here once a new provider is benchmarked and approved.</p>
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
+      <div class="field-label">FASHN Model Photo</div>
+      <div id="fashnModelPhotoPreview" style="margin-bottom:8px"></div>
+      <input type="file" accept="image/*" id="fashnModelPhotoInput" style="display:none" onchange="saveFashnModelPhoto(this)">
+      <button class="btn" onclick="document.getElementById('fashnModelPhotoInput').click()" style="width:100%;background:var(--sand-light);color:var(--ink)"><i class="ti ti-upload"></i> Upload model photo</button>
+      <p class="key-note" style="margin-top:6px">Required for FASHN virtual try-on. Full-length photo of a Pakistani/South Asian woman, neutral standing pose, studio background.</p>
+    </div>
+    <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
     </div>
   </div>
@@ -831,12 +844,18 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+            <div id="detailProviderPills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
+        <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
+      </div>
+<div id="detailWeightRow">
       <div style="margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
           <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
         </div>
         <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
+      </div>
       </div>
       <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
         <i class="ti ti-user"></i> Generate AI Model Photo
@@ -1207,6 +1226,91 @@ registerImageGenProvider('ideogram', {
   }
 });
 
+// ─── FASHN PROVIDER ──────────────────────────────────────────────────────────
+// Virtual try-on: garment image + model image → model wearing the garment.
+// Requires a model photo stored in localStorage under 'fashnModelPhoto'.
+// Generation is async — polls /api/fashn?id=xxx until completed or failed.
+// Returns a CDN URL; applyWatermark() proxies and watermarks it.
+registerImageGenProvider('fashn', {
+  id: 'fashn',
+  label: 'FASHN Virtual Try-On',
+  async generate(prompt, garmentB64, imageWeight) {
+    const modelPhoto = localStorage.getItem('fashnModelPhoto');
+    if (!modelPhoto) {
+      throw new Error('FASHN needs a model photo. Go to Settings → Provider Lab to upload one.');
+    }
+    if (!garmentB64) {
+      throw new Error('No garment photo available for FASHN.');
+    }
+
+    // Strip data URL prefix — FASHN API expects raw base64
+    const stripPrefix = s => s.replace(/^data:image\/\w+;base64,/, '');
+    const garmentRaw = stripPrefix(garmentB64);
+    const modelRaw = stripPrefix(modelPhoto);
+
+    console.group('[Meraki] FASHN virtual try-on');
+    console.log('Garment base64 length:', garmentRaw.length);
+    console.log('Model base64 length:', modelRaw.length);
+    console.log('PAID API CALL: starting FASHN prediction');
+
+    const runRes = await fetch('/api/fashn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model_image: modelRaw,
+        garment_image: garmentRaw,
+        category: 'one-pieces',
+        garment_photo_type: 'flat-lay',
+        mode: 'balanced'
+      })
+    });
+    const runData = await runRes.json();
+    if (!runRes.ok || runData.error) {
+      console.groupEnd();
+      throw new Error(runData.error || 'FASHN prediction failed to start');
+    }
+
+    const predId = runData.id;
+    console.log('Prediction ID:', predId);
+
+    // Poll status — max 2 minutes, 3-second interval
+    const maxWaitMs = 120000;
+    const pollIntervalMs = 3000;
+    const started = Date.now();
+
+    while (Date.now() - started < maxWaitMs) {
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId));
+      const statusData = await statusRes.json();
+      console.log('FASHN status:', statusData.status);
+
+      if (statusData.status === 'completed') {
+        const output = statusData.output;
+        const imageUrl = Array.isArray(output) ? output[0] : output;
+        if (!imageUrl) {
+          console.groupEnd();
+          throw new Error('FASHN completed but returned no image');
+        }
+        console.log('FASHN output URL:', imageUrl.slice(0, 80) + '...');
+        console.groupEnd();
+        return imageUrl;
+      }
+
+      if (statusData.status === 'failed') {
+        const errMsg = statusData.error?.message || statusData.error || 'Unknown FASHN error';
+        console.error('FASHN failed:', errMsg);
+        console.groupEnd();
+        throw new Error('FASHN generation failed: ' + errMsg);
+      }
+      // status === 'processing' or 'starting' — keep polling
+    }
+
+    console.groupEnd();
+    throw new Error('FASHN timed out after 2 minutes');
+  }
+});
+
+
 function showToast(msg, duration = 2500) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1228,7 +1332,7 @@ function setLoading(btnId, loading, originalHTML) {
 
 function openModal(id) {
   document.getElementById(id).classList.add('open');
-  if (id === 'settingsModal') _populateProviderSelect();
+  if (id === 'settingsModal') { _populateProviderSelect(); _renderFashnModelPhotoPreview(); }
 }
 function _populateProviderSelect() {
   const sel = document.getElementById('imageGenProviderSelect');
@@ -2131,6 +2235,7 @@ async function init() {
     showToast('Could not load data — check settings');
   }
   renderHome();
+  renderProviderPills();
 }
 
 // ─── NUDGES ───────────────────────────────────────────────────────────────────
@@ -3511,6 +3616,83 @@ async function setExhStatus(status) {
     currentExhibition = exhibitions[idx];
     await openExhibitionDetail(currentExhibition.id);
   } catch(e) { showToast('Error: ' + e.message); }
+}
+
+
+// ─── PROVIDER PILLS ──────────────────────────────────────────────────────────
+// Renders small pill buttons (one per registered provider) in both generate areas.
+// Tapping a pill switches the active provider, shows/hides the weight slider and
+// FASHN note accordingly.
+
+function renderProviderPills() {
+  ['intakeProviderPills', 'detailProviderPills'].forEach(containerId => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = Object.values(IMAGE_GEN_PROVIDERS).map(p =>
+      `<button onclick="selectProvider('${p.id}')" id="provPill_${containerId}_${p.id}" style="padding:4px 10px;border-radius:20px;border:1.5px solid var(--burgundy);font-size:11px;font-weight:600;cursor:pointer;background:${p.id === activeImageGenProvider ? 'var(--burgundy)' : 'white'};color:${p.id === activeImageGenProvider ? 'white' : 'var(--burgundy)'};">${p.label}</button>`
+    ).join('');
+  });
+  _applyProviderUI();
+}
+
+function selectProvider(id) {
+  setImageGenProvider(id);
+  renderProviderPills();
+}
+
+function _applyProviderUI() {
+  const isFashn = activeImageGenProvider === 'fashn';
+  ['intakeWeightRow', 'detailWeightRow'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isFashn ? 'none' : '';
+  });
+  ['intakeFashnNote', 'detailFashnNote'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isFashn ? 'block' : 'none';
+  });
+  const creditNote = document.getElementById('intakeCreditNote');
+  if (creditNote) {
+    creditNote.textContent = isFashn
+      ? 'Uses 1 FASHN credit — only on tap'
+      : 'Uses 1 Ideogram credit — only on tap';
+  }
+}
+
+// ─── FASHN MODEL PHOTO ───────────────────────────────────────────────────────
+
+function saveFashnModelPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    localStorage.setItem('fashnModelPhoto', e.target.result);
+    showToast('Model photo saved');
+    _renderFashnModelPhotoPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function _renderFashnModelPhotoPreview() {
+  const preview = document.getElementById('fashnModelPhotoPreview');
+  if (!preview) return;
+  const stored = localStorage.getItem('fashnModelPhoto');
+  if (stored) {
+    preview.innerHTML = `<div style="display:flex;align-items:center;gap:10px">
+      <img src="${stored}" style="width:48px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--sand-mid)">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--emerald-mid)">✓ Model photo set</div>
+        <button onclick="removeFashnModelPhoto()" style="background:none;border:none;color:var(--error,#c0392b);font-size:11px;cursor:pointer;padding:2px 0">Remove</button>
+      </div>
+    </div>`;
+  } else {
+    preview.innerHTML = '<div style="font-size:12px;color:var(--ink-light);padding:4px 0">No model photo uploaded yet.</div>';
+  }
+}
+
+function removeFashnModelPhoto() {
+  localStorage.removeItem('fashnModelPhoto');
+  showToast('Model photo removed');
+  _renderFashnModelPhotoPreview();
 }
 
 // ─── PROVIDER LAB & BENCHMARKS ───────────────────────────────────────────────
