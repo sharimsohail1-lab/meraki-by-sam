@@ -224,6 +224,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .slot-badge.required { background: var(--burgundy); color: white; }
 .slot-badge.optional { background: var(--border); color: var(--muted); }
 .slot-check { position: absolute; top: 6px; right: 6px; background: var(--emerald-mid); color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 13px; z-index: 2; }
+.slot-photo-btns { display: flex; gap: 6px; margin-bottom: 6px; z-index: 1; }
+.slot-action-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 10px; color: var(--ink); cursor: pointer; }
+.slot-action-btn i { font-size: 18px; color: var(--gold); }
+.slot-action-btn:active { background: var(--bg); }
 .extras-section { margin-top: 8px; margin-bottom: 12px; }
 .extras-title { font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase; }
 .add-extra-row { display: flex; gap: 8px; margin-top: 8px; }
@@ -404,11 +408,18 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <input type="text" id="collectionNameInput" class="field-input" placeholder="e.g. Eid 2026 Collection" style="flex:1;margin-bottom:0">
             <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
           </div>
-          <div id="collectionSuggestions" style="display:none;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
+          <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
           <div class="field-label" style="margin-top:12px" id="t-priceLabel">Price (USD)</div>
           <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150">
           <div class="field-label" style="margin-top:12px" id="t-costLabel">Your Cost (Optional)</div>
-          <input type="number" id="costInput" class="field-input" placeholder="e.g. 80">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" id="costInput" class="field-input" placeholder="e.g. 80" style="flex:1;margin-bottom:0">
+            <div class="tab-pills" style="margin:0;flex-shrink:0">
+              <button class="tab-pill active" id="costUsdBtn" onclick="setCostCurrency('usd',this)" style="padding:6px 10px;font-size:11px">USD</button>
+              <button class="tab-pill" id="costPkrBtn" onclick="setCostCurrency('pkr',this)" style="padding:6px 10px;font-size:11px">PKR</button>
+            </div>
+          </div>
+          <div id="costConversionNote" style="display:none;font-size:10px;color:var(--muted);margin-top:4px"></div>
         </div>
         <button class="btn btn-primary" onclick="goToStep(2)"><span id="t-nextStep">Next: Add Photos →</span></button>
       </div>
@@ -594,7 +605,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="sheet-title" style="margin-bottom:0" id="collDetailName"></div>
       <button onclick="closeSheet('collectionDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
-    <div id="collDetailMeta" style="font-size:12px;color:var(--muted);margin-bottom:14px"></div>
+    <div id="collDetailMeta" style="font-size:12px;color:var(--muted);margin-bottom:6px"></div>
+    <div id="collRenameRow" style="display:flex;gap:6px;margin-bottom:14px">
+      <input type="text" id="collRenameInput" class="field-input" style="flex:1;margin-bottom:0;font-size:13px" placeholder="Rename collection...">
+      <button class="btn btn-secondary btn-sm" onclick="renameCollection()" style="white-space:nowrap">Rename</button>
+    </div>
     <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()"><i class="ti ti-package"></i> Create Collection Marketing Package</button>
     <div id="collPkgOutput" style="display:none;margin-bottom:14px"></div>
     <div class="field-label" style="margin-top:6px">Items in this Collection</div>
@@ -1191,17 +1206,24 @@ function renderPhotoSlots() {
   const grid = document.getElementById('photoSlotGrid');
   grid.innerHTML = slots.map(slot => {
     const filled = uploadedPhotos[slot.id];
-    return `<div class="photo-slot ${filled ? 'filled' : ''} ${slot.required && !filled ? 'required-missing' : ''}" id="slot-${slot.id}" onclick="triggerSlotInput('${slot.id}')">
-      ${filled ? `<img src="${filled.dataUrl}" alt="${slot.label}"><div class="slot-check"><i class="ti ti-check"></i></div>` : ''}
+    return `<div class="photo-slot ${filled ? 'filled' : ''} ${slot.required && !filled ? 'required-missing' : ''}" id="slot-${slot.id}">
+      ${filled ? `<img src="${filled.dataUrl}" alt="${slot.label}" onclick="triggerSlotUpload('${slot.id}')"><div class="slot-check"><i class="ti ti-check"></i></div>` : `<div class="slot-photo-btns">
+        <button class="slot-action-btn" onclick="triggerSlotCamera('${slot.id}')"><i class="ti ti-camera"></i><span>Camera</span></button>
+        <button class="slot-action-btn" onclick="triggerSlotUpload('${slot.id}')"><i class="ti ti-photo"></i><span>Gallery</span></button>
+      </div>`}
       <div class="slot-label">${slot.label}</div>
       <div class="slot-badge ${slot.required ? 'required' : 'optional'}">${slot.required ? 'Required' : 'Optional'}</div>
-      <input type="file" accept="image/*" capture="environment" style="display:none" id="input-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
+      <input type="file" accept="image/*" capture="environment" style="display:none" id="input-cam-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
+      <input type="file" accept="image/*" style="display:none" id="input-gal-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
     </div>`;
   }).join('');
 }
 
-function triggerSlotInput(slotId) {
-  document.getElementById('input-' + slotId)?.click();
+function triggerSlotCamera(slotId) {
+  document.getElementById('input-cam-' + slotId)?.click();
+}
+function triggerSlotUpload(slotId) {
+  document.getElementById('input-gal-' + slotId)?.click();
 }
 
 function handleSlotFile(slotId, input) {
@@ -1228,11 +1250,15 @@ function renderExtraSlots() {
   const grid = document.getElementById('extraSlotGrid');
   grid.innerHTML = extraSlots.map(slot => {
     const filled = uploadedPhotos[slot.id];
-    return `<div class="photo-slot ${filled ? 'filled' : ''}" id="slot-${slot.id}" onclick="triggerSlotInput('${slot.id}')">
-      ${filled ? `<img src="${filled.dataUrl}" alt="${slot.label}"><div class="slot-check"><i class="ti ti-check"></i></div>` : ''}
+    return `<div class="photo-slot ${filled ? 'filled' : ''}" id="slot-${slot.id}">
+      ${filled ? `<img src="${filled.dataUrl}" alt="${slot.label}" onclick="triggerSlotUpload('${slot.id}')"><div class="slot-check"><i class="ti ti-check"></i></div>` : `<div class="slot-photo-btns">
+        <button class="slot-action-btn" onclick="triggerSlotCamera('${slot.id}')"><i class="ti ti-camera"></i><span>Camera</span></button>
+        <button class="slot-action-btn" onclick="triggerSlotUpload('${slot.id}')"><i class="ti ti-photo"></i><span>Gallery</span></button>
+      </div>`}
       <div class="slot-label">${slot.label}</div>
       <div class="slot-badge optional">Optional</div>
-      <input type="file" accept="image/*" capture="environment" style="display:none" id="input-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
+      <input type="file" accept="image/*" capture="environment" style="display:none" id="input-cam-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
+      <input type="file" accept="image/*" style="display:none" id="input-gal-${slot.id}" onchange="handleSlotFile('${slot.id}',this)">
     </div>`;
   }).join('');
 }
@@ -1326,7 +1352,7 @@ async function saveProduct() {
 
   const photo = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
   const price = parseInt(document.getElementById('priceInput').value) || null;
-  const cost = parseInt(document.getElementById('costInput').value) || null;
+  const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
   const collection = document.getElementById('collectionNameInput').value || null;
 
@@ -1442,6 +1468,10 @@ function resetIntake() {
   renderExistingCollectionChips();
   document.getElementById('priceInput').value = '';
   document.getElementById('costInput').value = '';
+  costCurrency = 'usd';
+  document.getElementById('costUsdBtn').classList.add('active');
+  document.getElementById('costPkrBtn').classList.remove('active');
+  document.getElementById('costConversionNote').style.display = 'none';
   document.getElementById('itemNameInput').value = '';
   document.getElementById('analysisResult').style.display = 'none';
   document.getElementById('saveSuccess').style.display = 'none';
@@ -1639,6 +1669,57 @@ function productDetailNudge(p) {
   return lines.map(l => `<div class="detail-nudge ${l.cls}">${l.text}</div>`).join('');
 }
 
+// ─── PKR / COST CURRENCY ──────────────────────────────────────────────────────
+let costCurrency = 'usd';
+let usdPkrRate = null;
+
+function setCostCurrency(cur, btn) {
+  costCurrency = cur;
+  document.getElementById('costUsdBtn').classList.toggle('active', cur === 'usd');
+  document.getElementById('costPkrBtn').classList.toggle('active', cur === 'pkr');
+  document.getElementById('costInput').placeholder = cur === 'pkr' ? 'e.g. 22000' : 'e.g. 80';
+  updateCostConversionNote();
+}
+
+function updateCostConversionNote() {
+  const note = document.getElementById('costConversionNote');
+  if (!note) return;
+  if (costCurrency !== 'pkr') { note.style.display = 'none'; return; }
+  const val = parseFloat(document.getElementById('costInput').value);
+  if (!val) { note.style.display = 'none'; return; }
+  if (usdPkrRate) {
+    note.style.display = 'block';
+    note.textContent = `≈ $${(val / usdPkrRate).toFixed(2)} USD at ₨${usdPkrRate.toFixed(0)}/USD`;
+  } else {
+    note.style.display = 'block';
+    note.textContent = 'Fetching exchange rate...';
+  }
+}
+
+async function fetchPkrRate() {
+  if (usdPkrRate) return usdPkrRate;
+  try {
+    const r = await fetch('https://open.er-api.com/v6/latest/USD');
+    const d = await r.json();
+    usdPkrRate = d.rates?.PKR || 278;
+  } catch { usdPkrRate = 278; }
+  return usdPkrRate;
+}
+
+async function getCostInUsd() {
+  const raw = parseFloat(document.getElementById('costInput').value);
+  if (!raw) return null;
+  if (costCurrency === 'usd') return Math.round(raw);
+  const rate = await fetchPkrRate();
+  return Math.round(raw / rate);
+}
+
+// Wire up live note update
+document.addEventListener('DOMContentLoaded', () => {
+  const ci = document.getElementById('costInput');
+  if (ci) ci.addEventListener('input', () => { if (costCurrency === 'pkr') { fetchPkrRate().then(updateCostConversionNote); } });
+});
+
 // ─── STOCK ────────────────────────────────────────────────────────────────────
 let stockFilter = 'all';
 let stockView = 'items';
@@ -1718,6 +1799,10 @@ function openCollectionDetail(name) {
   document.getElementById('collDetailName').textContent = name || 'Uncollected Items';
   const available = items.filter(p => p.status === 'available').length;
   document.getElementById('collDetailMeta').textContent = `${items.length} pieces · ${available} available`;
+  const renameRow = document.getElementById('collRenameRow');
+  const renameInput = document.getElementById('collRenameInput');
+  if (name === null) { renameRow.style.display = 'none'; }
+  else { renameRow.style.display = 'flex'; renameInput.value = name; }
 
   const hasPkg = !!sessionStorage.getItem('collPkg_' + name);
   const pkgBtn = document.getElementById('collPkgBtn');
@@ -1747,6 +1832,24 @@ function openCollectionDetail(name) {
     </div>`).join('');
 
   openSheet('collectionDetailSheet');
+}
+
+async function renameCollection() {
+  const oldName = currentCollection;
+  const newName = document.getElementById('collRenameInput').value.trim();
+  if (!newName || newName === oldName) return;
+  const items = inventory.filter(p => p.collection_name === oldName);
+  if (!items.length) return;
+  try {
+    await Promise.all(items.map(p => db('update', 'products', { id: p.id, data: { collection_name: newName } })));
+    items.forEach(p => { p.collection_name = newName; });
+    currentCollection = newName;
+    document.getElementById('collDetailName').textContent = newName;
+    document.getElementById('collRenameInput').value = newName;
+    sessionStorage.removeItem('collPkg_' + oldName);
+    renderCollections();
+    showToast('Collection renamed ✓');
+  } catch(e) { showToast('Error: ' + e.message); }
 }
 
 async function generateCollectionPackage() {
@@ -1845,13 +1948,39 @@ async function suggestCollectionNames() {
 
   const season = intakeSeason;
   const type = garmentType;
-  const year = new Date().getFullYear();
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-12
+
+  // Determine Pakistani cultural context by month
+  const pkContext = month <= 2 ? 'winter wedding season in Pakistan, shadi season is peak' :
+    month <= 3 ? 'end of winter, Ramadan may be approaching, pre-Eid prep' :
+    month <= 4 ? 'Ramadan and Eid ul Fitr season — the biggest clothing season in Pakistan' :
+    month <= 5 ? 'post-Eid, spring, transition season' :
+    month <= 7 ? 'summer heat, lighter fabrics, mehndi and summer weddings' :
+    month <= 8 ? 'mid-year, monsoon season in Pakistan, casual wear' :
+    month <= 9 ? 'late summer, fall prep, Muharram season' :
+    month <= 10 ? 'autumn, wedding season beginning again, formal occasions' :
+    month <= 11 ? 'pre-winter, heavy wedding season, Eid Milad-un-Nabi may fall here' :
+    'December — winter wedding season, Christmas/New Year NJ events, heavy formal season';
 
   try {
     const resp = await callClaude([{ role: 'user', content:
-      `Suggest 4 creative collection names for a Pakistani clothing boutique called "Meraki by Sam".
-Season/Occasion: ${season}. Garment type: ${type}. Year: ${year}.
-Rules: short (2-4 words), evocative, mix of English/Urdu blend acceptable, no generic names like "New Arrivals".
+      `Suggest 4 creative collection names for a Pakistani clothing boutique called "Meraki by Sam" based in New Jersey, selling to the Pakistani-American diaspora.
+
+Current context:
+- Month: ${now.toLocaleString('en-US', {month:'long'})} ${year}
+- Pakistani cultural calendar: ${pkContext}
+- Garment occasion/season setting: ${season}
+- Garment type: ${type}
+
+Rules:
+- Short (2-4 words), evocative, memorable
+- Can blend English + Urdu words naturally (not forced)
+- Reference the actual cultural moment — Eid, shadi season, mehndi, Ramadan, etc. as appropriate
+- No generic names like "New Arrivals" or "Spring Collection"
+- Can reference colors, moods, times of day, Pakistani poetic imagery
+
 Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki Raunak", "Dusk & Dew", "Pearl Season"]`
     }], '', 200);
     let names;
