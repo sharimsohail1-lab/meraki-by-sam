@@ -812,7 +812,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-layout-grid"></i> Model Templates</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('modelTemplateSheet')"><i class="ti ti-x"></i></button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Generate with Ideogram (1 credit each) or upload. You'll choose which model to use when generating.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Generate or upload reusable base model photos. Only <b>Approved</b> templates are used during try-on generation.</div>
     <div id="modelTemplateGrid" style="display:flex;flex-direction:column;gap:12px"></div>
   </div>
 </div>
@@ -4311,8 +4311,8 @@ async function loadAppSettings() {
     if (active?.value) {
       activeModelTemplateId = active.value;
       localStorage.setItem('activeModelTemplateId', active.value);
-      // sync fashnModelPhoto from DB template if not already in localStorage
-      if (!localStorage.getItem('fashnModelPhoto')) {
+      // sync fashnModelPhoto from DB template if not already in localStorage (not needed for cfs-auto)
+      if (active.value !== 'cfs-auto' && !localStorage.getItem('fashnModelPhoto')) {
         const tmplRows = await db('select', 'model_templates', {}) || [];
         const row = tmplRows.find(r => r.def_id === active.value);
         if (row?.image) localStorage.setItem('fashnModelPhoto', row.image);
@@ -4327,80 +4327,166 @@ async function saveSetting(key, value) {
   } catch(e) { console.warn('[settings] save failed:', e.message); }
 }
 
-// IMPORTANT: All prompts specify plain solid-color shalwar kameez as base.
-// FASHN try-on replaces the kameez with the uploaded garment while preserving the
-// South Asian silhouette. A Western dress base would cause FASHN to output a Western silhouette.
-const BASE_OUTFIT = 'wearing a plain solid light beige shalwar kameez with no embroidery, no pattern, no dupatta, high modest crew neckline (no V-neck, no low cut, fully covered chest), straight modest cut, full length plain trousers visible, modest South Asian silhouette, chest fully covered';
+// Base outfit constraint for all Classic Front Stand templates.
+// Plain, neutral, minimal — so FASHN try-on replaces cleanly without interference.
+const CFS_BASE = 'wearing a plain solid cream modest long tunic with no embroidery, no prints, no pattern, no decorative neckline, no decorative placket, no jewelry, no dupatta, no shawl, plain neutral slim trousers, full length, modest South Asian silhouette, chest fully covered, suitable for virtual garment try-on';
+
+// Classic Front Stand — 20 varied templates (10 studio + 10 traditional background).
+// All: full-body, front-facing, standing, arms relaxed, feet visible, plain neutral base outfit.
+// Variety comes from background, hair, expression, stance — NOT from clothing detail.
 const MODEL_TEMPLATE_DEFS = [
+  // ── Classic Front Stand: Simple Studio ──────────────────────────────────────
   {
-    defId: 'front-1',
-    name: 'Classic Front Stand',
-    category: 'front-facing',
-    poseNotes: 'Arms at sides, looking directly at camera',
-    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium warm skin tone, straight black hair past shoulders, standing perfectly straight facing camera, arms relaxed at sides, neutral expression, plain white seamless background, soft even studio lighting, full length shot showing feet, ${BASE_OUTFIT}, Pakistani fashion catalog photography, 4K`
+    defId: 'cfs-01', name: 'CFS Studio — Warm Beige', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Arms at sides, neutral expression, warm beige background',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, medium warm skin tone, straight black hair past shoulders, standing perfectly straight facing camera, arms relaxed at sides, neutral expression, plain warm beige seamless background, soft even studio lighting, full length including feet clearly visible, ${CFS_BASE}, boutique catalog photography, 4K`
   },
   {
-    defId: 'front-2',
-    name: 'Hands Clasped Front',
-    category: 'front-facing',
+    defId: 'cfs-02', name: 'CFS Studio — Soft White, Waves', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Loose dark waves, subtle smile, white background',
+    prompt: `Full-body front-facing adult South Asian female model, 26 years old, medium skin tone, dark brown loose wavy hair to shoulders, standing facing camera, arms relaxed slightly away from torso, subtle natural smile, plain soft white seamless background, gentle studio lighting, full length shot showing feet, ${CFS_BASE}, professional catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-03', name: 'CFS Studio — Light Grey, Bun', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Hair in neat bun, calm expression, grey background',
+    prompt: `Full-body front-facing adult South Asian female model, 27 years old, fair-medium skin tone, black hair neatly pulled in a bun, standing straight facing camera, arms relaxed at sides, calm composed expression, plain light grey seamless background, soft diffused studio lighting, full length including feet, ${CFS_BASE}, South Asian boutique catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-04', name: 'CFS Studio — Cream, Chestnut Hair', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Chestnut brown hair down, relaxed stance',
+    prompt: `Full-body front-facing adult South Asian female model, 24 years old, warm medium skin tone, chestnut brown straight hair past shoulders, standing facing camera, arms relaxed slightly away from torso, natural relaxed expression, cream boutique backdrop, professional catalog lighting, full body visible including feet, ${CFS_BASE}, fashion catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-05', name: 'CFS Studio — Ivory, Hair Tied Back', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Hair tied back, poised expression, slightly wider stance',
+    prompt: `Full-body front-facing adult South Asian female model, 28 years old, medium skin tone, black hair tied back neatly, standing facing camera with a slightly wider comfortable stance, arms relaxed slightly away from torso, poised confident expression, warm ivory seamless background, even studio lighting, full length shot feet visible, ${CFS_BASE}, boutique fashion catalog, 4K`
+  },
+  {
+    defId: 'cfs-06', name: 'CFS Studio — Taupe, Ponytail', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Dark hair in ponytail, natural expression, taupe background',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, warm skin tone, dark hair in a neat ponytail, standing straight facing camera, arms relaxed at sides, natural expression, light taupe seamless background, soft studio lighting, full length fashion shot including feet, ${CFS_BASE}, South Asian catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-07', name: 'CFS Studio — Soft Grey, Wavy Brown', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Wavy dark brown hair, relaxed wider stance',
+    prompt: `Full-body front-facing adult South Asian female model, 26 years old, medium-fair skin tone, wavy dark brown hair past shoulders, standing facing camera with a relaxed slightly wider stance, arms gently away from torso, soft expression, neutral soft grey background, flattering studio lighting, full body head to feet, ${CFS_BASE}, fashion catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-08', name: 'CFS Studio — White, Middle Part', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Black hair with middle part, professional expression',
+    prompt: `Full-body front-facing adult South Asian female model, 27 years old, medium neutral skin tone, straight black hair with middle part, standing perfectly straight facing camera, arms relaxed at sides, professional composed expression, minimal white seamless background, flat even studio lighting, full length including feet clearly visible, ${CFS_BASE}, neutral catalog base photography, 4K`
+  },
+  {
+    defId: 'cfs-09', name: 'CFS Studio — Beige Gradient, Low Bun', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Dark brunette low bun, serene expression',
+    prompt: `Full-body front-facing adult South Asian female model, 29 years old, medium warm skin tone, dark brunette hair in a soft low bun, standing facing camera, arms relaxed slightly away from torso, serene gentle expression, soft beige gradient background, warm studio lighting, full length shot feet visible, ${CFS_BASE}, boutique photography, 4K`
+  },
+  {
+    defId: 'cfs-10', name: 'CFS Studio — Neutral Cream, Loose Dark', group: 'classic-front', subtype: 'studio',
+    poseNotes: 'Straight dark hair loose, gentle expression',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, fair-medium skin tone, straight dark hair loose past shoulders, standing facing camera, arms relaxed at sides, gentle open expression, neutral cream studio background, soft professional lighting, full body visible from head to feet, ${CFS_BASE}, South Asian fashion photography, 4K`
+  },
+  // ── Classic Front Stand: Traditional / South Asian Background ────────────────
+  {
+    defId: 'cfs-11', name: 'CFS Traditional — Mughal Arch', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Sandstone Mughal arch background, black hair',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, medium warm skin tone, straight black hair past shoulders, standing in front of an elegant warm sandstone Mughal-inspired carved archway, arms relaxed at sides, natural expression, boutique catalog lighting, full length including feet clearly visible, ${CFS_BASE}, South Asian boutique catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-12', name: 'CFS Traditional — Sandstone Courtyard', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Warm sandstone courtyard, wavy dark brown hair',
+    prompt: `Full-body front-facing adult South Asian female model, 26 years old, medium skin tone, dark brown wavy hair to shoulders, standing in a warm sandstone traditional courtyard, arms relaxed slightly away from torso, calm expression, elegant ambient lighting, full body visible including feet, ${CFS_BASE}, Pakistani boutique fashion photography, 4K`
+  },
+  {
+    defId: 'cfs-13', name: 'CFS Traditional — Carved Archway, Braid', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Carved stone archway, black hair in side braid',
+    prompt: `Full-body front-facing adult South Asian female model, 27 years old, warm medium skin tone, black hair in a loose side braid, standing in front of an elegant carved stone archway with warm ambient lighting, arms relaxed at sides, serene expression, full length shot including feet, ${CFS_BASE}, South Asian boutique catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-14', name: 'CFS Traditional — Floral Boutique Backdrop', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Soft muted floral backdrop, loose dark hair',
+    prompt: `Full-body front-facing adult South Asian female model, 24 years old, fair-medium skin tone, loose dark hair past shoulders, standing in front of a soft muted floral boutique backdrop in dusty rose and cream tones, arms relaxed slightly away from torso, natural gentle expression, professional catalog lighting, full body visible head to feet, ${CFS_BASE}, boutique fashion photography, 4K`
+  },
+  {
+    defId: 'cfs-15', name: 'CFS Traditional — Draped Fabric Background', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Elegant cream and gold draped fabric bg, chestnut hair bun',
+    prompt: `Full-body front-facing adult South Asian female model, 28 years old, medium warm skin tone, chestnut hair in a soft bun, standing in front of elegant draped fabric background in cream and soft gold tones, arms relaxed at sides, composed expression, warm boutique lighting, full length including feet clearly visible, ${CFS_BASE}, South Asian catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-16', name: 'CFS Traditional — Terracotta Interior', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Warm terracotta Pakistani boutique interior, wavy black hair',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, medium skin tone, wavy black hair past shoulders, standing in a warm traditional Pakistani boutique interior with terracotta and earthy tones, arms relaxed slightly away from torso, natural expression, warm catalog lighting, full body visible from head to feet, ${CFS_BASE}, traditional boutique photography, 4K`
+  },
+  {
+    defId: 'cfs-17', name: 'CFS Traditional — Carved Doorway', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Mughal carved doorway warm stone tones, straight dark hair',
+    prompt: `Full-body front-facing adult South Asian female model, 27 years old, warm medium skin tone, straight dark hair with side part, standing centered in front of an elegant Mughal-inspired carved doorway in warm stone tones, arms relaxed at sides, poised expression, boutique catalog lighting, full length including feet, ${CFS_BASE}, South Asian fashion photography, 4K`
+  },
+  {
+    defId: 'cfs-18', name: 'CFS Traditional — Sandstone Floral Wall', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Sandstone wall with carved floral details, dark hair braid',
+    prompt: `Full-body front-facing adult South Asian female model, 26 years old, medium-fair skin tone, dark hair in a loose braid over one shoulder, standing in front of a warm sandstone wall with subtle carved floral details, arms relaxed slightly away from torso, calm natural expression, soft boutique lighting, full body visible head to feet, ${CFS_BASE}, boutique catalog photography, 4K`
+  },
+  {
+    defId: 'cfs-19', name: 'CFS Traditional — Cream Boutique Interior', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Refined cream traditional boutique interior, dark brunette hair',
+    prompt: `Full-body front-facing adult South Asian female model, 29 years old, medium warm skin tone, straight dark brunette hair past shoulders, standing in a refined traditional boutique interior with cream and ivory tones, arms relaxed at sides, elegant composed expression, warm professional lighting, full length including feet, ${CFS_BASE}, South Asian boutique fashion photography, 4K`
+  },
+  {
+    defId: 'cfs-20', name: 'CFS Traditional — Festive Gold Setting', group: 'classic-front', subtype: 'traditional',
+    poseNotes: 'Festive South Asian studio setting soft gold tones, loose black hair',
+    prompt: `Full-body front-facing adult South Asian female model, 25 years old, medium warm skin tone, straight black hair loose past shoulders, standing in a festive but uncluttered South Asian boutique studio setting with warm soft gold and ivory tones, arms relaxed slightly away from torso, warm natural expression, boutique catalog lighting, full body visible head to feet, ${CFS_BASE}, Pakistani boutique catalog photography, 4K`
+  },
+  // ── Legacy templates (kept for backward compatibility) ──────────────────────
+  {
+    defId: 'front-1', name: 'Classic Front Stand (Legacy)', group: 'other', subtype: 'studio',
+    poseNotes: 'Original single CFS template — use CFS group instead',
+    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium warm skin tone, straight black hair past shoulders, standing perfectly straight facing camera, arms relaxed at sides, neutral expression, plain white seamless background, soft even studio lighting, full length shot showing feet, ${CFS_BASE}, Pakistani fashion catalog photography, 4K`
+  },
+  {
+    defId: 'front-2', name: 'Hands Clasped Front', group: 'other', subtype: 'studio',
     poseNotes: 'Hands clasped loosely at waist',
-    prompt: `Full-body studio photo of a Pakistani woman, 27 years old, medium-fair skin tone, dark brown hair, standing facing camera, hands clasped loosely at waist, slight natural smile, plain off-white seamless background, soft studio lighting, full length including feet, ${BASE_OUTFIT}, South Asian boutique fashion photography, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 27 years old, medium-fair skin tone, dark brown hair, standing facing camera, hands clasped loosely at waist, slight natural smile, plain off-white seamless background, soft studio lighting, full length including feet, ${CFS_BASE}, South Asian boutique fashion photography, 4K`
   },
   {
-    defId: 'front-3',
-    name: 'One Hand on Hip',
-    category: 'front-facing',
+    defId: 'front-3', name: 'One Hand on Hip', group: 'other', subtype: 'studio',
     poseNotes: 'Right hand on hip, relaxed confident stance',
-    prompt: `Full-body studio photo of a South Asian woman, 24 years old, warm medium skin tone, shoulder-length black hair, standing facing camera, right hand on hip, relaxed confident stance, plain light grey seamless background, soft diffused studio lighting, full length fashion shot, ${BASE_OUTFIT}, Pakistani clothing catalog, 4K`
+    prompt: `Full-body studio photo of a South Asian woman, 24 years old, warm medium skin tone, shoulder-length black hair, standing facing camera, right hand on hip, relaxed confident stance, plain light grey seamless background, soft diffused studio lighting, full length fashion shot, ${CFS_BASE}, Pakistani clothing catalog, 4K`
   },
   {
-    defId: 'three-quarter-1',
-    name: 'Three-Quarter Left',
-    category: 'three-quarter',
+    defId: 'three-quarter-1', name: 'Three-Quarter Left', group: 'other', subtype: 'studio',
     poseNotes: 'Body turned slightly left, face toward camera',
-    prompt: `Full-body studio photo of a Pakistani woman, 26 years old, medium skin tone, long black hair, three-quarter turn to the left, face angled toward camera, arms relaxed at sides, white seamless studio background, elegant studio lighting, full length shot, ${BASE_OUTFIT}, South Asian fashion photography, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 26 years old, medium skin tone, long black hair, three-quarter turn to the left, face angled toward camera, arms relaxed at sides, white seamless studio background, elegant studio lighting, full length shot, ${CFS_BASE}, South Asian fashion photography, 4K`
   },
   {
-    defId: 'three-quarter-2',
-    name: 'Three-Quarter Right',
-    category: 'three-quarter',
+    defId: 'three-quarter-2', name: 'Three-Quarter Right', group: 'other', subtype: 'studio',
     poseNotes: 'Body turned slightly right, face toward camera',
-    prompt: `Full-body studio photo of a Pakistani woman, 27 years old, warm skin tone, dark hair, three-quarter turn to the right, face looking at camera, natural elegant posture, plain cream seamless background, studio fashion lighting, full body visible, ${BASE_OUTFIT}, Pakistani clothing catalog photography, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 27 years old, warm skin tone, dark hair, three-quarter turn to the right, face looking at camera, natural elegant posture, plain cream seamless background, studio fashion lighting, full body visible, ${CFS_BASE}, Pakistani clothing catalog photography, 4K`
   },
   {
-    defId: 'dupatta-1',
-    name: 'Dupatta Drape Classic',
-    category: 'dupatta-friendly',
+    defId: 'dupatta-1', name: 'Dupatta Drape Classic', group: 'other', subtype: 'studio',
     poseNotes: 'Arms slightly extended to show fabric drape',
-    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium skin tone, black hair, standing facing camera with arms slightly extended outward to show fabric drape, neutral expression, plain white seamless background, bright even studio lighting, full length fashion shot, ${BASE_OUTFIT}, South Asian fashion catalog, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium skin tone, black hair, standing facing camera with arms slightly extended outward to show fabric drape, neutral expression, plain white seamless background, bright even studio lighting, full length fashion shot, ${CFS_BASE}, South Asian fashion catalog, 4K`
   },
   {
-    defId: 'dupatta-2',
-    name: 'Dupatta Walking Pose',
-    category: 'dupatta-friendly',
+    defId: 'dupatta-2', name: 'Dupatta Walking Pose', group: 'other', subtype: 'studio',
     poseNotes: 'Slight walking motion, one foot forward',
-    prompt: `Full-body studio photo of a Pakistani woman, 26 years old, medium-fair skin tone, long dark hair, natural walking pose, one foot slightly forward, arms at sides, plain white studio background, natural studio lighting, full length visible, ${BASE_OUTFIT}, Pakistani fashion editorial, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 26 years old, medium-fair skin tone, long dark hair, natural walking pose, one foot slightly forward, arms at sides, plain white studio background, natural studio lighting, full length visible, ${CFS_BASE}, Pakistani fashion editorial, 4K`
   },
   {
-    defId: 'formal-1',
-    name: 'Formal Straight',
-    category: 'formal',
+    defId: 'formal-1', name: 'Formal Straight', group: 'other', subtype: 'studio',
     poseNotes: 'Very upright, formal wedding/event ready stance',
-    prompt: `Full-body studio photo of a Pakistani woman, 28 years old, fair-medium skin tone, hair neatly set in a bun, standing in a formal upright posture, hands at sides, dignified expression, seamless white background, professional studio lighting, full length including feet, ${BASE_OUTFIT}, Pakistani formal fashion catalog, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 28 years old, fair-medium skin tone, hair neatly set in a bun, standing in a formal upright posture, hands at sides, dignified expression, seamless white background, professional studio lighting, full length including feet, ${CFS_BASE}, Pakistani formal fashion catalog, 4K`
   },
   {
-    defId: 'formal-2',
-    name: 'Formal Angled',
-    category: 'formal',
+    defId: 'formal-2', name: 'Formal Angled', group: 'other', subtype: 'studio',
     poseNotes: 'Slight body angle, hands folded gracefully',
-    prompt: `Full-body studio photo of a Pakistani woman, 29 years old, medium skin tone, upswept dark hair, slight body angle to camera, hands folded gracefully in front, formal elegant posture, ivory seamless background, soft professional studio lighting, full body visible, ${BASE_OUTFIT}, Pakistani occasion wear catalog, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 29 years old, medium skin tone, upswept dark hair, slight body angle to camera, hands folded gracefully in front, formal elegant posture, ivory seamless background, soft professional studio lighting, full body visible, ${CFS_BASE}, Pakistani occasion wear catalog, 4K`
   },
   {
-    defId: 'neutral-1',
-    name: 'Neutral Base',
-    category: 'neutral',
+    defId: 'neutral-1', name: 'Neutral Base', group: 'other', subtype: 'studio',
     poseNotes: 'Most versatile — works with any garment type',
-    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium neutral skin tone, straight black hair, standing perfectly straight facing camera, arms at sides, completely neutral expression, plain white background, flat even studio lighting, no shadows, full length from head to feet clearly visible, ${BASE_OUTFIT}, neutral model base for garment try-on, 4K`
+    prompt: `Full-body studio photo of a Pakistani woman, 25 years old, medium neutral skin tone, straight black hair, standing perfectly straight facing camera, arms at sides, completely neutral expression, plain white background, flat even studio lighting, no shadows, full length from head to feet clearly visible, ${CFS_BASE}, neutral model base for garment try-on, 4K`
   }
 ];
 
@@ -4420,74 +4506,205 @@ async function loadModelTemplates() {
   renderModelTemplates();
 }
 
+// ── Auto-rotate: no-repeat pool of approved CFS templates ────────────────────
+
+function _getApprovedCFSTemplates() {
+  const cfsIds = new Set(MODEL_TEMPLATE_DEFS.filter(d => d.group === 'classic-front').map(d => d.defId));
+  return modelTemplates.filter(r => cfsIds.has(r.def_id) && r.status === 'approved' && r.image);
+}
+
+function getNextCFSTemplate() {
+  const approved = _getApprovedCFSTemplates();
+  if (!approved.length) return null;
+  let pool = JSON.parse(localStorage.getItem('cfsRotationPool') || '[]');
+  // Remove any defIds no longer approved
+  pool = pool.filter(id => approved.some(r => r.def_id === id));
+  if (!pool.length) {
+    // Refill: shuffle all approved
+    pool = approved.map(r => r.def_id).sort(() => Math.random() - 0.5);
+  }
+  const next = pool.shift();
+  localStorage.setItem('cfsRotationPool', JSON.stringify(pool));
+  return next;
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function _statusBadge(status) {
+  if (status === 'approved') return `<span style="font-size:10px;background:#d4edda;color:#155724;border-radius:4px;padding:2px 6px;font-weight:600">✓ Approved</span>`;
+  if (status === 'rejected') return `<span style="font-size:10px;background:#f8d7da;color:#721c24;border-radius:4px;padding:2px 6px;font-weight:600">✗ Rejected</span>`;
+  return `<span style="font-size:10px;background:#fff3cd;color:#856404;border-radius:4px;padding:2px 6px;font-weight:600">⏳ Needs Review</span>`;
+}
+
+function _subtypeBadge(subtype) {
+  if (subtype === 'traditional') return `<span style="font-size:10px;background:var(--gold-pale);color:var(--ink-light);border-radius:4px;padding:2px 6px">Traditional</span>`;
+  return `<span style="font-size:10px;background:var(--sand-light);color:var(--muted);border-radius:4px;padding:2px 6px">Studio</span>`;
+}
+
 function renderModelTemplates() {
   const el = document.getElementById('modelTemplateGrid');
   if (!el) return;
-  el.innerHTML = MODEL_TEMPLATE_DEFS.map(def => {
+
+  const cfsDefs = MODEL_TEMPLATE_DEFS.filter(d => d.group === 'classic-front');
+  const otherDefs = MODEL_TEMPLATE_DEFS.filter(d => d.group !== 'classic-front');
+  const approvedCount = cfsDefs.filter(d => modelTemplates.find(r => r.def_id === d.defId && r.status === 'approved' && r.image)).length;
+  const generatedCount = cfsDefs.filter(d => modelTemplates.find(r => r.def_id === d.defId && r.image)).length;
+
+  const renderDef = (def) => {
     const row = modelTemplates.find(r => r.def_id === def.defId);
     const img = row?.image || null;
-    const isActive = activeModelTemplateId === def.defId;
-    const borderStyle = isActive ? 'border:2px solid var(--emerald-mid)' : 'border:2px solid transparent';
+    const status = row?.status || null;
     const thumb = img
-      ? `<img src="${img}" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)">`
+      ? `<img src="${img}" onclick="previewTemplate('${def.defId}')" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);cursor:pointer" title="Tap to preview larger">`
       : `<div style="width:56px;height:72px;border-radius:6px;flex-shrink:0;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted);text-align:center;padding:4px">Not<br>generated</div>`;
-    const activeTag = isActive
-      ? `<span style="font-size:10px;background:var(--emerald-mid);color:white;border-radius:4px;padding:2px 6px;font-weight:600">✓ Active</span>`
-      : '';
-    const categoryLabel = `<span style="font-size:10px;background:var(--sand-light);color:var(--muted);border-radius:4px;padding:2px 6px">${def.category}</span>`;
-    const actionBtns = `
-      <button class="btn" style="font-size:11px;padding:4px 8px" onclick="generateModelTemplate('${def.defId}')"><i class="ti ti-photo-ai"></i> Generate</button>
-      <label class="btn" style="font-size:11px;padding:4px 8px;cursor:pointer"><i class="ti ti-upload"></i> Upload<input type="file" accept="image/*" style="display:none" onchange="uploadModelTemplate('${def.defId}',this)"></label>
-      ${row ? `<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--error,#c0392b)" onclick="deleteModelTemplate('${row.id}','${def.defId}')"><i class="ti ti-trash"></i></button>` : ''}
-    `;
-    return `<div style="background:white;border-radius:10px;padding:12px;display:flex;gap:10px;align-items:flex-start;${borderStyle}">
+    const statusBadge = status ? _statusBadge(status) : '';
+    const subtypeBadge = _subtypeBadge(def.subtype);
+    const approveBtn = (row && status !== 'approved') ? `<button class="btn" style="font-size:11px;padding:4px 8px;background:#d4edda;color:#155724" onclick="setTemplateStatus('${row.id}','${def.defId}','approved')">✓ Approve</button>` : '';
+    const rejectBtn = (row && status !== 'rejected') ? `<button class="btn" style="font-size:11px;padding:4px 8px;background:#f8d7da;color:#721c24" onclick="setTemplateStatus('${row.id}','${def.defId}','rejected')">✗ Reject</button>` : '';
+    const replaceBtn = row ? `<button class="btn" style="font-size:11px;padding:4px 8px" onclick="generateModelTemplate('${def.defId}')"><i class="ti ti-refresh"></i> Replace</button>` : `<button class="btn" style="font-size:11px;padding:4px 8px" onclick="generateModelTemplate('${def.defId}')"><i class="ti ti-photo-ai"></i> Generate</button>`;
+    const uploadBtn = `<label class="btn" style="font-size:11px;padding:4px 8px;cursor:pointer"><i class="ti ti-upload"></i> Upload<input type="file" accept="image/*" style="display:none" onchange="uploadModelTemplate('${def.defId}',this)"></label>`;
+    const border = (status === 'approved') ? 'border:2px solid #c3e6cb' : (status === 'rejected' ? 'border:2px solid #f5c6cb' : 'border:2px solid var(--border)');
+    return `<div style="background:white;border-radius:10px;padding:12px;display:flex;gap:10px;align-items:flex-start;${border}">
       ${thumb}
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">${def.name}</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${categoryLabel}${activeTag}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">${subtypeBadge}${statusBadge}</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${def.poseNotes}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${actionBtns}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${replaceBtn}${approveBtn}${rejectBtn}${uploadBtn}</div>
       </div>
     </div>`;
-  }).join('');
+  };
+
+  const cfsSection = `
+    <div style="background:var(--burgundy);color:white;border-radius:8px;padding:10px 12px;margin-bottom:4px">
+      <div style="font-size:14px;font-weight:700">Classic Front Stand Group</div>
+      <div style="font-size:11px;opacity:0.85;margin-top:2px">${approvedCount} approved · ${generatedCount}/${cfsDefs.length} generated</div>
+    </div>
+    <div style="background:var(--sand-light);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:var(--ink-light);line-height:1.5">
+      <b>Background</b>: traditional or studio — both fine.<br>
+      <b>Clothing</b>: must stay plain, neutral, and unembellished. No embroidery, prints, dupatta, jewelry, or decorative plackets.
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-bottom:12px" onclick="generateAllMissingCFS()">
+      <i class="ti ti-photo-ai"></i> Generate All Missing (${cfsDefs.length - generatedCount} remaining)
+    </button>
+    ${cfsDefs.map(renderDef).join('')}`;
+
+  const otherSection = otherDefs.length ? `
+    <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:10px">Other Templates (Legacy)</div>
+      ${otherDefs.map(renderDef).join('')}
+    </div>` : '';
+
+  el.innerHTML = cfsSection + otherSection;
+}
+
+// ── Template status management ───────────────────────────────────────────────
+
+async function setTemplateStatus(dbId, defId, newStatus) {
+  try {
+    await db('update', 'model_templates', { id: dbId, data: { status: newStatus } });
+    if (newStatus === 'rejected' && (activeModelTemplateId === defId || activeModelTemplateId === 'cfs-auto')) {
+      if (activeModelTemplateId === defId) {
+        activeModelTemplateId = null;
+        localStorage.removeItem('activeModelTemplateId');
+        localStorage.removeItem('fashnModelPhoto');
+        saveSetting('activeModelTemplateId', '');
+        _renderActiveTemplatePreview();
+      }
+    }
+    // Clear rotation pool so rejected template is excluded on next pick
+    localStorage.removeItem('cfsRotationPool');
+    await loadModelTemplates();
+  } catch(e) {
+    showToast('Status update failed: ' + e.message);
+  }
+}
+
+function previewTemplate(defId) {
+  const row = modelTemplates.find(r => r.def_id === defId);
+  if (!row?.image) return;
+  const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = () => overlay.remove();
+  overlay.innerHTML = `
+    <img src="${row.image}" style="max-height:80vh;max-width:100%;object-fit:contain;border-radius:8px">
+    <div style="color:white;margin-top:12px;font-size:13px;text-align:center">${def?.name || defId}<br><span style="opacity:0.6;font-size:11px">Tap anywhere to close</span></div>`;
+  document.body.appendChild(overlay);
+}
+
+// ── Generate ─────────────────────────────────────────────────────────────────
+
+async function _urlToDataUrl(urlOrDataUrl) {
+  if (urlOrDataUrl.startsWith('data:')) return urlOrDataUrl;
+  const proxied = '/api/ideogram?url=' + encodeURIComponent(urlOrDataUrl);
+  const imgEl = await loadImg(proxied);
+  const canvas = document.createElement('canvas');
+  canvas.width = imgEl.naturalWidth; canvas.height = imgEl.naturalHeight;
+  canvas.getContext('2d').drawImage(imgEl, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+async function _generateOneTemplate(defId) {
+  const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
+  if (!def) throw new Error('Unknown template def: ' + defId);
+  const provider = IMAGE_GEN_PROVIDERS[activeImageGenProvider];
+  if (!provider) throw new Error('No provider selected. Go to Settings → Image Generation Provider.');
+  const rawResult = await provider.generate(def.prompt);
+  const dataUrl = await _urlToDataUrl(rawResult);
+  const existing = modelTemplates.find(r => r.def_id === defId);
+  if (existing) await db('delete', 'model_templates', { id: existing.id });
+  await db('insert', 'model_templates', { data: {
+    def_id: defId,
+    name: def.name,
+    group_name: def.group || 'other',
+    subtype: def.subtype || null,
+    pose_notes: def.poseNotes,
+    prompt: def.prompt,
+    image: dataUrl,
+    source_provider: activeImageGenProvider,
+    status: 'needs_review',
+    is_default: false
+  }});
 }
 
 async function generateModelTemplate(defId) {
   const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
   if (!def) return;
-  showToast('Generating — uses 1 Ideogram credit…');
+  const provider = IMAGE_GEN_PROVIDERS[activeImageGenProvider];
+  if (!provider) { showToast('No provider selected'); return; }
+  showToast(`Generating with ${provider.label}…`);
   try {
-    const r = await fetch('/api/ideogram', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text_prompt: def.prompt, aspect_ratio: 'ASPECT_2_3' })
-    });
-    const json = await r.json();
-    if (json.error) throw new Error(json.error);
-    const rawUrl = json.data?.[0]?.url || json.url;
-    if (!rawUrl) throw new Error('No URL returned');
-    const proxied = '/api/ideogram?url=' + encodeURIComponent(rawUrl);
-    const imgEl = await loadImg(proxied);
-    const canvas = document.createElement('canvas');
-    canvas.width = imgEl.naturalWidth; canvas.height = imgEl.naturalHeight;
-    canvas.getContext('2d').drawImage(imgEl, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    const existing = modelTemplates.find(r => r.def_id === defId);
-    if (existing) await db('delete', 'model_templates', { id: existing.id });
-    await db('insert', 'model_templates', { data: {
-      def_id: defId,
-      name: def.name,
-      category: def.category,
-      pose_notes: def.poseNotes,
-      image: dataUrl,
-      source_provider: 'ideogram',
-      is_default: false
-    }});
-    showToast('Generated — ready to use');
+    await _generateOneTemplate(defId);
+    showToast('Generated — review and approve in template list');
     await loadModelTemplates();
   } catch(e) {
     showToast('Generation failed: ' + e.message);
   }
+}
+
+async function generateAllMissingCFS() {
+  const cfsDefs = MODEL_TEMPLATE_DEFS.filter(d => d.group === 'classic-front');
+  const missing = cfsDefs.filter(d => !modelTemplates.find(r => r.def_id === d.defId && r.image));
+  if (!missing.length) { showToast('All Classic Front Stand templates already generated'); return; }
+  const provider = IMAGE_GEN_PROVIDERS[activeImageGenProvider];
+  if (!provider) { showToast('No provider selected'); return; }
+  const ok = confirm(`Generate ${missing.length} missing Classic Front Stand templates using ${provider.label}?\n\nThis uses ${missing.length} provider credits. Generated templates will be saved as "Needs Review" — you approve or reject each one after.`);
+  if (!ok) return;
+  let done = 0;
+  for (const def of missing) {
+    showToast(`Generating ${done + 1}/${missing.length}: ${def.name}…`);
+    try {
+      await _generateOneTemplate(def.defId);
+      done++;
+      await loadModelTemplates();
+    } catch(e) {
+      showToast(`Failed: ${def.name} — ${e.message}`);
+    }
+    if (done < missing.length) await new Promise(r => setTimeout(r, 1200));
+  }
+  showToast(`Done — ${done}/${missing.length} generated. Review and approve each one.`);
+  await loadModelTemplates();
 }
 
 function uploadModelTemplate(defId, input) {
@@ -4503,19 +4720,31 @@ function uploadModelTemplate(defId, input) {
     await db('insert', 'model_templates', { data: {
       def_id: defId,
       name: def.name,
-      category: def.category,
+      group_name: def.group || 'other',
+      subtype: def.subtype || null,
       pose_notes: def.poseNotes,
+      prompt: def.prompt,
       image: dataUrl,
       source_provider: 'upload',
+      status: 'approved',
       is_default: false
     }});
-    showToast('Uploaded');
+    showToast('Uploaded and approved');
     await loadModelTemplates();
   };
   reader.readAsDataURL(file);
 }
 
 function _selectModelTemplateById(defId, fromPicker) {
+  if (defId === 'cfs-auto') {
+    activeModelTemplateId = 'cfs-auto';
+    localStorage.setItem('activeModelTemplateId', 'cfs-auto');
+    saveSetting('activeModelTemplateId', 'cfs-auto');
+    showToast('Auto Rotate active — Classic Front Stand templates will be cycled');
+    if (fromPicker) { closeSheet('fashnPickerSheet'); } else { renderModelTemplates(); }
+    _renderActiveTemplatePreview();
+    return;
+  }
   const row = modelTemplates.find(r => r.def_id === defId);
   if (!row?.image) { showToast('No image for this template'); return; }
   activeModelTemplateId = defId;
@@ -4536,6 +4765,7 @@ async function deleteModelTemplate(dbId, defId) {
     saveSetting('activeModelTemplateId', '');
     _renderActiveTemplatePreview();
   }
+  localStorage.removeItem('cfsRotationPool');
   showToast('Deleted');
   await loadModelTemplates();
 }
@@ -4543,6 +4773,12 @@ async function deleteModelTemplate(dbId, defId) {
 function _renderActiveTemplatePreview() {
   const el = document.getElementById('activeTemplatePreview');
   if (!el) return;
+  if (activeModelTemplateId === 'cfs-auto') {
+    const count = _getApprovedCFSTemplates().length;
+    el.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--emerald-mid)">✓ Auto Rotate — Classic Front Stand</div>
+      <div style="font-size:11px;color:var(--muted)">${count} approved template${count !== 1 ? 's' : ''} in rotation</div>`;
+    return;
+  }
   const img = localStorage.getItem('fashnModelPhoto');
   if (img && activeModelTemplateId) {
     const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === activeModelTemplateId);
@@ -4550,7 +4786,7 @@ function _renderActiveTemplatePreview() {
       <img src="${img}" style="width:48px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">
       <div>
         <div style="font-size:12px;font-weight:600;color:var(--emerald-mid)">✓ ${def ? def.name : 'Template active'}</div>
-        <div style="font-size:11px;color:var(--muted)">${def ? def.category : ''}</div>
+        <div style="font-size:11px;color:var(--muted)">${def ? (def.subtype || def.group || '') : ''}</div>
       </div>
     </div>`;
   } else {
@@ -4579,19 +4815,34 @@ function _openFashnPicker(targetImgId, outputDivId, btnId) {
   _fashnPickerSelected = activeModelTemplateId;
   _renderFashnPickerGrid();
   openSheet('fashnPickerSheet');
-  // Apply saved category highlight after sheet opens
   setTimeout(() => _setFashnCategory(_fashnCategory), 50);
 }
 
 function _renderFashnPickerGrid() {
   const el = document.getElementById('fashnPickerGrid');
   if (!el) return;
-  const available = modelTemplates.filter(r => r.image);
-  if (!available.length) {
-    el.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">No templates generated yet.<br>Go to Settings → Manage Templates.</div>';
+  const approved = modelTemplates.filter(r => r.image && r.status === 'approved');
+  const cfsApproved = _getApprovedCFSTemplates();
+
+  if (!approved.length && !cfsApproved.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">No approved templates yet.<br>Go to Settings → Manage Templates,<br>generate templates and approve them.</div>';
     return;
   }
-  el.innerHTML = available.map(row => {
+
+  const autoSelected = _fashnPickerSelected === 'cfs-auto';
+  const autoRow = cfsApproved.length ? `
+    <div onclick="_fashnPickerSelect('cfs-auto')" style="display:flex;gap:12px;align-items:center;background:var(--gold-pale);border-radius:10px;padding:10px;cursor:pointer;border:${autoSelected ? '2px solid var(--emerald-mid)' : '2px solid var(--gold-light)'}">
+      <div style="width:56px;height:72px;border-radius:6px;flex-shrink:0;background:var(--burgundy);display:flex;align-items:center;justify-content:center;color:white;font-size:20px">
+        <i class="ti ti-refresh"></i>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:var(--burgundy)">Auto Rotate — Classic Front Stand</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${cfsApproved.length} approved template${cfsApproved.length !== 1 ? 's' : ''} — cycles through all, no repeats</div>
+      </div>
+      ${autoSelected ? '<i class="ti ti-circle-check" style="color:var(--emerald-mid);font-size:20px;flex-shrink:0"></i>' : ''}
+    </div>` : '';
+
+  const templateRows = approved.map(row => {
     const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === row.def_id);
     const isSelected = _fashnPickerSelected === row.def_id;
     const border = isSelected ? '2px solid var(--emerald-mid)' : '2px solid var(--border)';
@@ -4599,12 +4850,14 @@ function _renderFashnPickerGrid() {
       <img src="${row.image}" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:var(--ink)">${def?.name || row.def_id}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${def?.category || ''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${def?.subtype || def?.group || ''}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${def?.poseNotes || ''}</div>
       </div>
       ${isSelected ? '<i class="ti ti-circle-check" style="color:var(--emerald-mid);font-size:20px;flex-shrink:0"></i>' : ''}
     </div>`;
   }).join('');
+
+  el.innerHTML = autoRow + (autoRow && templateRows ? '<div style="margin:8px 0;font-size:11px;color:var(--muted);text-align:center">— or pick a specific template —</div>' : '') + templateRows;
 }
 
 function _fashnPickerSelect(defId) {
@@ -4614,15 +4867,28 @@ function _fashnPickerSelect(defId) {
 
 async function _confirmFashnPicker() {
   if (!_fashnPickerSelected) { showToast('Select a model first'); return; }
-  const row = modelTemplates.find(r => r.def_id === _fashnPickerSelected);
+
+  let defIdToUse = _fashnPickerSelected;
+
+  if (defIdToUse === 'cfs-auto') {
+    await loadModelTemplates();
+    defIdToUse = getNextCFSTemplate();
+    if (!defIdToUse) {
+      showToast('No approved Classic Front Stand templates. Approve some in Settings → Manage Templates.');
+      return;
+    }
+  }
+
+  const row = modelTemplates.find(r => r.def_id === defIdToUse);
   if (!row?.image) { showToast('No image for selected template'); return; }
-  // Set as active
+
+  // Save selected mode (cfs-auto or specific defId) as the active preference
   activeModelTemplateId = _fashnPickerSelected;
   localStorage.setItem('activeModelTemplateId', _fashnPickerSelected);
+  // Set fashnModelPhoto to the actual chosen template for this run
   localStorage.setItem('fashnModelPhoto', row.image);
   saveSetting('activeModelTemplateId', _fashnPickerSelected);
   closeSheet('fashnPickerSheet');
-  // Now run the generation
   const { targetImgId, outputDivId, btnId } = _fashnPickerTarget;
   await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
 }
