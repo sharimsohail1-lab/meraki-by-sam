@@ -1695,13 +1695,9 @@ function loadImg(src) {
 }
 
 function triggerDownload(src, filename) {
-  const a = document.createElement('a');
-  a.href = src;
-  a.download = filename;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => document.body.removeChild(a), 200);
+  // Open in a new tab — on mobile Safari PWA, <a download> navigates within the app
+  // and loses all state. A new tab preserves the app and lets the user save from there.
+  window.open(src, '_blank');
 }
 
 function downloadModelPhoto() {
