@@ -738,10 +738,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <p class="key-note">Switch providers here once a new provider is benchmarked and approved.</p>
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
-      <div class="field-label">Active Model Template</div>
-      <div id="activeTemplatePreview" style="margin-bottom:8px"></div>
-      <button class="btn" onclick="closeModal('settingsModal');openModelTemplateSheet()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-layout-grid"></i> Manage Templates</button>
-      <p class="key-note" style="margin-top:6px">Model photos used as FASHN virtual try-on inputs. Generate with Ideogram or upload your own.</p>
+      <button class="btn" onclick="closeModal('settingsModal');openModelTemplateSheet()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-layout-grid"></i> Manage Model Templates</button>
+      <p class="key-note" style="margin-top:6px">Generate or upload model photos for FASHN virtual try-on. Choose which to use at generation time.</p>
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
@@ -772,7 +770,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-layout-grid"></i> Model Templates</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('modelTemplateSheet')"><i class="ti ti-x"></i></button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Generate with Ideogram (1 credit each) or upload. Tap Set Active to use for FASHN.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Generate with Ideogram (1 credit each) or upload. You'll choose which model to use when generating.</div>
     <div id="modelTemplateGrid" style="display:flex;flex-direction:column;gap:12px"></div>
   </div>
 </div>
@@ -3884,7 +3882,6 @@ function renderModelTemplates() {
     const actionBtns = `
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="generateModelTemplate('${def.defId}')"><i class="ti ti-photo-ai"></i> Generate</button>
       <label class="btn" style="font-size:11px;padding:4px 8px;cursor:pointer"><i class="ti ti-upload"></i> Upload<input type="file" accept="image/*" style="display:none" onchange="uploadModelTemplate('${def.defId}',this)"></label>
-      ${img ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 8px" onclick="_selectModelTemplateById('${def.defId}')"><i class="ti ti-check"></i> Set Active</button>` : ''}
       ${row ? `<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--error,#c0392b)" onclick="deleteModelTemplate('${row.id}','${def.defId}')"><i class="ti ti-trash"></i></button>` : ''}
     `;
     return `<div style="background:white;border-radius:10px;padding:12px;display:flex;gap:10px;align-items:flex-start;${borderStyle}">
@@ -3930,7 +3927,7 @@ async function generateModelTemplate(defId) {
       source_provider: 'ideogram',
       is_default: false
     }});
-    showToast('Generated — tap Set Active to use it');
+    showToast('Generated — ready to use');
     await loadModelTemplates();
   } catch(e) {
     showToast('Generation failed: ' + e.message);
