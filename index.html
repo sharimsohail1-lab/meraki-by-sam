@@ -478,7 +478,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div class="field-label" id="t-collectionLabel">Collection</div>
           <div id="existingCollectionChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
           <div style="display:flex;gap:6px;margin-bottom:6px">
-            <input type="text" id="collectionNameInput" class="field-input" placeholder="e.g. Eid 2026 Collection" style="flex:1;margin-bottom:0">
+            <input type="text" id="collectionNameInput" class="field-input" placeholder="e.g. Eid 2026 Collection" style="flex:1;margin-bottom:0" oninput="syncIntakeCollChips()">
             <button class="btn btn-secondary btn-sm" onclick="suggestCollectionNames()" id="suggestCollBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
           </div>
           <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
@@ -781,6 +781,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
+      <div class="field-label">Collection(s)</div>
+      <input type="text" id="detailCollectionInput" class="field-input" placeholder="e.g. Eid 2026, Summer Shadi" style="margin-bottom:10px">
       <div class="field-label">Notes</div>
       <textarea id="detailNotesInput" class="field-input" placeholder="Any notes..."></textarea>
       <button class="btn btn-primary" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
@@ -2088,19 +2090,52 @@ Create a collection-level marketing package in this EXACT JSON format (no markdo
 }
 
 // ─── COLLECTION NAME SUGGESTIONS ──────────────────────────────────────────────
+function allCollectionNames() {
+  // Supports comma-separated multi-collection values
+  const all = inventory.flatMap(p => (p.collection_name || '').split(',').map(s => s.trim())).filter(Boolean);
+  return [...new Set(all)];
+}
+
 function renderExistingCollectionChips() {
-  const names = [...new Set(inventory.map(p => p.collection_name).filter(Boolean))];
+  const names = allCollectionNames();
   const container = document.getElementById('existingCollectionChips');
   if (!container) return;
   if (!names.length) { container.style.display = 'none'; return; }
   container.style.display = 'flex';
-  container.innerHTML = names.map(n =>
-    `<div class="coll-suggestion" onclick="document.getElementById('collectionNameInput').value=${JSON.stringify(n)};highlightCollChip(this)">${n}</div>`
-  ).join('') + `<div class="coll-suggestion" style="background:white;color:var(--muted);border-style:dashed" onclick="document.getElementById('collectionNameInput').value='';document.getElementById('collectionNameInput').focus()">+ New</div>`;
+  window._intakeCollNames = names;
+  container.innerHTML = names.map((n, i) =>
+    `<div class="coll-suggestion" id="intakeCollChip-${i}" onclick="toggleIntakeCollChip(${i})">${n}</div>`
+  ).join('');
+  // Re-highlight any already in the input
+  syncIntakeCollChips();
 }
 
-function highlightCollChip(el) {
-  el.closest('#existingCollectionChips').querySelectorAll('.coll-suggestion').forEach(c => c.style.background = '');
+function toggleIntakeCollChip(i) {
+  const name = window._intakeCollNames[i];
+  const input = document.getElementById('collectionNameInput');
+  const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  const idx = current.indexOf(name);
+  if (idx >= 0) current.splice(idx, 1);
+  else current.push(name);
+  input.value = current.join(', ');
+  syncIntakeCollChips();
+}
+
+function syncIntakeCollChips() {
+  const input = document.getElementById('collectionNameInput');
+  const active = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  (window._intakeCollNames || []).forEach((n, i) => {
+    const chip = document.getElementById('intakeCollChip-' + i);
+    if (chip) chip.style.background = active.includes(n) ? '#F5D78A' : '';
+  });
+}
+
+function applyCollSuggestion(el, name) {
+  const input = document.getElementById('collectionNameInput');
+  const current = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!current.includes(name)) current.push(name);
+  input.value = current.join(', ');
+  syncIntakeCollChips();
   el.style.background = '#F5D78A';
 }
 
@@ -2114,11 +2149,11 @@ async function suggestCollectionNames() {
 
   const season = intakeSeason;
   const type = garmentType;
+  const seed = document.getElementById('collectionNameInput').value.trim();
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth() + 1; // 1-12
+  const month = now.getMonth() + 1;
 
-  // Determine Pakistani cultural context by month
   const pkContext = month <= 2 ? 'winter wedding season in Pakistan, shadi season is peak' :
     month <= 3 ? 'end of winter, Ramadan may be approaching, pre-Eid prep' :
     month <= 4 ? 'Ramadan and Eid ul Fitr season — the biggest clothing season in Pakistan' :
@@ -2139,6 +2174,7 @@ Current context:
 - Pakistani cultural calendar: ${pkContext}
 - Garment occasion/season setting: ${season}
 - Garment type: ${type}
+${seed ? `- Sam has already typed this seed/idea: "${seed}" — build on this direction, refine or complete it into 4 polished options. Keep her words or energy if possible.` : ''}
 
 Rules:
 - Short (2-4 words), evocative, memorable
@@ -2146,6 +2182,7 @@ Rules:
 - Reference the actual cultural moment — Eid, shadi season, mehndi, Ramadan, etc. as appropriate
 - No generic names like "New Arrivals" or "Spring Collection"
 - Can reference colors, moods, times of day, Pakistani poetic imagery
+${seed ? '- At least 2 of the 4 suggestions should feel like completions or elevations of the seed text Sam typed' : ''}
 
 Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki Raunak", "Dusk & Dew", "Pearl Season"]`
     }], '', 200);
@@ -2154,7 +2191,7 @@ Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki
     catch { names = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
 
     sugDiv.innerHTML = names.map(n =>
-      `<div class="coll-suggestion" onclick="document.getElementById('collectionNameInput').value=${JSON.stringify(n)};this.style.background='#F5D78A'">${n}</div>`
+      `<div class="coll-suggestion" onclick="applyCollSuggestion(this,${JSON.stringify(n)})">${n}</div>`
     ).join('');
   } catch(e) {
     sugDiv.innerHTML = '<span style="font-size:11px;color:var(--burgundy)">Could not generate suggestions</span>';
@@ -2211,6 +2248,7 @@ function openProductDetail(id) {
   document.getElementById('detailDesc').textContent = p.description_en || '';
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
+  document.getElementById('detailCollectionInput').value = p.collection_name || '';
   document.getElementById('detailModelOutput').style.display = 'none';
   document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
   renderMarketingPackageCache(p);
@@ -2248,10 +2286,11 @@ async function saveProductEdits() {
   if (!currentProduct) return;
   const price = parseInt(document.getElementById('detailPriceInput').value) || null;
   const notes = document.getElementById('detailNotesInput').value || null;
+  const collection_name = document.getElementById('detailCollectionInput').value.trim() || null;
   try {
-    await db('update', 'products', { id: currentProduct.id, data: { price, notes } });
+    await db('update', 'products', { id: currentProduct.id, data: { price, notes, collection_name } });
     const idx = inventory.findIndex(p => p.id === currentProduct.id);
-    inventory[idx] = { ...inventory[idx], price, notes };
+    inventory[idx] = { ...inventory[idx], price, notes, collection_name };
     currentProduct = inventory[idx];
     showToast('Saved');
   } catch(e) { showToast('Error: ' + e.message); }
