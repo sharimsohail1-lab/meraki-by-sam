@@ -1268,10 +1268,71 @@ registerImageGenProvider('ideogram', {
 
 // ─── FASHN PROVIDER ──────────────────────────────────────────────────────────
 // Virtual try-on: garment image + model image → model wearing the garment.
-// South Asian modesty guardrail — appended to every FASHN generation.
-// Prevents FASHN from interpreting decorative plackets/borders as open necklines,
-// and prevents Western silhouette reinterpretation of Pakistani kameez/suits.
-const SOUTH_ASIAN_GUARDRAIL = 'Traditional modest Pakistani kameez. Keep the neckline modest and the chest fully covered. The center front placket and any vertical embroidered border is decorative trim, NOT an open neckline or deep V. Do not create a plunging neckline, deep V neckline, cleavage, low-cut chest, exposed chest, or open front. Preserve the original South Asian kameez structure: long modest tunic silhouette, original sleeve shape, original hemline, original embroidery placement. Do not convert into a Western dress, gown, blouse, skirt, cocktail dress, or fusion outfit. Full-length South Asian boutique catalog photo.';
+// Builds a FASHN-specific prompt from garment analysis + garment type.
+// Layer 1: general South Asian modesty guardrail (always included).
+// Layer 2: garment-type-specific structure notes (based on garmentType).
+// Layer 3: feature-specific notes (based on analysis fields).
+function buildFashnPrompt(analysis, gType) {
+  const parts = [];
+
+  // ── Layer 1: general South Asian modesty guardrail ──────────────────────────
+  parts.push(
+    'Dress the model in the uploaded traditional South Asian garment. ' +
+    'Preserve the original garment structure, silhouette, colors, embroidery placement, sleeves, hemline, and borders exactly. ' +
+    'Keep the styling modest and South Asian. ' +
+    'Do not create cleavage, plunging neckline, or exposed chest unless clearly present in the original garment photo. ' +
+    'Do not convert into a Western dress, cocktail dress, gown, blouse, or fusion outfit. ' +
+    'Preserve trousers/shalwar if visible. Preserve dupatta if visible. ' +
+    'Full-length South Asian boutique catalog photo.'
+  );
+
+  // ── Layer 2: garment-type-specific notes ────────────────────────────────────
+  if (gType === 'full-suit' || gType === 'kameez') {
+    parts.push('Preserve the long kameez/tunic silhouette. Do not shorten the kameez into a blouse or Western top.');
+  } else if (gType === 'lehenga') {
+    parts.push('Preserve the lehenga-choli-dupatta structure. Do not convert into a Western ball gown or strapless dress.');
+  } else if (gType === 'dupatta') {
+    parts.push('This is a dupatta. Drape it naturally in South Asian style over the shoulder.');
+  }
+
+  // ── Layer 3: detected feature notes ─────────────────────────────────────────
+  if (analysis) {
+    // Neckline
+    const nl = analysis.neckline;
+    if (nl === 'high' || nl === 'round' || nl === 'mandarin' || nl === 'collar') {
+      parts.push(`Preserve the ${nl} modest neckline. Do not lower or widen it.`);
+    } else if (nl === 'v-neck-shallow') {
+      parts.push('Preserve the modest shallow V neckline. Do not deepen it into a plunging neckline.');
+    } else if (nl === 'v-neck-deep') {
+      parts.push('The original garment has a deep V neckline — preserve its exact depth, no deeper.');
+    } else if (nl === 'open-front') {
+      parts.push('The original garment has an open front — preserve its exact opening, keep the rest of the structure intact.');
+    } else {
+      // unknown or no data — default to modest
+      parts.push('Keep the neckline modest and chest covered unless the original garment clearly shows otherwise.');
+    }
+
+    // Placket
+    if (analysis.has_placket) {
+      parts.push('The center front vertical trim/placket is decorative embroidery. It is NOT an open neckline or deep V. Keep the chest covered.');
+    }
+
+    // Dupatta
+    if (analysis.has_dupatta === true) {
+      parts.push('Include the dupatta draped naturally in South Asian style over the shoulder or arm.');
+    } else if (analysis.has_dupatta === false) {
+      parts.push('Do not invent a dupatta if none is visible in the garment photo.');
+    }
+
+    // Motifs
+    if (Array.isArray(analysis.motifs) && analysis.motifs.length > 0) {
+      const motifSummary = analysis.motifs.map(m => `${m.type} at ${m.placement}`).join('; ');
+      parts.push(`Preserve embroidery placement exactly: ${motifSummary}.`);
+    }
+  }
+
+  return parts.join(' ');
+}
 
 // Requires a model photo stored in localStorage under 'fashnModelPhoto'.
 // Generation is async — polls /api/fashn?id=xxx until completed or failed.
@@ -1302,7 +1363,7 @@ registerImageGenProvider('fashn', {
         category: _fashnCategory || 'tops',
         garment_photo_type: 'flat-lay',
         mode: 'balanced',
-        prompt: SOUTH_ASIAN_GUARDRAIL
+        prompt: buildFashnPrompt(currentAnalysis, garmentType)
       })
     });
     const runData = await runRes.json();
@@ -1780,6 +1841,9 @@ Respond with a single JSON object (no markdown, no extra text). Fields:
     symmetrical (boolean),
     style_notes (string — brief visual description: pose, form, stitch style).
   Use an empty array [] if no distinctive motifs are present.
+- "neckline": one of: "high", "round", "v-neck-shallow", "v-neck-deep", "square", "boat", "collar", "mandarin", "open-front", "unknown"
+- "has_placket": true if garment has a visible center front placket or decorative vertical front trim, otherwise false
+- "has_dupatta": true if a dupatta is visible or clearly part of the set, otherwise false
 - "ideogramPrompt": a complete Ideogram v4 fashion prompt written as a single paragraph. Follow this order: (1) begin with "Full-length professional fashion photograph of a Pakistani woman model wearing [garment type]." (2) silhouette and cut. (3) fabric and drape. (4) base colors zone by zone. (5) neckline — shape, embroidery depth, density. (6) for EACH motif in the motifs array: state type + count + exact placement + colors + state explicitly which zones it does NOT appear on. (7) sleeves. (8) borders and hemline. (9) dupatta. (10) trouser or skirt. End with: "Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. Not a flat-lay, not a product photo, not a collage." Omit zones not visible. Keep motif descriptions proportional — they enhance the overall description, they do not dominate it.
 
 Return only the JSON object. No explanation, no markdown fences.` }
@@ -1876,6 +1940,10 @@ async function saveProduct() {
       category: currentAnalysis.category,
       description_en: currentAnalysis.description,
       ideogram_prompt: currentAnalysis.ideogramPrompt,
+      neckline: currentAnalysis.neckline || null,
+      has_placket: currentAnalysis.has_placket ?? null,
+      has_dupatta: currentAnalysis.has_dupatta ?? null,
+      motifs: currentAnalysis.motifs ? JSON.stringify(currentAnalysis.motifs) : null,
       price,
       cost,
       status: 'available',
@@ -3226,7 +3294,11 @@ async function generateDetailModelPhoto() {
   currentAnalysis = {
     ideogramPrompt: currentProduct.ideogram_prompt,
     sku: currentProduct.sku,
-    _uploadedPhotoB64: currentProduct.photo || null
+    _uploadedPhotoB64: currentProduct.photo || null,
+    neckline: currentProduct.neckline || null,
+    has_placket: currentProduct.has_placket ?? null,
+    has_dupatta: currentProduct.has_dupatta ?? null,
+    motifs: currentProduct.motifs || []
   };
   await generateModelPhoto('detailModelImg', 'detailModelOutput', 'detailModelBtn');
   currentAnalysis = tempAnalysis;
