@@ -1746,6 +1746,7 @@ function filterStock(f, btn) {
 }
 
 function renderCollections() {
+  window._collActions = [];
   const grid = document.getElementById('collectionsGrid');
   const grouped = {};
   for (const p of inventory) {
@@ -1768,7 +1769,9 @@ function renderCollections() {
     ).join('');
     const hasPkg = items.some(p => p.caption_en);
     const available = items.filter(p => p.status === 'available').length;
-    html += `<div class="collection-card" onclick="openCollectionDetail(${JSON.stringify(name)})">
+    const collIdx = window._collActions.length;
+    window._collActions.push(name);
+    html += `<div class="collection-card" onclick="openCollectionDetail(window._collActions[${collIdx}])">
       <div class="collection-thumb-row">${thumbs}</div>
       <div class="collection-info">
         <div class="collection-name-text">${name}</div>
@@ -2022,10 +2025,18 @@ function renderInventory() {
         <span class="status-pill status-${p.status}">${p.status}</span>
         ${productNudge(p)}
       </div>
-      <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="openProductDetail('${p.id}');setTimeout(()=>{ if(!document.getElementById('marketingPackageOutput').innerHTML) generateMarketingPackage(); },300)" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
+      <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket('${p.id}')" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
         <i class="ti ti-package"></i>${p.caption_en ? ' Package ✓' : ' Market'}
       </button>
     </div>`).join('');
+}
+
+function openAndMarket(id) {
+  openProductDetail(id);
+  const p = inventory.find(x => x.id === id);
+  if (p && !p.caption_en) {
+    setTimeout(() => generateMarketingPackage(), 400);
+  }
 }
 
 function openProductDetail(id) {
