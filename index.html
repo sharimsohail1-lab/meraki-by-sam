@@ -1506,36 +1506,49 @@ MOTIF DETECTION — identify every distinctive decorative element visible across
 - For each motif: determine where it appears on the garment from the STRUCTURAL photos. Use DETAIL photos only to understand its appearance (colors, style, stitch type).
 - If a motif appears only once or twice, note it explicitly as non-repeating.
 
-Respond in EXACTLY this JSON format (no markdown, no extra text):
-{
-  "name": "Short evocative English name (3-5 words)",
-  "description": "2-3 sentence poetic description for customers. Mention fabric, key colors, embroidery placement, standout design details. Do NOT mention APPNA.",
-  "colors": "comma-separated list of main colors",
-  "occasion": "best occasion for this garment",
-  "category": "Formal/Semi-Formal/Casual/Bridal",
-  "motifs": [
-    {
-      "type": "e.g. bird / floral vine / geometric / mirror work / zari border / etc.",
-      "count": "approximate number visible, or 'continuous' for borders",
-      "placement": "exact location on garment — e.g. upper front panels beneath shoulders, centered on back, along hemline only",
-      "absent_from": "zones where this motif does NOT appear — e.g. sleeves, trouser, neckline",
-      "colors": "dominant color(s) of the motif itself",
-      "surrounding": "what surrounds or frames the motif — e.g. floral vine fill, plain field, geometric border",
-      "repeats": false,
-      "symmetrical": true,
-      "style_notes": "brief visual description of the motif's appearance — pose, form, stitch style"
-    }
-  ],
-  "ideogramPrompt": "Write an Ideogram v4 fashion prompt. Use the motifs array above to describe decorative elements with EXACT placement. Priority order: (1) MODEL: begin with 'Full-length professional fashion photograph of a Pakistani woman model wearing [garment type].' (2) SILHOUETTE: overall shape and cut. (3) FABRIC: texture and drape. (4) BASE COLORS: color blocking zone by zone. (5) NECKLINE: shape, embroidery depth and density. (6) MOTIFS: for each motif in the array, state type + exact count + exact placement + colors + whether it repeats — e.g. 'two embroidered birds symmetrically placed on upper front chest panels, one per side, integrated into floral vine embroidery, birds do not appear on sleeves or trouser.' (7) SLEEVES: length and any embroidery. (8) BORDERS/HEMLINE: describe or state plain. (9) DUPATTA: color, edge, any motifs. (10) TROUSER/SKIRT: color and embroidery if any. END WITH: 'Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. Not a flat-lay. Not a product photo. Not a collage.' Omit zones not visible in photos. Keep motifs proportional — they should enhance, not dominate, the overall garment description."
-}` }
+Respond with a single JSON object (no markdown, no extra text). Fields:
+- "name": short evocative English name, 3-5 words
+- "description": 2-3 sentence poetic description for customers — fabric, key colors, embroidery placement, standout details. Do NOT mention APPNA.
+- "colors": comma-separated main colors
+- "occasion": best occasion for this garment
+- "category": one of Formal / Semi-Formal / Casual / Bridal
+- "motifs": array of objects, one per distinctive decorative element detected. Each object has:
+    type (string — e.g. "bird", "floral vine", "geometric", "mirror work", "zari border", "sequins"),
+    count (string — e.g. "2", "4", "continuous border"),
+    placement (string — exact zone, e.g. "upper front panels beneath shoulders, one each side"),
+    absent_from (string — zones where motif does NOT appear, e.g. "sleeves, trouser, dupatta"),
+    colors (string — motif colors),
+    surrounding (string — what surrounds or frames it),
+    repeats (boolean),
+    symmetrical (boolean),
+    style_notes (string — brief visual description: pose, form, stitch style).
+  Use an empty array [] if no distinctive motifs are present.
+- "ideogramPrompt": a complete Ideogram v4 fashion prompt written as a single paragraph. Follow this order: (1) begin with "Full-length professional fashion photograph of a Pakistani woman model wearing [garment type]." (2) silhouette and cut. (3) fabric and drape. (4) base colors zone by zone. (5) neckline — shape, embroidery depth, density. (6) for EACH motif in the motifs array: state type + count + exact placement + colors + state explicitly which zones it does NOT appear on. (7) sleeves. (8) borders and hemline. (9) dupatta. (10) trouser or skirt. End with: "Model is wearing the complete outfit. Studio white seamless background, soft editorial fashion lighting, full-length shot, sharp focus, 8k. Not a flat-lay, not a product photo, not a collage." Omit zones not visible. Keep motif descriptions proportional — they enhance the overall description, they do not dominate it.
+
+Return only the JSON object. No explanation, no markdown fences.` }
       ]}],
       'You are a luxury Pakistani fashion expert. Always respond with valid JSON only.',
-      1800
+      2400
     );
 
     let parsed;
-    try { parsed = JSON.parse(response); }
-    catch { parsed = JSON.parse(response.replace(/```json|```/g, '').trim()); }
+    try {
+      // Try direct parse first
+      parsed = JSON.parse(response);
+    } catch {
+      // Strip markdown fences and retry
+      let clean = response.replace(/```json|```/g, '').trim();
+      try {
+        parsed = JSON.parse(clean);
+      } catch {
+        // Extract first {...} block in case Claude added surrounding text
+        const match = clean.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error('Could not extract JSON from analysis response');
+        parsed = JSON.parse(match[0]);
+      }
+    }
+    // motifs is optional — default to empty array if Claude omitted it or returned null
+    if (!Array.isArray(parsed.motifs)) parsed.motifs = [];
 
     const sku = generateSKU();
     const primaryPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
