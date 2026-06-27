@@ -1092,7 +1092,7 @@ async function callIdeogram(prompt, aspectRatio = 'ASPECT_2_3', imageB64 = null)
   const payload = { text_prompt: prompt, aspect_ratio: aspectRatio };
   if (imageB64) {
     payload.image_b64 = imageB64;
-    payload.image_weight = 1.0; // high weight so Ideogram closely follows the actual garment
+    payload.image_weight = 0.7; // high weight so Ideogram closely follows the actual garment
   }
   const r = await fetch('/api/ideogram', {
     method: 'POST',
