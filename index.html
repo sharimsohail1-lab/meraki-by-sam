@@ -158,6 +158,24 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .nudge-pkg { background: var(--gold-pale); color: #8B6914; }
 .nudge-old { background: #F3E5F5; color: #6A1B9A; }
 
+/* Collection catalog cover */
+.coll-catalog-cover { background: var(--burgundy); padding: 28px 20px 22px; text-align: center; }
+.coll-cover-logo { height: 38px; width: auto; object-fit: contain; margin-bottom: 14px; filter: brightness(0) invert(1); opacity: 0.92; }
+.coll-cover-title { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--gold-light); letter-spacing: 0.5px; margin-bottom: 4px; }
+.coll-cover-sub { font-size: 11px; color: rgba(255,255,255,0.65); letter-spacing: 1px; text-transform: uppercase; }
+
+/* Catalog item row */
+.catalog-item { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.catalog-item:last-child { border-bottom: none; }
+.catalog-item:active { opacity: 0.75; }
+.catalog-item-photo { width: 72px; height: 96px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: var(--gold-pale); display: flex; align-items: center; justify-content: center; font-size: 28px; overflow: hidden; }
+.catalog-item-photo img { width: 100%; height: 100%; object-fit: cover; }
+.catalog-item-body { flex: 1; min-width: 0; }
+.catalog-item-name { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.catalog-item-meta { font-size: 11px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+.catalog-item-price { font-size: 14px; font-weight: 600; color: var(--emerald-mid); }
+.catalog-item-price.no-price { color: #E65100; font-size: 11px; }
+
 /* Collection cards */
 .collection-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; cursor: pointer; display: flex; align-items: center; gap: 14px; }
 .collection-card:active { background: var(--bg); }
@@ -481,6 +499,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:-6px;margin-bottom:10px">Uses 1 Ideogram credit — only on tap</div>
             <div id="modelPhotoOutput" style="display:none">
               <img id="modelPhotoImg" class="preview-img" src="" alt="Model photo">
+              <div id="modelPhotoStockNote" style="display:none;background:#E8F5E9;color:#2E7D32;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:6px;text-align:center">
+                <i class="ti ti-check"></i> This photo will appear in your stock
+              </div>
               <div style="display:flex;gap:8px">
                 <button class="btn btn-secondary btn-sm" onclick="downloadModelPhoto()" style="flex:1"><i class="ti ti-download"></i> Download</button>
               </div>
@@ -602,21 +623,32 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 <!-- COLLECTION DETAIL SHEET -->
 <div class="sheet-overlay" id="collectionDetailSheet" onclick="closeSheetOutside(event,'collectionDetailSheet')">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-      <div class="sheet-title" style="margin-bottom:0" id="collDetailName"></div>
-      <button onclick="closeSheet('collectionDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+  <div class="sheet" style="padding:0;overflow:hidden">
+    <div style="padding:16px 16px 0">
+      <div class="sheet-handle" style="margin:-8px auto 10px"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:11px;color:var(--muted)" id="collDetailMeta"></div>
+        <button onclick="closeSheet('collectionDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+      </div>
     </div>
-    <div id="collDetailMeta" style="font-size:12px;color:var(--muted);margin-bottom:6px"></div>
-    <div id="collRenameRow" style="display:flex;gap:6px;margin-bottom:14px">
-      <input type="text" id="collRenameInput" class="field-input" style="flex:1;margin-bottom:0;font-size:13px" placeholder="Rename collection...">
-      <button class="btn btn-secondary btn-sm" onclick="renameCollection()" style="white-space:nowrap">Rename</button>
+    <!-- Catalog Cover -->
+    <div class="coll-catalog-cover" id="collCatalogCover">
+      <img id="collCoverLogo" class="coll-cover-logo" src="" alt="Meraki by Sam">
+      <div class="coll-cover-title" id="collDetailName"></div>
+      <div class="coll-cover-sub" id="collCoverSub"></div>
     </div>
-    <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()"><i class="ti ti-package"></i> Create Collection Marketing Package</button>
-    <div id="collPkgOutput" style="display:none;margin-bottom:14px"></div>
-    <div class="field-label" style="margin-top:6px">Items in this Collection</div>
-    <div id="collDetailItems" class="inventory-grid" style="margin-top:8px"></div>
+    <!-- Actions bar -->
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+      <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()" style="flex:1;margin:0"><i class="ti ti-package"></i> Collection Marketing Package</button>
+      <button class="btn btn-secondary btn-sm" onclick="toggleCollRename()" style="padding:0 12px;height:38px" title="Rename"><i class="ti ti-pencil"></i></button>
+    </div>
+    <div id="collRenameRow" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);gap:6px;flex-direction:row">
+      <input type="text" id="collRenameInput" class="field-input" style="flex:1;margin-bottom:0;font-size:13px" placeholder="Collection name...">
+      <button class="btn btn-primary btn-sm" onclick="renameCollection()" style="white-space:nowrap">Save</button>
+    </div>
+    <div id="collPkgOutput" style="display:none;padding:0 16px 14px;border-bottom:1px solid var(--border)"></div>
+    <!-- Catalog item list -->
+    <div id="collDetailItems" style="padding:0 16px 24px"></div>
   </div>
 </div>
 
@@ -1353,7 +1385,10 @@ async function saveProduct() {
   btn.disabled = true;
   btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
 
-  const photo = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
+  const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
+  const modelPhoto = currentAnalysis._modelPhotoUrl || null;
+  // If AI model photo was generated, use it as the primary display photo
+  const photo = modelPhoto || uploadedPhoto;
   const price = parseInt(document.getElementById('priceInput').value) || null;
   const cost = await getCostInUsd();
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
@@ -1374,6 +1409,7 @@ async function saveProduct() {
       cost,
       status: 'available',
       photo,
+      model_photo: modelPhoto,
       collection_name: collection,
     }});
     const saved = rows[0];
@@ -1481,6 +1517,7 @@ function resetIntake() {
   document.getElementById('saveProductBtn').style.display = '';
   document.getElementById('backToPhotosBtn').style.display = '';
   document.getElementById('modelPhotoOutput').style.display = 'none';
+  document.getElementById('modelPhotoStockNote').style.display = 'none';
   document.getElementById('feedbackPanel').style.display = 'none';
   document.querySelectorAll('#garmentTypePills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
   document.querySelectorAll('#seasonPills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
@@ -1499,6 +1536,9 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
     img.src = watermarked;
     document.getElementById(outputDivId).style.display = 'block';
     currentAnalysis._modelPhotoUrl = watermarked;
+    // Show indicator that stock will use this photo
+    const note = document.getElementById('modelPhotoStockNote');
+    if (note) { note.style.display = 'block'; }
   } catch(e) {
     showToast('Photo generation failed: ' + e.message);
   }
@@ -1802,14 +1842,18 @@ function openCollectionDetail(name) {
     ? inventory.filter(p => !p.collection_name)
     : inventory.filter(p => p.collection_name === name);
 
+  // Cover
   document.getElementById('collDetailName').textContent = name || 'Uncollected Items';
   const available = items.filter(p => p.status === 'available').length;
   document.getElementById('collDetailMeta').textContent = `${items.length} pieces · ${available} available`;
-  const renameRow = document.getElementById('collRenameRow');
-  const renameInput = document.getElementById('collRenameInput');
-  if (name === null) { renameRow.style.display = 'none'; }
-  else { renameRow.style.display = 'flex'; renameInput.value = name; }
+  document.getElementById('collCoverSub').textContent = `${items.length} piece${items.length !== 1 ? 's' : ''} · ${available} available`;
+  document.getElementById('collCoverLogo').src = 'data:image/png;base64,' + LOGO_B64;
 
+  // Rename
+  document.getElementById('collRenameRow').style.display = 'none';
+  document.getElementById('collRenameInput').value = name || '';
+
+  // Marketing package
   const hasPkg = !!sessionStorage.getItem('collPkg_' + name);
   const pkgBtn = document.getElementById('collPkgBtn');
   const pkgOut = document.getElementById('collPkgOutput');
@@ -1822,22 +1866,41 @@ function openCollectionDetail(name) {
     pkgOut.innerHTML = '';
   }
 
-  const itemsGrid = document.getElementById('collDetailItems');
-  itemsGrid.innerHTML = items.map(p => `
-    <div class="product-card" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail('${p.id}'),200)">
-      <div class="product-thumb">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
-        <div class="product-sku">${p.sku}</div>
-      </div>
-      <div class="product-info">
-        <div class="product-name">${p.name}</div>
-        <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
-        <span class="status-pill status-${p.status}">${p.status}</span>
-        ${productNudge(p)}
-      </div>
-    </div>`).join('');
+  // Catalog list — photo + name + meta + price side by side
+  const itemsEl = document.getElementById('collDetailItems');
+  if (!items.length) {
+    itemsEl.innerHTML = '<div class="empty" style="padding:30px 0"><i class="ti ti-hanger"></i><p>No items in this collection yet.</p></div>';
+  } else {
+    const idxBase = window._collItemActions ? window._collItemActions.length : 0;
+    window._collItemActions = window._collItemActions || [];
+    itemsEl.innerHTML = items.map((p, i) => {
+      const idx = idxBase + i;
+      window._collItemActions[idx] = p.id;
+      const photoHTML = p.photo
+        ? `<div class="catalog-item-photo"><img src="${p.photo}" alt="${p.name}"></div>`
+        : `<div class="catalog-item-photo">👗</div>`;
+      const meta = [p.garment_type, p.season, p.colors].filter(Boolean).join(' · ');
+      return `<div class="catalog-item" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${idx}]),200)">
+        ${photoHTML}
+        <div class="catalog-item-body">
+          <div class="catalog-item-name">${p.name}</div>
+          ${meta ? `<div class="catalog-item-meta">${meta}</div>` : ''}
+          <div class="catalog-item-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price set'}</div>
+          ${p.caption_en ? '<span style="font-size:10px;color:var(--emerald-mid)">✓ Has marketing package</span>' : ''}
+          ${productNudge(p)}
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--muted);font-size:14px;flex-shrink:0;margin-top:4px"></i>
+      </div>`;
+    }).join('');
+  }
 
   openSheet('collectionDetailSheet');
+}
+
+function toggleCollRename() {
+  const row = document.getElementById('collRenameRow');
+  row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  if (row.style.display === 'flex') document.getElementById('collRenameInput').focus();
 }
 
 async function renameCollection() {
