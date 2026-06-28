@@ -4684,11 +4684,23 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
 // ─── BIO EDIT FLOW ─────────────────────────────────────────────────────────────
 // "Don't like the bio?" sheet → Regenerate or Edit Manually
 
-function _openBioRegenerate(style) {
+function _bioSheetError(msg, retryStyle) {
+  const content = document.getElementById('bioEditContent');
+  if (!content) return;
+  content.innerHTML = `
+    <div style="color:var(--burgundy);font-size:13px;padding:12px 0;line-height:1.5">${msg}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+      <button class="btn btn-primary" onclick="_openBioRegenerate(${retryStyle ? `'${retryStyle}'` : ''})" style="width:100%"><i class="ti ti-refresh"></i> Try Again</button>
+      <button class="btn" onclick="_openBioManualEdit()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-edit"></i> Edit Manually</button>
+      <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
+    </div>`;
+}
+
+async function _openBioRegenerate(style) {
   const p = currentProduct;
   if (!p) { closeSheet('bioEditSheet'); return; }
   const content = document.getElementById('bioEditContent');
-  if (content) content.innerHTML = '<div style="text-align:center;padding:20px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:10px;font-size:13px;color:var(--muted)">Regenerating bio…</div></div>';
+  if (content) content.innerHTML = '<div style="text-align:center;padding:20px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:10px;font-size:13px;color:var(--muted)">Regenerating bio…</div><div style="margin-top:6px;font-size:11px;color:var(--muted)">Usually takes 5–15 seconds</div></div>';
 
   const occasionCtx = p.occasion && p.occasion !== 'not specified'
     ? `The selected occasion is "${p.occasion}". Use occasion-specific language ONLY where it fits naturally.`
@@ -4699,46 +4711,60 @@ function _openBioRegenerate(style) {
     : style === 'luxury' ? 'Write in a premium, aspirational luxury boutique tone.'
     : 'Write in a natural, confident boutique tone.';
 
-  const prompt = `You are writing product bio copy for Meraki by Sam, a Pakistani clothing boutique.
+  const prompt = `Write product bio copy for a Pakistani clothing boutique (Meraki by Sam).
 
 Garment: ${p.name || 'Unnamed'}
 Type: ${p.garment_type || 'garment'}
 Colors: ${p.colors || 'not specified'}
 Category: ${p.category || 'not specified'}
-Current description: ${p.description_en || p.catalog_blurb || 'not available'}
+Current description: ${(p.description_en || p.catalog_blurb || '').slice(0, 300) || 'not available'}
 Motifs: ${(p.motifs || []).join(', ') || 'not specified'}
+${occasionCtx}
+${styleNote}
 
-Occasion rule: ${occasionCtx}
-Style direction: ${styleNote}
+Return ONLY valid JSON (no markdown, no extra text):
+{"description_en":"2-3 sentence garment bio","catalog_blurb":"2-sentence catalog entry","share_blurb":"1-2 sentences, max 200 chars"}`;
 
-Return ONLY valid JSON, no markdown:
-{
-  "description_en": "2-3 sentence garment bio. Specific to the actual garment. Lead with the most distinctive visual detail. No generic filler.",
-  "catalog_blurb": "2-sentence catalog entry. Professional editorial tone. Most distinctive detail first.",
-  "share_blurb": "1-2 sentences for a social share image. 140-220 characters max. No hashtags, no price, no CTA."
-}`;
+  try {
+    const resp = await Promise.race([
+      callClaude([{ role: 'user', content: prompt }], '', 400),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000))
+    ]);
 
-  callClaude([{ role: 'user', content: prompt }], '', 600).then(resp => {
-    let parsed;
-    try { parsed = JSON.parse(resp); }
-    catch { try { parsed = JSON.parse(resp.replace(/```json|```/g, '').trim()); } catch { parsed = null; } }
-    if (!parsed) {
-      if (content) content.innerHTML = '<div style="color:var(--burgundy);font-size:13px;padding:12px">Could not parse bio — try again.</div>';
+    let parsed = null;
+    try { parsed = JSON.parse(resp); } catch (_) {
+      try { parsed = JSON.parse(resp.replace(/```json|```/g, '').trim()); } catch (_) {}
+    }
+    if (!parsed || !parsed.description_en) {
+      _bioSheetError('Could not parse the generated bio. Please try again or edit manually.', style);
       return;
     }
-    const update = { description_en: parsed.description_en || null, catalog_blurb: parsed.catalog_blurb || null, share_blurb: parsed.share_blurb || null };
-    db('update', 'products', { id: p.id, data: update }).then(() => {
-      const idx = inventory.findIndex(x => x.id === p.id);
-      if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
-      closeSheet('bioEditSheet');
-      openMktShareWorkspace();
-      showToast('Bio updated ✓');
-    }).catch(e => {
-      if (content) content.innerHTML = `<div style="color:var(--burgundy);font-size:13px;padding:12px">Save failed: ${e.message}</div>`;
-    });
-  }).catch(e => {
-    if (content) content.innerHTML = `<div style="color:var(--burgundy);font-size:13px;padding:12px">AI error: ${e.message}</div>`;
-  });
+
+    const update = {
+      description_en: parsed.description_en || null,
+      catalog_blurb: parsed.catalog_blurb || null,
+      share_blurb: parsed.share_blurb || null
+    };
+
+    try {
+      await db('update', 'products', { id: p.id, data: update });
+    } catch (saveErr) {
+      console.warn('[BioRegen] DB save failed, updating state only:', saveErr.message);
+    }
+
+    const idx = inventory.findIndex(x => x.id === p.id);
+    if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
+
+    closeSheet('bioEditSheet');
+    openMktShareWorkspace();
+    showToast('Bio updated ✓');
+  } catch (e) {
+    console.error('[BioRegen] failed:', e.message);
+    const msg = e.message.includes('timed out')
+      ? 'Bio regeneration timed out. Please try again or edit manually.'
+      : `Regeneration failed: ${e.message}`;
+    _bioSheetError(msg, style);
+  }
 }
 
 function _openBioManualEdit() {
