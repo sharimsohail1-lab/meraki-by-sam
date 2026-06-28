@@ -1,3 +1,11 @@
+// Runs all pending SQL migrations in migrations/ in alphabetical order.
+// Accepts any HTTP method (GET or POST both work).
+// If MIGRATION_SECRET env var is set, the request must include header:
+//   x-migration-secret: <value>   (do not expose the value in URLs or logs)
+// If MIGRATION_SECRET is not set, the endpoint is open — fine for a private app.
+// Always sends NOTIFY pgrst, 'reload schema' at the end to refresh PostgREST.
+// After adding DB columns, run this endpoint once via Hoppscotch or browser fetch.
+// If Product Detail detail photos show a schema cache error, this is the fix.
 import { createClient } from '@supabase/supabase-js';
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
