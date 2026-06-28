@@ -3,3 +3,4 @@
 -- Distinct from catalog_blurb (which can be longer) and description_en (full analysis).
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS share_blurb TEXT;
+NOTIFY pgrst, 'reload schema';

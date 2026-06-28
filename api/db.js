@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Columns added in later migrations that may not exist if schema cache is stale
-const OPTIONAL_COLS = ['size_inventory', 'detail_photos'];
+const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb'];
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
