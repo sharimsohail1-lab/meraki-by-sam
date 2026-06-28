@@ -2244,59 +2244,97 @@ async function analyzePhoto() {
       .filter(([id]) => _analysisExtraIds.has(id) || slotMap[id]?.role === 'detail')
       .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
 
-    // Claude only accepts these image media types. Remap HEIC/HEIF (iPhone) → jpeg.
-    const _CLAUDE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-    function _prepPhotoBlock(id, p, role) {
-      if (!p.dataUrl) { console.warn('[ANALYSIS] skip', id, '— no dataUrl'); return null; }
-      const commaIdx = p.dataUrl.indexOf(',');
-      if (commaIdx === -1) { console.warn('[ANALYSIS] skip', id, '— malformed dataUrl (no comma)'); return null; }
-      const b64 = p.dataUrl.slice(commaIdx + 1);
-      if (!b64) { console.warn('[ANALYSIS] skip', id, '— empty base64'); return null; }
-      const headerMime = (p.dataUrl.slice(5, commaIdx).split(';')[0]) || '';
-      let mediaType = p.file?.type || headerMime || 'image/jpeg';
-      if (!_CLAUDE_MEDIA_TYPES.has(mediaType)) {
-        if (/heic|heif/i.test(mediaType)) {
-          console.warn('[ANALYSIS] remapped', mediaType, '→ image/jpeg for:', id, '(HEIC from iPhone — FileReader already re-encoded as JPEG)');
-          mediaType = 'image/jpeg';
-        } else {
-          console.warn('[ANALYSIS] skip', id, '— unsupported media type:', mediaType, '(Claude only accepts jpeg/png/gif/webp)');
-          showToast('One photo format not supported — try replacing it with a JPEG.');
-          return null;
-        }
-      }
-      console.log('[ANALYSIS]', role, id, '| type:', mediaType, '| b64len:', b64.length);
-      return { b64, mediaType };
-    }
-
     console.log('[ANALYSIS] structural slots:', structuralPhotos.map(([id]) => id));
     console.log('[ANALYSIS] detail slots:', detailPhotos.map(([id]) => id));
+
+    // Re-encode every photo to JPEG via canvas before sending to Claude.
+    // This handles HEIC/HEIF (iPhone), BMP, TIFF, and any other format by letting
+    // the browser decode the pixels and re-encoding to guaranteed-valid JPEG.
+    // Claude only accepts image/jpeg, image/png, image/gif, image/webp.
+    async function _normalizeForClaude(dataUrl, id) {
+      return new Promise((resolve, reject) => {
+        if (!dataUrl) { reject(new Error('no dataUrl')); return; }
+        const img = new Image();
+        img.onload = () => {
+          if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+            reject(new Error('zero dimensions after load'));
+            return;
+          }
+          // Downscale to max 1600px on the long edge — keeps payload reasonable
+          const MAX = 1600;
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (w > MAX || h > MAX) {
+            const r = Math.min(MAX / w, MAX / h);
+            w = Math.round(w * r); h = Math.round(h * r);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx2 = canvas.getContext('2d');
+          if (!ctx2) { reject(new Error('no 2d context')); return; }
+          ctx2.drawImage(img, 0, 0, w, h);
+          const jpegUrl = canvas.toDataURL('image/jpeg', 0.9);
+          const commaIdx = jpegUrl.indexOf(',');
+          if (commaIdx === -1) { reject(new Error('toDataURL returned no comma')); return; }
+          const base64 = jpegUrl.slice(commaIdx + 1);
+          if (!base64) { reject(new Error('toDataURL returned empty base64')); return; }
+          resolve({ mediaType: 'image/jpeg', base64 });
+        };
+        img.onerror = () => reject(new Error('browser could not decode image (unsupported format?)'));
+        img.src = dataUrl;
+      });
+    }
 
     _stage = 'build-payload';
     console.log('MERAKI_ANALYSIS_STAGE: build-payload');
     const photoContent = [];
+    let _skippedDetail = 0;
+
     if (structuralPhotos.length) {
       photoContent.push({ type: 'text', text: '=== STRUCTURAL PHOTOS (define garment layout, silhouette, proportions) ===' });
-      structuralPhotos.forEach(([id, p]) => {
-        const prep = _prepPhotoBlock(id, p, 'structural');
-        if (!prep) return;
+      for (const [id, p] of structuralPhotos) {
+        let norm;
+        try {
+          norm = await _normalizeForClaude(p.dataUrl, id);
+        } catch(normErr) {
+          console.warn('[ANALYSIS] structural skip', id, '—', normErr.message, '| originalPrefix:', p.dataUrl?.slice(0, 50));
+          throw new Error(`Could not read the garment photo (${slotMap[id]?.label || id}). Please replace it with a JPEG or PNG and try again.`);
+        }
+        console.log('[ANALYSIS PHOTO]', { id, role: 'structural', label: slotMap[id]?.label || id, fileType: p.file?.type, originalPrefix: p.dataUrl?.slice(0, 50), normalizedMediaType: norm.mediaType, normalizedBase64Length: norm.base64.length, base64StartsWithData: norm.base64.startsWith('data:') });
         photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — STRUCTURAL]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: prep.mediaType, data: prep.b64 } });
-      });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: norm.mediaType, data: norm.base64 } });
+      }
     }
     if (detailPhotos.length) {
       photoContent.push({ type: 'text', text: '=== DETAIL PHOTOS (close-up references only — extract embroidery/texture info; do NOT use to redefine garment structure or layout) ===' });
-      detailPhotos.forEach(([id, p]) => {
-        const prep = _prepPhotoBlock(id, p, 'detail');
-        if (!prep) return;
+      for (const [id, p] of detailPhotos) {
+        let norm;
+        try {
+          norm = await _normalizeForClaude(p.dataUrl, id);
+        } catch(normErr) {
+          console.warn('[ANALYSIS] detail skip', id, '—', normErr.message, '| originalPrefix:', p.dataUrl?.slice(0, 50));
+          _skippedDetail++;
+          continue;
+        }
         const label = _analysisExtraIds.has(id) ? (extraSlots.find(s => s.id === id)?.label || id) : (slotMap[id]?.label || id);
+        console.log('[ANALYSIS PHOTO]', { id, role: 'detail', label, fileType: p.file?.type, originalPrefix: p.dataUrl?.slice(0, 50), normalizedMediaType: norm.mediaType, normalizedBase64Length: norm.base64.length, base64StartsWithData: norm.base64.startsWith('data:') });
         photoContent.push({ type: 'text', text: `[${label} — DETAIL REFERENCE]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: prep.mediaType, data: prep.b64 } });
-      });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: norm.mediaType, data: norm.base64 } });
+      }
+      if (_skippedDetail > 0) showToast(`${_skippedDetail} detail photo${_skippedDetail > 1 ? 's' : ''} could not be read and ${_skippedDetail > 1 ? 'were' : 'was'} skipped.`);
     }
-    // Require at least one structural photo made it through validation
-    const structuralInPayload = photoContent.filter(b => b.type === 'image').length;
-    if (structuralInPayload === 0) throw new Error('No valid photos — please replace photos and try again.');
-    console.log('[ANALYSIS] photoContent blocks:', photoContent.length, '| image blocks:', structuralInPayload);
+
+    const _imageBlockCount = photoContent.filter(b => b.type === 'image').length;
+    if (_imageBlockCount === 0) throw new Error('No valid photos — please replace photos and try again.');
+    console.log('[ANALYSIS PAYLOAD SUMMARY]', {
+      structuralCount: structuralPhotos.length,
+      detailCount: detailPhotos.length,
+      skippedDetail: _skippedDetail,
+      imageBlocks: photoContent.filter(b => b.type === 'image').map(b => ({
+        media_type: b.source?.media_type,
+        dataLength: b.source?.data?.length,
+        dataStartsWithData: b.source?.data?.startsWith?.('data:')
+      }))
+    });
 
     _stage = 'claude-request';
     console.log('MERAKI_ANALYSIS_STAGE: claude-request');
@@ -3009,7 +3047,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-analysis-inset-fix';
+const _MERAKI_BUILD = '2026-06-28-analysis-normalize';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
