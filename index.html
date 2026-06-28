@@ -4702,28 +4702,56 @@ async function _openBioRegenerate(style) {
   const content = document.getElementById('bioEditContent');
   if (content) content.innerHTML = '<div style="text-align:center;padding:20px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:10px;font-size:13px;color:var(--muted)">Regenerating bio…</div><div style="margin-top:6px;font-size:11px;color:var(--muted)">Usually takes 5–15 seconds</div></div>';
 
+  // Parse motifs — stored as JSON string in DB, may also already be array
+  let motifsList = [];
+  try {
+    const raw = p.motifs;
+    if (Array.isArray(raw)) motifsList = raw;
+    else if (typeof raw === 'string' && raw.trim()) motifsList = JSON.parse(raw);
+  } catch (_) {}
+  const motifsText = motifsList.length
+    ? motifsList.map(m => (m.type && m.placement) ? `${m.type} at ${m.placement}` : (m.type || String(m))).join(', ')
+    : null;
+
+  // Parse detail photo labels — saved as JSON string
+  let detailLabels = [];
+  try {
+    const raw = p.detail_photos;
+    const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw.trim() ? JSON.parse(raw) : []);
+    if (Array.isArray(arr)) detailLabels = arr.map(d => d.label || d.slot).filter(Boolean);
+  } catch (_) {}
+
+  // Structural fields saved from original upload analysis
+  const structural = [
+    p.neckline ? `neckline: ${p.neckline}` : null,
+    p.has_placket === true ? 'has front placket' : p.has_placket === false ? 'no placket' : null,
+    p.has_dupatta === true ? 'includes dupatta' : p.has_dupatta === false ? 'no dupatta' : null,
+  ].filter(Boolean).join(', ');
+
   const occasionCtx = p.occasion && p.occasion !== 'not specified'
-    ? `The selected occasion is "${p.occasion}". Use occasion-specific language ONLY where it fits naturally.`
-    : 'No specific occasion. Keep all copy garment-focused and event-agnostic. Do NOT invent an occasion.';
-  const styleNote = style === 'elegant' ? 'Write in an elevated, poetic, editorial tone.'
-    : style === 'simple' ? 'Write in a clear, warm, conversational tone. No poetic excess.'
-    : style === 'detailed' ? 'Include as much specific garment detail as possible.'
-    : style === 'luxury' ? 'Write in a premium, aspirational luxury boutique tone.'
-    : 'Write in a natural, confident boutique tone.';
+    ? `Occasion: ${p.occasion} — use occasion language only where it fits naturally.`
+    : 'No occasion selected — keep copy garment-focused, do NOT invent an event or occasion.';
+  const styleNote = style === 'elegant' ? 'Tone: elevated, poetic, editorial.'
+    : style === 'simple' ? 'Tone: clear, warm, conversational. No poetic excess.'
+    : style === 'detailed' ? 'Tone: detailed — include as many specific garment details as available.'
+    : style === 'luxury' ? 'Tone: premium, aspirational luxury boutique.'
+    : 'Tone: natural, confident boutique voice.';
 
-  const prompt = `Write product bio copy for a Pakistani clothing boutique (Meraki by Sam).
+  const prompt = `You are rewriting the product bio for a Pakistani clothing boutique using ONLY the saved garment facts below. Do not invent details. Do not add fabric types, motifs, occasions, or structural features unless they appear in the data.
 
-Garment: ${p.name || 'Unnamed'}
-Type: ${p.garment_type || 'garment'}
-Colors: ${p.colors || 'not specified'}
+Garment name: ${p.name || 'Unnamed'}
+Type: ${p.garment_type || 'not specified'}
 Category: ${p.category || 'not specified'}
-Current description: ${(p.description_en || p.catalog_blurb || '').slice(0, 300) || 'not available'}
-Motifs: ${(p.motifs || []).join(', ') || 'not specified'}
+Colors: ${p.colors || 'not specified'}
+${motifsText ? `Motifs: ${motifsText}` : ''}
+${structural ? `Structure: ${structural}` : ''}
+${detailLabels.length ? `Detail areas photographed: ${detailLabels.join(', ')}` : ''}
+Existing bio: ${(p.description_en || p.catalog_blurb || '').slice(0, 400) || 'none'}
 ${occasionCtx}
 ${styleNote}
 
-Return ONLY valid JSON (no markdown, no extra text):
-{"description_en":"2-3 sentence garment bio","catalog_blurb":"2-sentence catalog entry","share_blurb":"1-2 sentences, max 200 chars"}`;
+Return ONLY valid JSON (no markdown):
+{"description_en":"2-3 sentence garment bio","catalog_blurb":"2-sentence catalog entry","share_blurb":"1-2 sentences max 200 chars"}`;
 
   try {
     const resp = await Promise.race([
