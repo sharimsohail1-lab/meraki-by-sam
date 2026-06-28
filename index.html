@@ -3556,7 +3556,7 @@ function _openProductDetailUI(p) {
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
   document.getElementById('reservedForInput').value = p.reserved_for || '';
   ['available','reserved','sold'].forEach(s => {
-    document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
+    document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
   });
   initDetailSizeSteppers(p);
   openSheet('productDetailSheet');
@@ -3582,7 +3582,7 @@ async function updateProductStatus(status) {
     inventory[idx] = { ...inventory[idx], ...update };
     currentProduct = inventory[idx];
     ['available','reserved','sold'].forEach(s => {
-      document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (status === s ? ' active-' + s : '');
+      document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
     showToast('Status updated');
   } catch(e) { showToast('Error: ' + e.message); }
@@ -3628,7 +3628,7 @@ async function _markSizeAsSold(size) {
     // Refresh size steppers and status buttons
     initDetailSizeSteppers(currentProduct);
     ['available','reserved','sold'].forEach(s => {
-      document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (newStatus === s ? ' active-' + s : '');
+      document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (newStatus === s ? ' active-' + s : '');
     });
     showToast(total === 0 ? 'All sizes sold — marked Sold Out' : `Size ${size} sold · ${total} remaining`);
   } catch(e) { showToast('Error: ' + e.message); }
@@ -3664,7 +3664,7 @@ async function saveProductEdits() {
     currentProduct = inventory[idx];
     // Refresh status buttons if status changed
     ['available','reserved','sold'].forEach(s => {
-      document.getElementById('statusBtn' + s.charAt(0).toUpperCase() + s.slice(1)).className = 'status-btn' + (status === s ? ' active-' + s : '');
+      document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
     _updateSizeTotalNote('detailSizeGrid', detailSizeState);
     showToast('Saved');
