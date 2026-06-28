@@ -742,8 +742,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="goToCatalogSelection()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
       <div class="catalog-toolbar-title">Catalog Preview</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-secondary btn-sm" onclick="printCatalog()" style="padding:0 10px"><i class="ti ti-printer"></i></button>
-        <button class="btn btn-primary btn-sm" onclick="shareCatalogWhatsApp()" style="padding:0 10px"><i class="ti ti-brand-whatsapp"></i></button>
+        <button class="btn btn-secondary btn-sm" onclick="printCatalog()" style="padding:0 10px" title="Print / Save PDF"><i class="ti ti-printer"></i></button>
+        <button class="btn btn-secondary btn-sm" id="catDownloadBtn" onclick="downloadCatalogImage()" style="padding:0 10px" title="Download catalog image"><i class="ti ti-download"></i></button>
+        <button class="btn btn-primary btn-sm" id="catShareBtn" onclick="shareCatalogWithAsset()" style="padding:0 10px" title="Share catalog"><i class="ti ti-share"></i></button>
       </div>
     </div>
     <div id="catalogWarnings" style="display:none"></div>
@@ -2734,7 +2735,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-mktshare';
+const _MERAKI_BUILD = '2026-06-28-catalog-share';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -4010,13 +4011,196 @@ function printCatalog() {
   window.print();
 }
 
-function shareCatalogWhatsApp() {
+function _catalogWhatsAppMessage() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   const collName = catalogCollection || 'Collection';
   const lines = selected.map(p => `• ${p.name} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
-  const msg = `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
-  const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
-  window.open(url, '_blank');
+  return `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
+}
+
+// Render all selected catalog product pages to a single tall canvas image.
+async function _buildCatalogImage() {
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  if (!selected.length) throw new Error('No products selected');
+
+  const W = 1080;
+  // Each product card: image area (W * 4/3) + info panel (~280px) + gap (24px)
+  const IMG_H = Math.round(W * (4 / 3));  // 1440 — portrait 3:4 image
+  const INFO_H = 280;
+  const GAP = 24;
+  const PAD = 48;
+  const CARD_H = IMG_H + INFO_H;
+  const TOTAL_H = selected.length * CARD_H + (selected.length - 1) * GAP + GAP * 2;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = TOTAL_H;
+  const ctx = canvas.getContext('2d');
+
+  // Cream background
+  ctx.fillStyle = '#FDF8F3';
+  ctx.fillRect(0, 0, W, TOTAL_H);
+
+  // Header strip
+  ctx.fillStyle = '#6B2737';
+  ctx.fillRect(0, 0, W, GAP * 2);
+  ctx.fillStyle = '#fff';
+  ctx.font = `600 28px "Playfair Display", serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText((catalogCollection || 'Collection') + ' · Meraki by Sam', W / 2, GAP);
+
+  // Load logo once
+  let logoImg = null;
+  if (MERAKI_LOGO_SRC) {
+    try { logoImg = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch(_) {}
+  }
+
+  for (let i = 0; i < selected.length; i++) {
+    const p = selected[i];
+    const cardTop = GAP * 2 + i * (CARD_H + GAP);
+
+    // ── Image area ──────────────────────────────────────────────────────────
+    ctx.fillStyle = '#f0ede8';
+    ctx.fillRect(0, cardTop, W, IMG_H);
+
+    const imgSrc = p.model_photo || p.photo;
+    if (imgSrc) {
+      try {
+        const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
+        const img = await _loadImgWithTimeout(proxied, 10000);
+        // Cover-crop to fill width, smart vertical centering (show top 60% to keep head/face)
+        const scale = W / img.naturalWidth;
+        const dh = img.naturalHeight * scale;
+        const srcY = dh > IMG_H ? -(dh - IMG_H) * 0.15 : (IMG_H - dh) / 2;
+        ctx.drawImage(img, 0, cardTop + srcY, W, dh);
+      } catch(_) {}
+    }
+
+    // Sold stamp
+    const isSoldOut = !isProductAvailable(p);
+    if (isSoldOut || p.status === 'reserved') {
+      const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
+      const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
+      ctx.font = `bold 28px "Playfair Display", serif`;
+      const tw = ctx.measureText(label).width;
+      const sw = tw + 36, sh = 48;
+      const sx = W - sw - 28, sy = cardTop + 24;
+      ctx.save();
+      ctx.fillStyle = stampBg;
+      ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, sx + sw / 2, sy + sh / 2);
+      ctx.restore();
+    }
+
+    // Logo watermark on image (bottom-right, safe margin)
+    if (logoImg) {
+      const lw = W * 0.18, lh = (logoImg.height / logoImg.width) * lw;
+      const lm = 52;
+      ctx.globalAlpha = 0.72;
+      ctx.drawImage(logoImg, W - lw - lm, cardTop + IMG_H - lh - lm, lw, lh);
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Info panel ──────────────────────────────────────────────────────────
+    const infoTop = cardTop + IMG_H;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, infoTop, W, INFO_H);
+    ctx.fillStyle = '#f0ede8';
+    ctx.fillRect(0, infoTop, W, 2);
+
+    let ty = infoTop + 36;
+    // Name
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = `600 48px "Playfair Display", serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const nl = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 58, 2);
+    ty += nl * 58 + 10;
+
+    // Blurb (short — 1 line only)
+    const blurb = p.catalog_blurb || p.description_en || '';
+    if (blurb) {
+      ctx.fillStyle = '#666';
+      ctx.font = `italic 28px Inter, sans-serif`;
+      _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 38, 1);
+      ty += 42;
+    }
+
+    // Price / status
+    if (isSoldOut) {
+      ctx.fillStyle = '#B71C1C';
+      ctx.font = `600 28px Inter, sans-serif`;
+      ctx.fillText('SOLD OUT', PAD, ty);
+    } else {
+      ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
+      ctx.font = `600 32px Inter, sans-serif`;
+      ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
+      ty += 42;
+      const sizes = getAvailableSizes(p);
+      ctx.fillStyle = '#999';
+      ctx.font = `24px Inter, sans-serif`;
+      ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
+    }
+
+    // Card separator
+    if (i < selected.length - 1) {
+      ctx.fillStyle = '#e8e0d8';
+      ctx.fillRect(0, infoTop + INFO_H, W, GAP);
+    }
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.90);
+}
+
+async function downloadCatalogImage() {
+  const btn = document.getElementById('catDownloadBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
+  try {
+    const dataUrl = await _buildCatalogImage();
+    const collName = (catalogCollection || 'Catalog').replace(/[^a-z0-9]/gi, '-');
+    triggerDownload(dataUrl, `Meraki-${collName}.jpg`);
+  } catch(e) {
+    showToast('Could not export catalog: ' + e.message);
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i>'; }
+}
+
+async function shareCatalogWithAsset() {
+  const btn = document.getElementById('catShareBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
+
+  const msg = _catalogWhatsAppMessage();
+  const collName = (catalogCollection || 'Catalog').replace(/[^a-z0-9]/gi, '-');
+
+  try {
+    const dataUrl = await _buildCatalogImage();
+    const blob = await (await fetch(dataUrl)).blob();
+    const file = new File([blob], `Meraki-${collName}.jpg`, { type: 'image/jpeg' });
+    const shareData = { title: catalogCollection || 'Meraki by Sam', text: msg, files: [file] };
+
+    if (navigator.canShare && navigator.canShare(shareData)) {
+      await navigator.share(shareData);
+    } else if (typeof navigator.share === 'function') {
+      // Share text only if files not supported
+      await navigator.share({ title: shareData.title, text: msg });
+    } else {
+      // No Web Share — download image and open WhatsApp text
+      triggerDownload(dataUrl, `Meraki-${collName}.jpg`);
+      setTimeout(() => window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank'), 800);
+      showToast('Catalog downloaded — send it in WhatsApp with the message');
+    }
+  } catch(e) {
+    if (e.name === 'AbortError') { /* user cancelled */ }
+    else {
+      // Fallback: text-only WhatsApp
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+      showToast('Could not share file — opening WhatsApp with caption instead');
+    }
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
 }
 
 function _loadImgWithTimeout(src, ms) {
@@ -4047,21 +4231,23 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
 }
 
 async function _buildItemShareCard(p) {
-  // Catalog-style layout: image on top (~65%), white info panel on bottom (~35%).
-  // Mirrors the cat-product-page visual language.
-  const SIZE = 1080;
-  const IMG_H = 700;   // top image area
+  // Catalog-style layout: image on top (~72%), white info panel on bottom (~28%).
+  // Portrait 1080×1350 gives enough room for full model + readable text panel.
+  const W = 1080;
+  const H = 1350;
+  const IMG_H = 970;   // top image area
   const INFO_Y = IMG_H;
-  const INFO_H = SIZE - IMG_H; // 380px info panel
+  const INFO_H = H - IMG_H; // 380px info panel
   const PAD = 48;      // horizontal padding inside info panel
+  const SIZE = W; // kept for any code using SIZE below
 
   const canvas = document.createElement('canvas');
-  canvas.width = SIZE; canvas.height = SIZE;
+  canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
   // ── Image area background (cream fallback if no photo) ───────────────────
   ctx.fillStyle = '#f0ede8';
-  ctx.fillRect(0, 0, SIZE, IMG_H);
+  ctx.fillRect(0, 0, W, IMG_H);
 
   // Load product photo — prefer DOM element (already loaded, no refetch)
   let imgEl = null;
@@ -4079,10 +4265,12 @@ async function _buildItemShareCard(p) {
     }
   }
   if (imgEl) {
-    // Cover-crop into the image area
-    const scale = Math.max(SIZE / imgEl.naturalWidth, IMG_H / imgEl.naturalHeight);
-    const dw = imgEl.naturalWidth * scale, dh = imgEl.naturalHeight * scale;
-    ctx.drawImage(imgEl, (SIZE - dw) / 2, (IMG_H - dh) / 2, dw, dh);
+    // Cover-crop to fill width; smart vertical crop — show top portion to keep head visible
+    const scale = W / imgEl.naturalWidth;
+    const dh = imgEl.naturalHeight * scale;
+    // Shift upward by at most 15% of overflow so feet can be cropped, not head
+    const offsetY = dh > IMG_H ? -(dh - IMG_H) * 0.15 : (IMG_H - dh) / 2;
+    ctx.drawImage(imgEl, 0, offsetY, W, dh);
   }
 
   // ── Sold / Reserved stamp — top-right corner of image (matches catalog style) ──
@@ -4093,7 +4281,7 @@ async function _buildItemShareCard(p) {
     ctx.font = `bold ${fontSize}px "Playfair Display", serif`;
     const textW = ctx.measureText(label).width;
     const sw = textW + 36, sh = 48;
-    const sx = SIZE - sw - 28, sy = 24;
+    const sx = W - sw - 28, sy = 24;
     ctx.save();
     ctx.fillStyle = stampBg;
     ctx.beginPath();
@@ -4108,11 +4296,11 @@ async function _buildItemShareCard(p) {
 
   // ── Thin separator line at top of info panel ─────────────────────────────
   ctx.fillStyle = '#f0ede8';
-  ctx.fillRect(0, INFO_Y, SIZE, 2);
+  ctx.fillRect(0, INFO_Y, W, 2);
 
   // ── White info panel ──────────────────────────────────────────────────────
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, INFO_Y + 2, SIZE, INFO_H - 2);
+  ctx.fillRect(0, INFO_Y + 2, W, INFO_H - 2);
 
   // ── Product name (Playfair Display, like cat-product-name 20px → scaled up) ─
   let ty = INFO_Y + 42;
@@ -4120,33 +4308,30 @@ async function _buildItemShareCard(p) {
   ctx.font = `600 52px "Playfair Display", serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, SIZE - PAD * 2, 62, 2);
-  ty += nameLines * 62 + 16;
+  const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 62, 2);
+  ty += nameLines * 62 + 14;
 
   // ── Catalog blurb / short description ────────────────────────────────────
   const blurb = p.catalog_blurb || p.description_en || '';
   if (blurb) {
     ctx.fillStyle = '#666666';
-    ctx.font = `italic 30px Inter, sans-serif`;
-    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, SIZE - PAD * 2, 42, 2);
-    ty += blurbLines * 42 + 20;
+    ctx.font = `italic 28px Inter, sans-serif`;
+    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 38, 2);
+    ty += blurbLines * 38 + 16;
   }
 
-  // ── Price (like cat-product-price) ───────────────────────────────────────
+  // ── Price / status ────────────────────────────────────────────────────────
   if (p.status === 'sold') {
     ctx.fillStyle = '#B71C1C';
-    ctx.font = `600 32px Inter, sans-serif`;
+    ctx.font = `600 30px Inter, sans-serif`;
     ctx.fillText('SOLD OUT · Message for similar pieces', PAD, ty);
-    ty += 44;
   } else {
     ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
-    ctx.font = `600 ${p.price ? 36 : 30}px Inter, sans-serif`;
+    ctx.font = `600 34px Inter, sans-serif`;
     ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
-    ty += 50;
-
-    // Sizes
+    ty += 46;
     const sizes = getAvailableSizes(p);
-    ctx.font = `26px Inter, sans-serif`;
+    ctx.font = `24px Inter, sans-serif`;
     ctx.fillStyle = '#999999';
     ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
   }
@@ -4155,11 +4340,11 @@ async function _buildItemShareCard(p) {
   if (MERAKI_LOGO_SRC) {
     try {
       const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
-      const logoW = SIZE * 0.18;
+      const logoW = W * 0.18;
       const logoH = (logo.height / logo.width) * logoW;
-      const safeMargin = 48; // well inside any crop
-      ctx.globalAlpha = 0.70;
-      ctx.drawImage(logo, SIZE - logoW - safeMargin, SIZE - logoH - safeMargin, logoW, logoH);
+      const safeMargin = 48;
+      ctx.globalAlpha = 0.68;
+      ctx.drawImage(logo, W - logoW - safeMargin, H - logoH - safeMargin, logoW, logoH);
       ctx.globalAlpha = 1;
     } catch(_) {}
   }
