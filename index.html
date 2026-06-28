@@ -105,6 +105,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .bio-edit-cta:active { transform:translateY(1px); }
 .change-name-btn { background:none;border:none;font-size:12px;color:var(--burgundy);cursor:pointer;padding:2px 8px;font-weight:600;text-decoration:underline;flex-shrink:0; }
 .sheet-overlay.open { display: flex; }
+.sheet-overlay.exh-top { z-index: 901; }
 .sheet { background: white; border-radius: 16px 16px 0 0; width: 100%; max-width: 480px; min-height: 60vh; max-height: 90vh; overflow-y: auto; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
 .sheet-title { font-family: 'Playfair Display', serif; font-size: 17px; color: var(--burgundy); margin-bottom: 14px; }
@@ -1366,7 +1367,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- ADD / EDIT EXHIBITION ITEM SHEET -->
-<div class="sheet-overlay" id="addExhItemSheet" onclick="closeSheetOutside(event,'addExhItemSheet')">
+<div class="sheet-overlay exh-top" id="addExhItemSheet" onclick="closeSheetOutside(event,'addExhItemSheet')">
   <div class="sheet" style="max-height:92vh;overflow-y:auto">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -1425,7 +1426,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- LOG EXHIBITION SALE SHEET -->
-<div class="sheet-overlay" id="logExhSaleSheet" onclick="closeSheetOutside(event,'logExhSaleSheet')">
+<div class="sheet-overlay exh-top" id="logExhSaleSheet" onclick="closeSheetOutside(event,'logExhSaleSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -1466,7 +1467,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- ADJUST EXHIBITION INVENTORY SHEET -->
-<div class="sheet-overlay" id="adjustExhItemSheet" onclick="closeSheetOutside(event,'adjustExhItemSheet')">
+<div class="sheet-overlay exh-top" id="adjustExhItemSheet" onclick="closeSheetOutside(event,'adjustExhItemSheet')">
   <div class="sheet" style="max-height:85vh;overflow-y:auto">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -1689,6 +1690,8 @@ let exhItems = [];           // exh_items rows for currentExhibition
 let exhSales = [];           // exh_sales rows for currentExhibition (non-voided)
 let _exhItem = null;         // item currently being acted on (sale / adjust / edit)
 let _exhTrackerTab = 'inventory';
+let _exhListFilter = 'active';   // 'active' | 'archived' on exhibitions list
+let _exhItemFilter = 'active';   // 'active' | 'archived' inside tracker
 let _exhAddSizes = {};       // size counts in Add/Edit Item form
 let _exhAddPhoto = null;     // compressed data URL for item photo
 let _exhSaleSize = '';       // selected size in Log Sale sheet
@@ -3661,7 +3664,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-crop-v2';
+const _MERAKI_BUILD = '2026-06-28-exh-archive';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -6989,16 +6992,110 @@ async function saveImportedCustomer() {
 // ─── SHOW / EXHIBITIONS ───────────────────────────────────────────────────────
 function renderExhibitions() {
   const list = document.getElementById('exhibitionList');
-  if (!exhibitions.length) {
-    list.innerHTML = '<div class="empty"><i class="ti ti-building-store"></i><p>No exhibitions yet. Add one to track what you bring and sell.</p></div>';
+  const nonDeleted = exhibitions.filter(e => e.status !== 'deleted');
+  const visible = nonDeleted.filter(e => _exhListFilter === 'archived' ? e.status === 'archived' : e.status !== 'archived');
+  const archivedCount = nonDeleted.filter(e => e.status === 'archived').length;
+
+  const filterBar = `<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff">
+    <button onclick="_setExhListFilter('active')" style="flex:1;padding:10px;border:none;background:${_exhListFilter==='active'?'var(--burgundy)':'transparent'};color:${_exhListFilter==='active'?'#fff':'var(--ink)'};font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation">Active</button>
+    <button onclick="_setExhListFilter('archived')" style="flex:1;padding:10px;border:none;border-left:1px solid var(--border);background:${_exhListFilter==='archived'?'var(--burgundy)':'transparent'};color:${_exhListFilter==='archived'?'#fff':'var(--ink)'};font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation">Archived${archivedCount ? ' (' + archivedCount + ')' : ''}</button>
+  </div>`;
+
+  if (!visible.length) {
+    list.innerHTML = filterBar + `<div class="empty"><i class="ti ti-building-store"></i><p>${_exhListFilter === 'archived' ? 'No archived exhibitions.' : 'No exhibitions yet. Add one to track what you bring and sell.'}</p></div>`;
     return;
   }
-  list.innerHTML = exhibitions.map(e => `
-    <div class="exhibition-card" onclick="openExhibitionDetail('${e.id}')">
-      <div class="exhibition-name">${e.name}</div>
+
+  window._exhMenuIds = [];
+  list.innerHTML = filterBar + visible.map(e => {
+    const idx = window._exhMenuIds.length;
+    window._exhMenuIds.push(e.id);
+    return `<div class="exhibition-card" style="position:relative" onclick="openExhibitionDetail('${e.id}')">
+      <button onclick="event.stopPropagation();showExhMenu(window._exhMenuIds[${idx}])" style="position:absolute;top:10px;right:10px;background:none;border:none;padding:4px 6px;cursor:pointer;font-size:18px;color:var(--muted);touch-action:manipulation;z-index:1">⋯</button>
+      <div class="exhibition-name" style="padding-right:28px">${e.name}</div>
       <div class="exhibition-meta">${[e.location, e.date].filter(Boolean).join(' · ')}</div>
       <span class="exhibition-status exh-${e.status}">${e.status}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function _setExhListFilter(f) {
+  _exhListFilter = f;
+  renderExhibitions();
+}
+
+function showExhMenu(id) {
+  const e = exhibitions.find(x => x.id === id);
+  if (!e) return;
+  const isArchived = e.status === 'archived';
+  const actions = isArchived
+    ? [
+        { label: 'Restore Exhibition', fn: () => restoreExhibition(id) },
+        { label: 'Delete Exhibition', fn: () => deleteExhibition(id), danger: true },
+      ]
+    : [
+        { label: 'Archive Exhibition', fn: () => archiveExhibition(id) },
+        { label: 'Delete Exhibition', fn: () => deleteExhibition(id), danger: true },
+      ];
+  _showActionMenu(e.name, actions);
+}
+
+function _showActionMenu(title, actions) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(28,20,16,0.55);display:flex;align-items:flex-end;justify-content:center';
+  el.innerHTML = `<div style="background:#fff;border-radius:16px 16px 0 0;width:100%;max-width:480px;padding:20px;padding-bottom:max(20px,env(safe-area-inset-bottom))">
+    <div style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:14px;font-weight:500">${title}</div>
+    ${actions.map((a, i) => `<button data-ai="${i}" style="width:100%;padding:14px;border:none;border-top:${i>0?'1px solid var(--border)':'none'};background:#fff;font-size:15px;color:${a.danger?'#c0392b':'var(--ink)'};font-weight:${a.danger?'700':'500'};cursor:pointer;text-align:center;touch-action:manipulation">${a.label}</button>`).join('')}
+    <button style="width:100%;padding:14px;border:none;border-top:1px solid var(--border);background:#fff;font-size:15px;color:var(--muted);cursor:pointer;touch-action:manipulation;margin-top:4px">Cancel</button>
+  </div>`;
+  document.body.appendChild(el);
+  el.querySelectorAll('[data-ai]').forEach(btn => {
+    btn.onclick = () => { document.body.removeChild(el); actions[+btn.dataset.ai].fn(); };
+  });
+  el.querySelector('button:last-child').onclick = () => document.body.removeChild(el);
+  el.onclick = e => { if (e.target === el) document.body.removeChild(el); };
+}
+
+async function archiveExhibition(id) {
+  try {
+    await db('update', 'exhibitions', { id, data: { status: 'archived' } });
+    const idx = exhibitions.findIndex(e => e.id === id);
+    if (idx >= 0) exhibitions[idx] = { ...exhibitions[idx], status: 'archived' };
+    renderExhibitions();
+    showToast('Exhibition archived');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+async function restoreExhibition(id) {
+  try {
+    await db('update', 'exhibitions', { id, data: { status: 'upcoming' } });
+    const idx = exhibitions.findIndex(e => e.id === id);
+    if (idx >= 0) exhibitions[idx] = { ...exhibitions[idx], status: 'upcoming' };
+    _exhListFilter = 'active';
+    renderExhibitions();
+    showToast('Exhibition restored');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+function deleteExhibition(id) {
+  const e = exhibitions.find(x => x.id === id);
+  if (!e) return;
+  _showActionMenu('Delete this exhibition?', [
+    {
+      label: 'This removes the exhibition inventory and sales log for this event. Normal Stock and catalogs are not affected. Tap to confirm delete.',
+      fn: () => _confirmDeleteExhibition(id),
+      danger: true,
+    }
+  ]);
+}
+
+async function _confirmDeleteExhibition(id) {
+  try {
+    await db('delete', 'exhibitions', { id });
+    exhibitions = exhibitions.filter(e => e.id !== id);
+    renderExhibitions();
+    showToast('Exhibition deleted');
+  } catch(e) { showToast('Error: ' + e.message); }
 }
 
 async function saveExhibition() {
@@ -7214,14 +7311,30 @@ function _exhItemSold(item) {
 }
 
 function _exhInventoryHTML() {
-  if (!exhItems.length) {
-    return `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+  const nonDeleted = exhItems.filter(i => i.status !== 'deleted');
+  const visible = nonDeleted.filter(i => _exhItemFilter === 'archived' ? i.status === 'archived' : i.status !== 'archived');
+  const archivedCount = nonDeleted.filter(i => i.status === 'archived').length;
+
+  const filterBar = `<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff">
+    <button onclick="_setExhItemFilter('active')" style="flex:1;padding:9px;border:none;background:${_exhItemFilter==='active'?'var(--burgundy)':'transparent'};color:${_exhItemFilter==='active'?'#fff':'var(--ink)'};font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation">Active</button>
+    <button onclick="_setExhItemFilter('archived')" style="flex:1;padding:9px;border:none;border-left:1px solid var(--border);background:${_exhItemFilter==='archived'?'var(--burgundy)':'transparent'};color:${_exhItemFilter==='archived'?'#fff':'var(--ink)'};font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation">Archived${archivedCount ? ' (' + archivedCount + ')' : ''}</button>
+  </div>`;
+
+  if (!nonDeleted.length) {
+    return filterBar + `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
       <i class="ti ti-package" style="font-size:44px;display:block;margin-bottom:12px;color:var(--gold,#c9a84c)"></i>
       <div style="font-size:16px;font-weight:600;margin-bottom:6px">No items yet</div>
       <div style="font-size:13px">Tap + Add Item to track your first piece</div>
     </div>`;
   }
-  return exhItems.map(item => {
+  if (!visible.length) {
+    return filterBar + `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">${_exhItemFilter === 'archived' ? 'No archived items.' : 'No active items.'}</div>`;
+  }
+
+  window._exhItemMenuIds = [];
+  return filterBar + visible.map(item => {
+    const midx = window._exhItemMenuIds.length;
+    window._exhItemMenuIds.push(item.id);
     const remaining = _exhItemRemaining(item);
     const sold = _exhItemSold(item);
     const inv = item.size_inventory || {};
@@ -7229,13 +7342,15 @@ function _exhInventoryHTML() {
       .map(s => `${s}:${inv[s]}`).join(' · ');
     const statusCls = remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
     const statusLabel = remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
-    return `<div class="exh-item-card">
+    const isArchived = item.status === 'archived';
+    return `<div class="exh-item-card" style="position:relative;${isArchived?'opacity:0.65':''}">
+      <button onclick="showExhItemMenu(window._exhItemMenuIds[${midx}])" style="position:absolute;top:10px;right:10px;background:none;border:none;padding:4px 6px;cursor:pointer;font-size:18px;color:var(--muted);touch-action:manipulation;z-index:1">⋯</button>
       <div style="display:flex;gap:12px;align-items:flex-start">
         ${item.photo
           ? `<img src="${item.photo}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border)">`
           : `<div style="width:64px;height:64px;border-radius:8px;background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-shirt" style="font-size:26px;color:var(--muted)"></i></div>`}
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:15px;margin-bottom:3px">${item.name}</div>
+        <div style="flex:1;min-width:0;padding-right:24px">
+          <div style="font-weight:600;font-size:15px;margin-bottom:3px">${item.name}${isArchived ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(archived)</span>' : ''}</div>
           <div style="font-size:12px;color:var(--muted)">${item.price_usd ? '$' + item.price_usd : ''}${item.cost_pkr ? ' · PKR ' + Number(item.cost_pkr).toLocaleString() : ''}</div>
           ${sizeStr ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${sizeStr}</div>` : ''}
           <div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -7244,15 +7359,79 @@ function _exhInventoryHTML() {
           </div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      ${!isArchived ? `<div style="display:flex;gap:8px;margin-top:12px">
         ${remaining > 0
           ? `<button onclick="openLogExhSale('${item.id}')" style="flex:2;padding:11px;background:var(--burgundy);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation">Log Sale</button>`
           : `<button disabled style="flex:2;padding:11px;background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:14px">Sold Out</button>`}
         <button onclick="openAdjustExhItem('${item.id}')" style="flex:1;padding:11px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation">Adjust</button>
-        <button onclick="openEditExhItem('${item.id}')" style="padding:11px 13px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-pencil"></i></button>
-      </div>
+      </div>` : ''}
     </div>`;
   }).join('');
+}
+
+function _setExhItemFilter(f) {
+  _exhItemFilter = f;
+  _renderExhContent();
+}
+
+function showExhItemMenu(id) {
+  const item = exhItems.find(i => i.id === id);
+  if (!item) return;
+  const isArchived = item.status === 'archived';
+  const hasSales = exhSales.some(s => s.item_id === id);
+  const actions = isArchived
+    ? [
+        { label: 'Restore Item', fn: () => restoreExhItem(id) },
+        { label: 'Delete Item', fn: () => deleteExhItem(id, hasSales), danger: true },
+      ]
+    : [
+        { label: 'Edit Item', fn: () => openEditExhItem(id) },
+        { label: 'Archive Item', fn: () => archiveExhItem(id) },
+        { label: 'Delete Item', fn: () => deleteExhItem(id, hasSales), danger: true },
+      ];
+  _showActionMenu(item.name, actions);
+}
+
+async function archiveExhItem(id) {
+  try {
+    await db('update', 'exh_items', { id, data: { status: 'archived', updated_at: new Date().toISOString() } });
+    const idx = exhItems.findIndex(i => i.id === id);
+    if (idx >= 0) exhItems[idx] = { ...exhItems[idx], status: 'archived' };
+    _renderExhContent();
+    showToast('Item archived');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+async function restoreExhItem(id) {
+  try {
+    await db('update', 'exh_items', { id, data: { status: 'active', updated_at: new Date().toISOString() } });
+    const idx = exhItems.findIndex(i => i.id === id);
+    if (idx >= 0) exhItems[idx] = { ...exhItems[idx], status: 'active' };
+    _exhItemFilter = 'active';
+    _renderExhContent();
+    showToast('Item restored');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+function deleteExhItem(id, hasSales) {
+  const item = exhItems.find(i => i.id === id);
+  if (!item) return;
+  const warning = hasSales
+    ? 'This item has sales logged. Its sales will also be removed.'
+    : 'This removes it from this exhibition only.';
+  _showActionMenu(`Delete "${item.name}"?`, [
+    { label: warning + ' Tap to confirm delete.', fn: () => _confirmDeleteExhItem(id), danger: true }
+  ]);
+}
+
+async function _confirmDeleteExhItem(id) {
+  try {
+    await db('delete', 'exh_items', { id });
+    exhItems = exhItems.filter(i => i.id !== id);
+    exhSales = exhSales.filter(s => s.item_id !== id);
+    _renderExhContent();
+    showToast('Item deleted');
+  } catch(e) { showToast('Error: ' + e.message); }
 }
 
 function _exhSalesHTML() {
