@@ -4024,9 +4024,9 @@ async function _buildCatalogImage() {
   if (!selected.length) throw new Error('No products selected');
 
   const W = 1080;
-  // Each product card: image area (W * 4/3) + info panel (~280px) + gap (24px)
-  const IMG_H = Math.round(W * (4 / 3));  // 1440 — portrait 3:4 image
-  const INFO_H = 380; // extra room for 3-line garment bio
+  // Each product card: image area + info panel + gap between cards
+  const IMG_H = 1350; // tall enough for full-length model, contain-fit (no crop)
+  const INFO_H = 460; // 4-line garment bio + name + price/sizes
   const GAP = 24;
   const PAD = 48;
   const CARD_H = IMG_H + INFO_H;
@@ -4069,11 +4069,12 @@ async function _buildCatalogImage() {
       try {
         const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
         const img = await _loadImgWithTimeout(proxied, 10000);
-        // Cover-crop to fill width, smart vertical centering (show top 60% to keep head/face)
-        const scale = W / img.naturalWidth;
-        const dh = img.naturalHeight * scale;
-        const srcY = dh > IMG_H ? -(dh - IMG_H) * 0.15 : (IMG_H - dh) / 2;
-        ctx.drawImage(img, 0, cardTop + srcY, W, dh);
+        // CONTAIN — no cropping, full garment visible. Cream background shows in margins.
+        const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
+        const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+        const dx = (W - dw) / 2;
+        const dy = cardTop + Math.max(16, (IMG_H - dh) / 2);
+        ctx.drawImage(img, dx, dy, dw, dh);
       } catch(_) {}
     }
 
@@ -4095,12 +4096,12 @@ async function _buildCatalogImage() {
       ctx.restore();
     }
 
-    // Logo watermark on image (bottom-right, safe margin)
+    // Logo in bottom-right of the info panel — safe margin from edges
     if (logoImg) {
-      const lw = W * 0.18, lh = (logoImg.height / logoImg.width) * lw;
-      const lm = 52;
-      ctx.globalAlpha = 0.72;
-      ctx.drawImage(logoImg, W - lw - lm, cardTop + IMG_H - lh - lm, lw, lh);
+      const lw = W * 0.16, lh = (logoImg.height / logoImg.width) * lw;
+      const lm = 60;
+      ctx.globalAlpha = 0.60;
+      ctx.drawImage(logoImg, W - lw - lm, cardTop + CARD_H - lh - lm, lw, lh);
       ctx.globalAlpha = 1;
     }
 
@@ -4125,8 +4126,8 @@ async function _buildCatalogImage() {
     if (blurb) {
       ctx.fillStyle = '#555';
       ctx.font = `italic 26px Inter, sans-serif`;
-      const bl = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 3);
-      ty += bl * 36 + 8;
+      const bl = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 4);
+      ty += bl * 36 + 10;
     }
 
     // Price / status
@@ -4231,25 +4232,24 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
 }
 
 async function _buildItemShareCard(p) {
-  // Catalog-style layout: image on top (~72%), white info panel on bottom (~28%).
-  // Portrait 1080×1350 gives enough room for full model + readable text panel.
+  // Catalog-style layout: image on top, white info panel on bottom.
+  // 1080×1620 portrait — enough for full model + 4-line garment bio.
   const W = 1080;
-  const H = 1350;
-  const IMG_H = 970;   // top image area
+  const H = 1620;
+  const IMG_H = 1150;  // top image area (~71% of height)
   const INFO_Y = IMG_H;
-  const INFO_H = H - IMG_H; // 380px info panel
-  const PAD = 48;      // horizontal padding inside info panel
-  const SIZE = W; // kept for any code using SIZE below
+  const INFO_H = H - IMG_H; // 470px info panel
+  const PAD = 52;
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // ── Image area background (cream fallback if no photo) ───────────────────
-  ctx.fillStyle = '#f0ede8';
+  // ── Image area — cream background ────────────────────────────────────────
+  ctx.fillStyle = '#f5f0ea';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  // Load product photo — prefer DOM element (already loaded, no refetch)
+  // Load product photo — prefer already-loaded DOM element to avoid refetching large base64
   let imgEl = null;
   try {
     const domEl = document.getElementById('detailPhoto');
@@ -4265,12 +4265,15 @@ async function _buildItemShareCard(p) {
     }
   }
   if (imgEl) {
-    // Cover-crop to fill width; smart vertical crop — show top portion to keep head visible
-    const scale = W / imgEl.naturalWidth;
+    // CONTAIN — scale to fit completely within image area, no cropping.
+    // Cream background shows in any letterbox margins.
+    const scale = Math.min(W / imgEl.naturalWidth, IMG_H / imgEl.naturalHeight);
+    const dw = imgEl.naturalWidth * scale;
     const dh = imgEl.naturalHeight * scale;
-    // Shift upward by at most 15% of overflow so feet can be cropped, not head
-    const offsetY = dh > IMG_H ? -(dh - IMG_H) * 0.15 : (IMG_H - dh) / 2;
-    ctx.drawImage(imgEl, 0, offsetY, W, dh);
+    // Vertically align to top with small padding so head has breathing room
+    const dx = (W - dw) / 2;
+    const dy = Math.max(16, (IMG_H - dh) / 2);
+    ctx.drawImage(imgEl, dx, dy, dw, dh);
   }
 
   // ── Sold / Reserved stamp — top-right corner of image (matches catalog style) ──
@@ -4302,23 +4305,23 @@ async function _buildItemShareCard(p) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, INFO_Y + 2, W, INFO_H - 2);
 
-  // ── Product name (Playfair Display, like cat-product-name 20px → scaled up) ─
-  let ty = INFO_Y + 42;
+  // ── Product name ──────────────────────────────────────────────────────────
+  let ty = INFO_Y + 46;
   ctx.fillStyle = '#1a1a1a';
   ctx.font = `600 52px "Playfair Display", serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 62, 2);
-  ty += nameLines * 62 + 14;
+  ty += nameLines * 62 + 16;
 
-  // ── Garment bio — prefer detailed upload analysis, fall back to catalog blurb ──
+  // ── Garment bio — detailed upload analysis first, catalog blurb fallback ──
   const blurb = p.description_en || p.catalog_blurb || '';
   if (blurb) {
     ctx.fillStyle = '#555555';
     ctx.font = `italic 26px Inter, sans-serif`;
-    // 3 lines max on individual card (380px info panel has room)
-    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 3);
-    ty += blurbLines * 36 + 14;
+    // 4 lines in the 470px panel — enough for rich garment detail
+    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 4);
+    ty += blurbLines * 36 + 18;
   }
 
   // ── Price / status ────────────────────────────────────────────────────────
@@ -4330,21 +4333,21 @@ async function _buildItemShareCard(p) {
     ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
     ctx.font = `600 34px Inter, sans-serif`;
     ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
-    ty += 46;
+    ty += 48;
     const sizes = getAvailableSizes(p);
     ctx.font = `24px Inter, sans-serif`;
     ctx.fillStyle = '#999999';
     ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
   }
 
-  // ── Meraki logo — bottom-right of info panel, inside safe margin ─────────
+  // ── Meraki logo — bottom-right of info panel, 60px safe margin ───────────
   if (MERAKI_LOGO_SRC) {
     try {
       const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
-      const logoW = W * 0.18;
+      const logoW = W * 0.17;
       const logoH = (logo.height / logo.width) * logoW;
-      const safeMargin = 48;
-      ctx.globalAlpha = 0.68;
+      const safeMargin = 60;
+      ctx.globalAlpha = 0.65;
       ctx.drawImage(logo, W - logoW - safeMargin, H - logoH - safeMargin, logoW, logoH);
       ctx.globalAlpha = 1;
     } catch(_) {}
