@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 :root {
@@ -363,7 +364,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .cat-product-info { padding:18px 20px 22px; border-top:1px solid #f0ede8; }
 .cat-product-sku { font-size:9px; letter-spacing:2px; text-transform:uppercase; color:#bbb; margin-bottom:8px; }
 .cat-product-name { font-family:'Playfair Display',serif; font-size:20px; color:#1a1a1a; margin-bottom:6px; line-height:1.3; }
-.cat-product-blurb { font-size:12px; color:#555; line-height:1.7; margin-bottom:14px; display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
+.cat-product-blurb { font-size:12px; color:#555; line-height:1.7; margin-bottom:14px; }
 .cat-product-price { font-size:16px; font-weight:600; color:#1a1a1a; letter-spacing:0.5px; }
 .cat-product-noprice { font-size:11px; color:#E65100; }
 .cat-warning-bar { background:#FFF3E0; border-left:3px solid #FF9800; padding:12px 16px; margin:12px 16px; border-radius:4px; font-size:12px; color:#E65100; }
@@ -742,9 +743,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="goToCatalogSelection()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
       <div class="catalog-toolbar-title">Catalog Preview</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-secondary btn-sm" onclick="printCatalog()" style="padding:0 10px" title="Print / Save PDF"><i class="ti ti-printer"></i></button>
-        <button class="btn btn-secondary btn-sm" id="catDownloadBtn" onclick="downloadCatalogImage()" style="padding:0 10px" title="Download catalog image"><i class="ti ti-download"></i></button>
-        <button class="btn btn-primary btn-sm" id="catShareBtn" onclick="shareCatalogWithAsset()" style="padding:0 10px" title="Share catalog"><i class="ti ti-share"></i></button>
+        <button class="btn btn-secondary btn-sm" id="catDownloadBtn" onclick="downloadCatalogPDF()" style="padding:0 10px;font-size:11px;gap:4px" title="Download PDF catalog"><i class="ti ti-file-type-pdf"></i> PDF</button>
+        <button class="btn btn-primary btn-sm" id="catShareBtn" onclick="shareCatalogWithAsset()" style="padding:0 10px" title="Share catalog PDF"><i class="ti ti-share"></i></button>
       </div>
     </div>
     <div id="catalogWarnings" style="display:none"></div>
@@ -789,6 +789,31 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="catalogPriceWarnMsg" style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5"></div>
     <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('catalogPriceWarnSheet');_showCatalogPreview()">Continue Anyway</button>
     <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('catalogPriceWarnSheet')">Go Back</button>
+  </div>
+</div>
+
+<!-- BIO EDIT SHEET -->
+<div class="sheet-overlay" id="bioEditSheet" onclick="closeSheetOutside(event,'bioEditSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:4px;color:var(--burgundy)">Update Garment Bio</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5">Regenerate from scratch or edit the bio text directly. The share image and catalog will update automatically.</div>
+    <div id="bioEditContent">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn btn-primary" onclick="_openBioRegenerate()" style="width:100%"><i class="ti ti-sparkles"></i> Regenerate Bio</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="bioStylePills">
+          <div style="font-size:11px;color:var(--muted);width:100%;margin-bottom:-2px">Quick style:</div>
+          <button onclick="_openBioRegenerate('elegant')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More elegant</button>
+          <button onclick="_openBioRegenerate('simple')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More simple</button>
+          <button onclick="_openBioRegenerate('detailed')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More detailed</button>
+          <button onclick="_openBioRegenerate('luxury')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More luxury</button>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px">
+          <button class="btn" onclick="_openBioManualEdit()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-edit"></i> Edit Manually</button>
+        </div>
+        <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2737,7 +2762,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-catalog-preview-unblocked';
+const _MERAKI_BUILD = '2026-06-28-catalog-pdf-bio-edit';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3928,19 +3953,27 @@ async function renderCatalogPreview() {
   // Warnings
   const warnEl = document.getElementById('catalogWarnings');
   const warns = [];
-  if (noPrice.length) warns.push(`${noPrice.length} item${noPrice.length > 1 ? 's' : ''} missing a price — will show "Price on request".`);
-  if (noModel.length) warns.push(`${noModel.length} item${noModel.length > 1 ? 's' : ''} have no model photo — product photo will be used instead.`);
-  if (warns.length) {
-    warnEl.style.display = 'block';
-    warnEl.innerHTML = warns.map(w => `<div class="cat-warning-bar">${w}</div>`).join('');
-  } else {
-    warnEl.style.display = 'none';
-  }
+  if (noPrice.length) warns.push(`${noPrice.length} item${noPrice.length > 1 ? 's' : ''} missing a price — will show "Reach out for price".`);
+  if (noModel.length) warns.push(`${noModel.length} item${noModel.length > 1 ? 's' : ''} have no model photo — product photo or placeholder will be used.`);
+  warnEl.style.display = warns.length ? 'block' : 'none';
+  warnEl.innerHTML = warns.map(w => `<div class="cat-warning-bar">${w}</div>`).join('');
 
-  const collName = catalogCollection || 'Collection';
-  const season = [...new Set(selected.map(p => p.season).filter(Boolean))].join(' · ');
-  const year = new Date().getFullYear();
-  const theme = getCatalogCoverTheme(collName);
+  // Show loading state immediately so the screen doesn't feel stuck
+  const content = document.getElementById('catalogPreviewContent');
+  content.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:14px">Building catalog preview…<br><span style="font-size:11px">Loading images and rendering pages</span></div></div>';
+
+  try {
+    const { pages } = await _buildCatalogPages();
+    content.innerHTML = pages.map((page, i) =>
+      `<div style="margin:${i === 0 ? '0 0 3px' : '3px 0'};line-height:0">
+        <img src="${page.dataUrl}" style="width:100%;display:block" alt="${i === 0 ? 'Catalog cover' : 'Product page ' + i}">
+      </div>`
+    ).join('');
+  } catch(err) {
+    console.error('[Catalog] Preview render failed', err);
+    content.innerHTML = `<div style="padding:24px;text-align:center;color:var(--burgundy);font-size:13px">Preview failed: ${err.message}</div>`;
+  }
+}
 
   // Render immediately with placeholder tagline, then update with AI tagline
   const buildCoverHTML = (tagline) => `<div class="cat-cover" style="background:${theme.bg};">
@@ -4032,208 +4065,286 @@ Respond with ONLY the tagline.` }], '', 60);
   } catch(e) { /* silent — cover still looks fine without tagline */ }
 }
 
-function printCatalog() {
-  window.print();
-}
-
 function _catalogWhatsAppMessage() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   const collName = catalogCollection || 'Collection';
-  const lines = selected.map(p => `• ${p.name} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
+  const lines = selected.map(p => `• ${p.name || 'Untitled'} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
   return `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
 }
 
-// Render all selected catalog product pages to a single tall canvas image.
-async function _buildCatalogImage() {
+// ─── CATALOG ENGINE ────────────────────────────────────────────────────────────
+// Returns { pages: [{dataUrl, W, H}], collName, W, H }
+// pages[0] = cover, pages[1..] = product pages (all same W × H)
+// Preview, PDF download, and PDF share all call this single function.
+async function _buildCatalogPages() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   if (!selected.length) throw new Error('No products selected');
 
   const W = 1080;
-  const IMG_H = 1350; // tall enough for full-length model, contain-fit
-  const GAP = 24;
+  const IMG_H = 1350;
   const PAD = 48;
   const NAME_LH = 58, NAME_SIZE = 48;
   const BIO_LH = 36, BIO_SIZE = 26;
-  const INFO_PAD_TOP = 36, INFO_PAD_BOT = 48;
-  const HEADER_H = GAP * 2;
+  const INFO_PAD_TOP = 36, INFO_PAD_BOT = 56;
 
-  // ── Phase 1: measure all product text to compute per-card info heights ────
-  // We need a scratch canvas to measure text before allocating the real one.
+  // Phase 1: measure text for each product
   const mc = document.createElement('canvas');
   mc.width = W;
   const mctx = mc.getContext('2d');
-
-  // Track whether any product is missing optional data (for post-render toast)
   let anyMissingData = false;
 
   const cardLayouts = selected.map(p => {
     const safeName = (p.name || 'Untitled piece').trim();
     mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
     const nameLines = _ctxMeasureLines(mctx, safeName, W - PAD * 2).slice(0, 2);
-
-    // Bio: full garment analysis first, then shorter fallbacks, then generated sentence
     const rawBio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
     const blurb = rawBio || `${safeName} — a beautiful piece from the Meraki by Sam collection.`;
     mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
     const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
-
     if (!p.model_photo && !p.photo) anyMissingData = true;
     if (!p.price) anyMissingData = true;
-
     const isSoldOut = !isProductAvailable(p);
     const priceBlockH = isSoldOut ? 36 : 42 + 32;
-    const nameBlockH = nameLines.length * NAME_LH + 10;
-    const bioBlockH = bioLines.length > 0 ? bioLines.length * BIO_LH + 10 : 0;
-    const INFO_H = INFO_PAD_TOP + nameBlockH + bioBlockH + priceBlockH + INFO_PAD_BOT;
-
+    const INFO_H = INFO_PAD_TOP + nameLines.length * NAME_LH + 10 + bioLines.length * BIO_LH + 10 + priceBlockH + INFO_PAD_BOT;
     return { p, safeName, nameLines, bioLines, isSoldOut, INFO_H };
   });
 
-  // ── Phase 2: normalize info panel height across all cards ────────────────
-  // Every card uses the same height (tallest bio wins) so the catalog looks
-  // consistent. Shorter bios get extra white space; longer bios always fit.
+  // Phase 2: all pages use the same height (longest bio wins)
   const MAX_INFO_H = Math.max(...cardLayouts.map(c => c.INFO_H));
   cardLayouts.forEach(c => { c.INFO_H = MAX_INFO_H; });
+  const PAGE_H = IMG_H + MAX_INFO_H; // every page — cover and product — is this tall
 
-  const totalCardsH = selected.length * (IMG_H + MAX_INFO_H);
-  const TOTAL_H = HEADER_H + totalCardsH + (selected.length - 1) * GAP + GAP;
+  // Phase 3: cover page canvas
+  const collName = catalogCollection || 'Collection';
+  const year = new Date().getFullYear();
+  const theme = getCatalogCoverTheme(collName);
+  const coverDataUrl = await _buildCatalogCoverCanvas(W, PAGE_H, theme, collName, year);
+  const pages = [{ dataUrl: coverDataUrl, W, H: PAGE_H }];
 
-  // ── Phase 3: draw ─────────────────────────────────────────────────────────
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = TOTAL_H;
-  const ctx = canvas.getContext('2d');
-
-  // Cream background
-  ctx.fillStyle = '#FDF8F3';
-  ctx.fillRect(0, 0, W, TOTAL_H);
-
-  // Header strip
-  ctx.fillStyle = '#6B2737';
-  ctx.fillRect(0, 0, W, HEADER_H);
-  ctx.fillStyle = '#fff';
-  ctx.font = `600 28px "Playfair Display", serif`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText((catalogCollection || 'Collection') + ' · Meraki by Sam', W / 2, HEADER_H / 2);
-
-  let cardTop = HEADER_H;
-  for (let i = 0; i < cardLayouts.length; i++) {
-    const { p, safeName, nameLines, bioLines, isSoldOut, INFO_H } = cardLayouts[i];
-
-    // ── Image area ──────────────────────────────────────────────────────────
-    ctx.fillStyle = '#f0ede8';
-    ctx.fillRect(0, cardTop, W, IMG_H);
-
-    const imgSrc = p.model_photo || p.photo;
-    let imgLoaded = false;
-    if (imgSrc) {
-      try {
-        const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-        const img = await _loadImgWithTimeout(proxied, 10000);
-        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-          const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
-          const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-          const dx = (W - dw) / 2;
-          const dy = cardTop + Math.max(16, (IMG_H - dh) / 2);
-          ctx.drawImage(img, dx, dy, dw, dh);
-          imgLoaded = true;
-        }
-      } catch(_) {}
-    }
-    if (!imgLoaded) {
-      // Tasteful placeholder — cream background already drawn above
-      ctx.save();
-      ctx.fillStyle = '#b5aca3';
-      ctx.font = `400 32px Inter, sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('Photo coming soon', W / 2, cardTop + IMG_H / 2);
-      ctx.font = `400 22px Inter, sans-serif`;
-      ctx.fillStyle = '#c9bfb7';
-      ctx.fillText(safeName, W / 2, cardTop + IMG_H / 2 + 48);
-      ctx.restore();
-    }
-
-    // Sold / Reserved stamp
-    if (isSoldOut || p.status === 'reserved') {
-      const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
-      const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
-      ctx.font = `bold 28px "Playfair Display", serif`;
-      const tw = ctx.measureText(label).width;
-      const sw = tw + 36, sh = 48;
-      const sx = W - sw - 28, sy = cardTop + 24;
-      ctx.save();
-      ctx.fillStyle = stampBg;
-      ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(label, sx + sw / 2, sy + sh / 2);
-      ctx.restore();
-    }
-
-    // ── Info panel ──────────────────────────────────────────────────────────
-    const infoTop = cardTop + IMG_H;
-    ctx.fillStyle = '#f0ede8';
-    ctx.fillRect(0, infoTop, W, 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, infoTop + 2, W, INFO_H - 2);
-
-    let ty = infoTop + INFO_PAD_TOP;
-    ctx.fillStyle = '#1a1a1a';
-    ctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    _ctxDrawLines(ctx, nameLines, PAD, ty, NAME_LH);
-    ty += nameLines.length * NAME_LH + 10;
-
-    // Full garment bio — no truncation
-    if (bioLines.length) {
-      ctx.fillStyle = '#555';
-      ctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
-      _ctxDrawLines(ctx, bioLines, PAD, ty, BIO_LH);
-      ty += bioLines.length * BIO_LH + 10;
-    }
-
-    // Price / status
-    if (isSoldOut) {
-      ctx.fillStyle = '#B71C1C';
-      ctx.font = `600 28px Inter, sans-serif`;
-      ctx.fillText('SOLD OUT', PAD, ty);
-    } else {
-      ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
-      ctx.font = `600 32px Inter, sans-serif`;
-      ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
-      ty += 42;
-      const sizes = getAvailableSizes(p);
-      ctx.fillStyle = '#999';
-      ctx.font = `24px Inter, sans-serif`;
-      ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
-    }
-
-    // Gap / separator between cards
-    if (i < cardLayouts.length - 1) {
-      ctx.fillStyle = '#e8e0d8';
-      ctx.fillRect(0, infoTop + INFO_H, W, GAP);
-    }
-
-    cardTop += IMG_H + INFO_H + GAP;
+  // Phase 4: product page canvases
+  for (const layout of cardLayouts) {
+    const dataUrl = await _drawCatalogProductPage(W, PAGE_H, IMG_H, MAX_INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, layout);
+    pages.push({ dataUrl, W, H: PAGE_H });
   }
 
-  if (anyMissingData) {
-    showToast('Some pieces are missing photos or prices — placeholders were used.');
-  }
-
-  return canvas.toDataURL('image/jpeg', 0.90);
+  if (anyMissingData) showToast('Some pieces are missing photos or prices — placeholders were used.');
+  return { pages, collName, W, H: PAGE_H };
 }
 
-async function downloadCatalogImage() {
+// Cover page canvas — dark themed, official logo, collection name, tagline
+async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background gradient
+  const bgHex = theme.bg.match(/#[0-9A-Fa-f]{6}/g) || ['#0D0808','#1A0F0F'];
+  const grad = ctx.createLinearGradient(0, 0, W * 0.35, H);
+  grad.addColorStop(0, bgHex[0]);
+  grad.addColorStop(0.55, bgHex[1] || bgHex[0]);
+  grad.addColorStop(1, bgHex[0]);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Inset border
+  const M = 52;
+  ctx.strokeStyle = theme.accent + '40';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(M, M, W - M * 2, H - M * 2);
+
+  // Corner accent marks (L-shaped)
+  const CL = 64;
+  ctx.strokeStyle = theme.accent + '99';
+  ctx.lineWidth = 2.5;
+  const corners = [[M-10,M-10,1,1],[W-M+10,M-10,-1,1],[M-10,H-M+10,1,-1],[W-M+10,H-M+10,-1,-1]];
+  corners.forEach(([cx, cy, sx, sy]) => {
+    ctx.beginPath(); ctx.moveTo(cx, cy + sy * CL); ctx.lineTo(cx, cy); ctx.lineTo(cx + sx * CL, cy); ctx.stroke();
+  });
+
+  // Subtle ornamental centre dot
+  ctx.fillStyle = theme.accent + '33';
+  ctx.beginPath(); ctx.arc(W/2, H/2, 160, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = theme.accent + '18';
+  ctx.beginPath(); ctx.arc(W/2, H/2, 220, 0, Math.PI*2); ctx.fill();
+
+  // Center content — start logo roughly 1/3 from top
+  let cy = H * 0.30;
+
+  // Logo (white-ified via composite)
+  let logoDrawn = false;
+  try {
+    const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
+    if (logo && logo.naturalWidth > 0) {
+      const logoH = 148, logoW = logo.naturalWidth * (logoH / logo.naturalHeight);
+      const tmpC = document.createElement('canvas');
+      tmpC.width = logoW; tmpC.height = logoH;
+      const tmpCtx = tmpC.getContext('2d');
+      tmpCtx.drawImage(logo, 0, 0, logoW, logoH);
+      tmpCtx.globalCompositeOperation = 'source-in';
+      tmpCtx.fillStyle = 'rgba(255,255,255,0.92)';
+      tmpCtx.fillRect(0, 0, logoW, logoH);
+      ctx.globalAlpha = 0.88;
+      ctx.drawImage(tmpC, (W - logoW) / 2, cy - logoH / 2, logoW, logoH);
+      ctx.globalAlpha = 1.0;
+      cy += logoH / 2 + 52;
+      logoDrawn = true;
+    }
+  } catch(_) {}
+  if (!logoDrawn) {
+    ctx.fillStyle = theme.accent;
+    ctx.font = `italic 400 32px "Playfair Display", serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Meraki by Sam', W / 2, cy);
+    cy += 56;
+  }
+
+  // Divider
+  const divW = (theme.dividerWidth || 60) * 7;
+  ctx.fillStyle = theme.accent + '55';
+  ctx.fillRect((W - divW) / 2, cy, divW, 1.5);
+  cy += 40;
+
+  // Collection name (word-wrapped, bold Playfair)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 72px "Playfair Display", serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const nameLines = _ctxMeasureLines(ctx, collName, W - 160);
+  nameLines.forEach((l, i) => ctx.fillText(l, W / 2, cy + i * 86));
+  cy += nameLines.length * 86 + 28;
+
+  // Tagline — keyword-derived, no Claude call needed (fast and consistent)
+  const tn = collName.toLowerCase();
+  const tagline = (
+    /eid|fitr|adha/.test(tn) ? 'where festivity meets grace' :
+    /wedding|bridal|shadi|nikkah/.test(tn) ? 'adorned in love & tradition' :
+    /summer|lawn|breeze|light/.test(tn) ? 'light, airy & effortlessly beautiful' :
+    /winter|velvet|snow|sarma/.test(tn) ? 'wrapped in warmth & elegance' :
+    /rose|gulab|pink|blush/.test(tn) ? 'blooming in softness & grace' :
+    /gold|sona|amber|zari|gilded/.test(tn) ? 'gilded in timeless luxury' :
+    /night|raat|dusk|evening|twilight/.test(tn) ? 'woven from moonlight & dreams' :
+    /spring|bahar|bloom|flower|floral/.test(tn) ? 'in full bloom, always' :
+    /bird|paradise|garden|botanical/.test(tn) ? 'where grace takes flight in every thread' :
+    /crimson|scarlet|ruby/.test(tn) ? 'rich in colour, timeless in spirit' :
+    /blue|sapphire|neel|sky/.test(tn) ? 'serene as the open sky' :
+    'a collection by meraki'
+  );
+  ctx.fillStyle = theme.accent + 'BB';
+  ctx.font = `italic 400 26px Inter, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText(tagline, W / 2, cy);
+  cy += 48;
+
+  // Bottom attribution
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.font = `300 22px Inter, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText(`MERAKI BY SAM  ·  ${year}`, W / 2, H - M - 18);
+
+  return canvas.toDataURL('image/jpeg', 0.93);
+}
+
+// Single product page canvas — full bio, no truncation, same dimensions as cover
+async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, layout) {
+  const { p, safeName, nameLines, bioLines, isSoldOut } = layout;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = PAGE_H;
+  const ctx = canvas.getContext('2d');
+
+  // Image area
+  ctx.fillStyle = '#f0ede8';
+  ctx.fillRect(0, 0, W, IMG_H);
+
+  const imgSrc = p.model_photo || p.photo;
+  let imgLoaded = false;
+  if (imgSrc) {
+    try {
+      const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
+      const img = await _loadImgWithTimeout(proxied, 10000);
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
+        const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+        ctx.drawImage(img, (W - dw) / 2, Math.max(16, (IMG_H - dh) / 2), dw, dh);
+        imgLoaded = true;
+      }
+    } catch(_) {}
+  }
+  if (!imgLoaded) {
+    ctx.fillStyle = '#b5aca3'; ctx.font = `400 32px Inter, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Photo coming soon', W / 2, IMG_H / 2);
+    ctx.fillStyle = '#c9bfb7'; ctx.font = `400 22px Inter, sans-serif`;
+    ctx.fillText(safeName, W / 2, IMG_H / 2 + 48);
+  }
+
+  // Sold / Reserved stamp
+  if (isSoldOut || p.status === 'reserved') {
+    const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
+    const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
+    ctx.font = `bold 28px "Playfair Display", serif`;
+    const tw = ctx.measureText(label).width;
+    const sw = tw + 36, sh = 48, sx = W - sw - 28, sy = 24;
+    ctx.save();
+    ctx.fillStyle = stampBg;
+    ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, sx + sw / 2, sy + sh / 2);
+    ctx.restore();
+  }
+
+  // Info panel
+  const infoTop = IMG_H;
+  ctx.fillStyle = '#f0ede8'; ctx.fillRect(0, infoTop, W, 2);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, infoTop + 2, W, INFO_H - 2);
+
+  let ty = infoTop + INFO_PAD_TOP;
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  _ctxDrawLines(ctx, nameLines, PAD, ty, NAME_LH);
+  ty += nameLines.length * NAME_LH + 10;
+
+  if (bioLines.length) {
+    ctx.fillStyle = '#555'; ctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
+    _ctxDrawLines(ctx, bioLines, PAD, ty, BIO_LH);
+    ty += bioLines.length * BIO_LH + 10;
+  }
+
+  if (isSoldOut) {
+    ctx.fillStyle = '#B71C1C'; ctx.font = `600 28px Inter, sans-serif`;
+    ctx.fillText('SOLD OUT', PAD, ty);
+  } else {
+    ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
+    ctx.font = `600 32px Inter, sans-serif`;
+    ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
+    ty += 42;
+    const sizes = getAvailableSizes(p);
+    ctx.fillStyle = '#999'; ctx.font = `24px Inter, sans-serif`;
+    ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.91);
+}
+
+// Download catalog as PDF — cover page + one page per product
+async function downloadCatalogPDF() {
   const btn = document.getElementById('catDownloadBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
   try {
-    const dataUrl = await _buildCatalogImage();
-    const collName = (catalogCollection || 'Catalog').replace(/[^a-z0-9]/gi, '-');
-    triggerDownload(dataUrl, `Meraki-${collName}.jpg`);
+    const { pages, collName, W, H } = await _buildCatalogPages();
+    if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
+    pages.forEach((page, i) => {
+      if (i > 0) pdf.addPage([W, H]);
+      pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
+    });
+    const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
+    pdf.save(`Meraki-${safeName}-Catalog.pdf`);
   } catch(e) {
-    showToast('Could not export catalog: ' + e.message);
+    console.error('[Catalog] PDF download failed', e);
+    showToast('Could not generate PDF: ' + e.message);
   }
-  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i>'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-type-pdf"></i> PDF'; }
 }
 
 async function shareCatalogWithAsset() {
@@ -4241,31 +4352,56 @@ async function shareCatalogWithAsset() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
 
   const msg = _catalogWhatsAppMessage();
-  const collName = (catalogCollection || 'Catalog').replace(/[^a-z0-9]/gi, '-');
 
   try {
-    const dataUrl = await _buildCatalogImage();
-    const blob = await (await fetch(dataUrl)).blob();
-    const file = new File([blob], `Meraki-${collName}.jpg`, { type: 'image/jpeg' });
-    const shareData = { title: catalogCollection || 'Meraki by Sam', text: msg, files: [file] };
+    const { pages, collName, W, H } = await _buildCatalogPages();
+    const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
+    const filename = `Meraki-${safeName}-Catalog.pdf`;
 
-    if (navigator.canShare && navigator.canShare(shareData)) {
-      await navigator.share(shareData);
-    } else if (typeof navigator.share === 'function') {
-      // Share text only if files not supported
+    // Try to share as PDF first
+    if (window.jspdf && typeof navigator.share === 'function') {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
+      pages.forEach((page, i) => {
+        if (i > 0) pdf.addPage([W, H]);
+        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
+      });
+      const pdfBlob = pdf.output('blob');
+      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+      const shareData = { title: collName || 'Meraki by Sam', text: msg, files: [pdfFile] };
+
+      if (navigator.canShare && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
+        return;
+      }
+      // PDF file share not supported — try text only and download PDF
+      pdf.save(filename);
       await navigator.share({ title: shareData.title, text: msg });
-    } else {
-      // No Web Share — download image and open WhatsApp text
-      triggerDownload(dataUrl, `Meraki-${collName}.jpg`);
+      showToast('PDF saved to Files — attach it in WhatsApp alongside this message.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
+      return;
+    }
+
+    // No Web Share API or jsPDF not loaded — download PDF and open WhatsApp
+    if (window.jspdf) {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
+      pages.forEach((page, i) => {
+        if (i > 0) pdf.addPage([W, H]);
+        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
+      });
+      pdf.save(filename);
       setTimeout(() => window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank'), 800);
-      showToast('Catalog downloaded — send it in WhatsApp with the message');
+      showToast('PDF downloaded — send it in WhatsApp with the copied message.');
+    } else {
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+      showToast('PDF library not loaded. Opened WhatsApp with catalog message.');
     }
   } catch(e) {
-    if (e.name === 'AbortError') { /* user cancelled */ }
-    else {
-      // Fallback: text-only WhatsApp
-      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
-      showToast('Could not share file — opening WhatsApp with caption instead');
+    if (e.name !== 'AbortError') {
+      console.error('[Catalog] Share failed', e);
+      showToast('Could not share: ' + e.message);
     }
   }
   if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
@@ -4540,7 +4676,10 @@ async function openMktShareWorkspace() {
         ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
         <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${safeName}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
       </div>
-      ${!canWebShare ? '<div style="font-size:11px;color:var(--muted)">Download the image and copy a caption below to share.</div>' : ''}`;
+      ${!canWebShare ? '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Download the image and copy a caption below to share.</div>' : ''}
+      <div style="text-align:center;margin-top:8px">
+        <button onclick="openSheet('bioEditSheet')" style="background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;text-decoration:underline;padding:4px 8px">Don't like the bio?</button>
+      </div>`;
   } catch(e) {
     console.error('[ProductShare] share card render failed', e);
     const cardEl = document.getElementById('mktCardArea');
@@ -4627,6 +4766,96 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-package"></i> Generate Marketing Copy'; }
     if (output) output.innerHTML = '<div style="font-size:12px;color:var(--burgundy);padding:8px 0">Error: ' + e.message + '</div>';
   }
+}
+
+// ─── BIO EDIT FLOW ─────────────────────────────────────────────────────────────
+// "Don't like the bio?" sheet → Regenerate or Edit Manually
+
+function _openBioRegenerate(style) {
+  const p = currentProduct;
+  if (!p) { closeSheet('bioEditSheet'); return; }
+  const content = document.getElementById('bioEditContent');
+  if (content) content.innerHTML = '<div style="text-align:center;padding:20px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:10px;font-size:13px;color:var(--muted)">Regenerating bio…</div></div>';
+
+  const occasionCtx = p.occasion && p.occasion !== 'not specified'
+    ? `The selected occasion is "${p.occasion}". Use occasion-specific language ONLY where it fits naturally.`
+    : 'No specific occasion. Keep all copy garment-focused and event-agnostic. Do NOT invent an occasion.';
+  const styleNote = style === 'elegant' ? 'Write in an elevated, poetic, editorial tone.'
+    : style === 'simple' ? 'Write in a clear, warm, conversational tone. No poetic excess.'
+    : style === 'detailed' ? 'Include as much specific garment detail as possible.'
+    : style === 'luxury' ? 'Write in a premium, aspirational luxury boutique tone.'
+    : 'Write in a natural, confident boutique tone.';
+
+  const prompt = `You are writing product bio copy for Meraki by Sam, a Pakistani clothing boutique.
+
+Garment: ${p.name || 'Unnamed'}
+Type: ${p.garment_type || 'garment'}
+Colors: ${p.colors || 'not specified'}
+Category: ${p.category || 'not specified'}
+Current description: ${p.description_en || p.catalog_blurb || 'not available'}
+Motifs: ${(p.motifs || []).join(', ') || 'not specified'}
+
+Occasion rule: ${occasionCtx}
+Style direction: ${styleNote}
+
+Return ONLY valid JSON, no markdown:
+{
+  "description_en": "2-3 sentence garment bio. Specific to the actual garment. Lead with the most distinctive visual detail. No generic filler.",
+  "catalog_blurb": "2-sentence catalog entry. Professional editorial tone. Most distinctive detail first.",
+  "share_blurb": "1-2 sentences for a social share image. 140-220 characters max. No hashtags, no price, no CTA."
+}`;
+
+  callClaude([{ role: 'user', content: prompt }], '', 600).then(resp => {
+    let parsed;
+    try { parsed = JSON.parse(resp); }
+    catch { try { parsed = JSON.parse(resp.replace(/```json|```/g, '').trim()); } catch { parsed = null; } }
+    if (!parsed) {
+      if (content) content.innerHTML = '<div style="color:var(--burgundy);font-size:13px;padding:12px">Could not parse bio — try again.</div>';
+      return;
+    }
+    const update = { description_en: parsed.description_en || null, catalog_blurb: parsed.catalog_blurb || null, share_blurb: parsed.share_blurb || null };
+    db('update', 'products', { id: p.id, data: update }).then(() => {
+      const idx = inventory.findIndex(x => x.id === p.id);
+      if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
+      closeSheet('bioEditSheet');
+      openMktShareWorkspace();
+      showToast('Bio updated ✓');
+    }).catch(e => {
+      if (content) content.innerHTML = `<div style="color:var(--burgundy);font-size:13px;padding:12px">Save failed: ${e.message}</div>`;
+    });
+  }).catch(e => {
+    if (content) content.innerHTML = `<div style="color:var(--burgundy);font-size:13px;padding:12px">AI error: ${e.message}</div>`;
+  });
+}
+
+function _openBioManualEdit() {
+  const p = currentProduct;
+  if (!p) return;
+  const currentBio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
+  const content = document.getElementById('bioEditContent');
+  if (!content) return;
+  content.innerHTML = `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Edit the full garment bio. This will be shown on the share card and in the catalog.</div>
+    <textarea id="bioManualText" style="width:100%;height:140px;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;line-height:1.6;resize:vertical;font-family:Inter,sans-serif">${currentBio}</textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-primary" onclick="_saveBioManual()" style="flex:1"><i class="ti ti-device-floppy"></i> Save Bio</button>
+      <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="flex:1">Cancel</button>
+    </div>`;
+}
+
+function _saveBioManual() {
+  const p = currentProduct;
+  if (!p) return;
+  const text = (document.getElementById('bioManualText')?.value || '').trim();
+  if (!text) { showToast('Bio cannot be empty'); return; }
+  const update = { description_en: text };
+  db('update', 'products', { id: p.id, data: update }).then(() => {
+    const idx = inventory.findIndex(x => x.id === p.id);
+    if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
+    closeSheet('bioEditSheet');
+    openMktShareWorkspace();
+    showToast('Bio saved ✓');
+  }).catch(e => showToast('Save failed: ' + e.message));
 }
 
 async function generateDetailModelPhoto() {
