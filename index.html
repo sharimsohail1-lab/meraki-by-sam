@@ -4050,12 +4050,6 @@ async function _buildCatalogImage() {
   ctx.textBaseline = 'middle';
   ctx.fillText((catalogCollection || 'Collection') + ' · Meraki by Sam', W / 2, GAP);
 
-  // Load logo once
-  let logoImg = null;
-  if (MERAKI_LOGO_SRC) {
-    try { logoImg = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch(_) {}
-  }
-
   for (let i = 0; i < selected.length; i++) {
     const p = selected[i];
     const cardTop = GAP * 2 + i * (CARD_H + GAP);
@@ -4096,14 +4090,7 @@ async function _buildCatalogImage() {
       ctx.restore();
     }
 
-    // Logo in bottom-right of the info panel — safe margin from edges
-    if (logoImg) {
-      const lw = W * 0.16, lh = (logoImg.height / logoImg.width) * lw;
-      const lm = 60;
-      ctx.globalAlpha = 0.60;
-      ctx.drawImage(logoImg, W - lw - lm, cardTop + CARD_H - lh - lm, lw, lh);
-      ctx.globalAlpha = 1;
-    }
+    // Logo omitted per product card — model photos already carry the Meraki watermark.
 
     // ── Info panel ──────────────────────────────────────────────────────────
     const infoTop = cardTop + IMG_H;
@@ -4340,18 +4327,7 @@ async function _buildItemShareCard(p) {
     ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
   }
 
-  // ── Meraki logo — bottom-right of info panel, 60px safe margin ───────────
-  if (MERAKI_LOGO_SRC) {
-    try {
-      const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
-      const logoW = W * 0.17;
-      const logoH = (logo.height / logo.width) * logoW;
-      const safeMargin = 60;
-      ctx.globalAlpha = 0.65;
-      ctx.drawImage(logo, W - logoW - safeMargin, H - logoH - safeMargin, logoW, logoH);
-      ctx.globalAlpha = 1;
-    } catch(_) {}
-  }
+  // Logo omitted — the generated model photo already carries the Meraki watermark.
 
   return canvas.toDataURL('image/jpeg', 0.92);
 }
