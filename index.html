@@ -103,6 +103,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .sheet-overlay { display: none; position: fixed; inset: 0; background: rgba(28,20,16,0.75); z-index: 300; align-items: flex-end; justify-content: center; }
 .bio-edit-cta { display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:10px 20px;border-radius:999px;border:1.5px solid rgba(122,35,55,0.35);background:#fff8f2;color:#7a2337;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 10px rgba(122,35,55,0.10); }
 .bio-edit-cta:active { transform:translateY(1px); }
+.change-name-btn { background:none;border:none;font-size:12px;color:var(--burgundy);cursor:pointer;padding:2px 8px;font-weight:600;text-decoration:underline;flex-shrink:0; }
 .sheet-overlay.open { display: flex; }
 .sheet { background: white; border-radius: 16px 16px 0 0; width: 100%; max-width: 480px; min-height: 60vh; max-height: 90vh; overflow-y: auto; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
@@ -496,7 +497,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="step-panel active" id="step-panel-1">
         <div class="field-label" id="t-seasonLabel">Season / Occasion</div>
         <div class="tab-pills" id="seasonPills">
-          <button class="tab-pill active" onclick="setSeason('eid',this)">Eid عید</button>
+          <button class="tab-pill" onclick="setSeason('eid',this)">Eid عید</button>
           <button class="tab-pill" onclick="setSeason('wedding',this)">Wedding شادی</button>
           <button class="tab-pill" onclick="setSeason('summer',this)">Summer گرمی</button>
           <button class="tab-pill" onclick="setSeason('winter',this)">Winter سردی</button>
@@ -561,9 +562,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div id="analysisResult" style="display:none">
           <div id="generatedSKU" class="sku-badge"></div>
           <div class="field-label" id="t-itemNameLabel">Item Name</div>
-          <div style="display:flex;gap:6px;margin-bottom:6px">
+          <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
             <input type="text" id="itemNameInput" class="field-input" style="flex:1;margin-bottom:0">
             <button class="btn btn-secondary btn-sm" onclick="suggestItemNames()" id="suggestItemNameBtn" style="white-space:nowrap;padding:0 10px"><i class="ti ti-sparkles"></i></button>
+            <button class="change-name-btn" data-action="change-product-name" data-context="intake" title="Edit name"><i class="ti ti-pencil"></i></button>
           </div>
           <div id="itemNameSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
           <div class="result-box">
@@ -912,7 +914,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
-    <div class="detail-name" id="detailName"></div>
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <div class="detail-name" id="detailName" style="flex:1"></div>
+      <button class="change-name-btn" data-action="change-product-name" data-context="detail" title="Change name"><i class="ti ti-pencil"></i> Change name</button>
+    </div>
     <div class="detail-meta" id="detailMeta"></div>
     <div id="mktShareSection">
       <button class="btn btn-gold" id="mktShareBtn" onclick="openMktShareWorkspace()">
@@ -970,7 +975,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="detailCollectionInput" class="field-input" placeholder="e.g. Eid 2026, Summer Shadi" style="margin-bottom:10px">
       <div class="field-label">Notes</div>
       <textarea id="detailNotesInput" class="field-input" placeholder="Any notes..."></textarea>
-      <button class="btn btn-primary" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
+      <button class="btn btn-primary" id="saveProductEditsBtn" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f0d0d0">
         <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:#c0392b;text-transform:uppercase;margin-bottom:8px">Danger Zone</div>
         <button class="btn" style="width:100%;background:#fff;color:#c0392b;border:1.5px solid #c0392b;font-weight:600" onclick="openSheet('deleteProductSheet')"><i class="ti ti-trash"></i> Delete Product</button>
@@ -1000,6 +1005,20 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         </div>
         <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- CHANGE NAME SHEET — after productDetailSheet so it paints above it -->
+<div class="sheet-overlay" id="changeNameSheet" onclick="closeSheetOutside(event,'changeNameSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:14px;color:var(--burgundy)">Change Product Name</div>
+    <input type="text" id="changeNameInput" class="field-input" placeholder="Product name" style="margin-bottom:12px">
+    <div id="changeNameError" style="color:#c0392b;font-size:12px;margin-bottom:8px;display:none"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="_saveChangedName()" style="flex:1"><i class="ti ti-device-floppy"></i> Save Name</button>
+      <button class="btn btn-secondary" onclick="closeSheet('changeNameSheet')" style="flex:1">Cancel</button>
     </div>
   </div>
 </div>
@@ -1400,7 +1419,7 @@ function initDetailSizeSteppers(p) {
 let uploadedPhotos = {}; // { slotId: { file, dataUrl, label } }
 let extraSlots = [];
 let garmentType = 'full-suit';
-let intakeSeason = 'eid';
+let intakeSeason = '';
 let currentProduct = null;   // product open in detail sheet
 let currentAnalysis = null;  // { sku, name, description, ideogramPrompt }
 let currentExhibition = null;
@@ -2109,10 +2128,10 @@ function goToStep(n) {
 
 function generateSKU() {
   const typeCode = { 'full-suit': 'FS', 'kameez': 'KZ', 'lehenga': 'LH', 'dupatta': 'DP', 'other': 'OT' }[garmentType] || 'OT';
-  const seasonCode = { 'eid': 'EID', 'wedding': 'WED', 'summer': 'SUM', 'winter': 'WIN', 'casual': 'CAS', 'formal': 'FOR' }[intakeSeason] || 'GEN';
   const year = new Date().getFullYear().toString().slice(-2);
+  const seasonCode = intakeSeason ? ({ 'eid': 'EID', 'wedding': 'WED', 'summer': 'SUM', 'winter': 'WIN', 'casual': 'CAS', 'formal': 'FOR' }[intakeSeason] || null) : null;
   const seq = String(inventory.length + 1).padStart(3, '0');
-  return `MRK-${typeCode}-${seasonCode}${year}-${seq}`;
+  return seasonCode ? `MRK-${typeCode}-${seasonCode}${year}-${seq}` : `MRK-${typeCode}-${year}-${seq}`;
 }
 
 async function analyzePhoto() {
@@ -2183,7 +2202,7 @@ async function analyzePhoto() {
       [{ role: 'user', content: [
         ...photoContent,
         { type: 'text', text: `You are analyzing a Pakistani garment for Meraki by Sam, a clothing boutique.
-Garment type: ${garmentType}, Season/Occasion: ${intakeSeason}.
+Garment type: ${garmentType}${intakeSeason ? `, Occasion: ${intakeSeason}` : '. No occasion selected — keep all descriptions event-agnostic. Do NOT assume Eid, wedding, or any event.'}.
 
 PHOTO HIERARCHY — follow strictly:
 - STRUCTURAL photos define garment shape, silhouette, proportions, and overall layout. Use them as the primary source.
@@ -2199,7 +2218,7 @@ Respond with a single JSON object (no markdown, no extra text). Fields:
 - "description": 2-3 sentence detailed garment bio for customers — fabric, key colors, embroidery placement, standout details, silhouette. Garment-specific, not occasion-generic. Do NOT mention APPNA.
 - "shareBlurb": 1-2 sentence version of the description for visual share cards. Lead with the most striking visual detail. 140-220 characters max. No hashtags, no price, no CTA. Event-agnostic unless the garment has a clearly specific occasion.
 - "colors": comma-separated main colors
-- "occasion": best occasion for this garment
+- "occasion": best occasion for this garment — ONLY if Occasion was specified above, otherwise return null
 - "category": one of Formal / Semi-Formal / Casual / Bridal
 - "motifs": array of objects, one per distinctive decorative element detected. Each object has:
     type (string — e.g. "bird", "floral vine", "geometric", "mirror work", "zari border", "sequins"),
@@ -2466,8 +2485,8 @@ function resetIntake() {
   document.getElementById('modelPhotoStockNote').style.display = 'none';
   document.getElementById('feedbackPanel').style.display = 'none';
   document.querySelectorAll('#garmentTypePills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
-  document.querySelectorAll('#seasonPills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
-  intakeSeason = 'eid';
+  document.querySelectorAll('#seasonPills .tab-pill').forEach(p => p.classList.remove('active'));
+  intakeSeason = '';
   // Reset size steppers to default M:1
   window._sizeStates['intakeSizeGrid'] = null;
   const intakeGrid = document.getElementById('intakeSizeGrid');
@@ -3468,7 +3487,7 @@ async function suggestItemNames() {
 
 Garment details:
 - Type: ${type}
-- Occasion/season: ${season}
+${season ? `- Occasion/season: ${season}` : '- No occasion selected — keep name event-agnostic'}
 ${collection ? `- Collection it belongs to: "${collection}"` : ''}
 ${current ? `- Sam's current name idea: "${current}" — refine or offer alternatives in this direction` : ''}
 ${analysis ? `- Garment analysis: ${analysis.slice(0, 400)}` : ''}
@@ -3689,19 +3708,19 @@ async function _markSizeAsSold(size) {
 
 async function saveProductEdits() {
   if (!currentProduct) return;
+  const btn = document.getElementById('saveProductEditsBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
+
   const price = parseInt(document.getElementById('detailPriceInput').value) || null;
   const notes = document.getElementById('detailNotesInput').value || null;
   const collection_name = document.getElementById('detailCollectionInput').value.trim() || null;
 
-  // Size inventory — normalize and save whatever is in the detail steppers
   const rawSizeState = window._sizeStates['detailSizeGrid'] || {};
   const detailSizeState = normalizeSizeInventory(rawSizeState);
   const hasSizes = SIZE_ORDER.some(s => detailSizeState[s] > 0);
-  // Preserve null if size_inventory was never set and Sam didn't enter any sizes
   const hadSizesBefore = !!getSizeInventory(currentProduct);
   const size_inventory = (hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null;
 
-  // Derive status from size totals when size_inventory is in play
   let status = currentProduct.status;
   let sold_at = currentProduct.sold_at;
   if (size_inventory !== null) {
@@ -3715,13 +3734,19 @@ async function saveProductEdits() {
     const idx = inventory.findIndex(p => p.id === currentProduct.id);
     inventory[idx] = { ...inventory[idx], price, notes, collection_name, size_inventory, status, sold_at };
     currentProduct = inventory[idx];
-    // Refresh status buttons if status changed
     ['available','reserved','sold'].forEach(s => {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
     _updateSizeTotalNote('detailSizeGrid', detailSizeState);
-    showToast('Saved');
-  } catch(e) { showToast('Error: ' + e.message); }
+    if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓'; }
+    showToast('Changes saved');
+    setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 1600);
+  } catch(e) {
+    console.error('[SaveEdits]', e.message);
+    if (btn) { btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save'; }
+    showToast('Could not save changes. Please try again.');
+    setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 2200);
+  }
 }
 
 async function deleteProduct() {
@@ -3924,27 +3949,31 @@ function setCatalogSelAll(val) {
 }
 
 function getCatalogCoverTheme(name) {
+  // Each theme: bg1/bg2 = gradient stops, accent = decorative color,
+  // light = true means cream/warm background (text will be dark ink)
   const n = (name || '').toLowerCase();
   if (/eid|عید|fitr|adha/.test(n))
-    return { bg: 'linear-gradient(160deg,#1C0F00 0%,#2E1A00 60%,#1C0F00 100%)', accent: '#C9A84C', dividerWidth: 70 };
+    return { bg1:'#1C0F00', bg2:'#2E1A00', accent:'#C9A84C', light:false };
   if (/wedding|bridal|shadi|bride|nikkah|shaadi/.test(n))
-    return { bg: 'linear-gradient(160deg,#1A001A 0%,#2D0A1F 60%,#1A001A 100%)', accent: '#E8B0CC', dividerWidth: 60 };
-  if (/summer|garmi|lawn|breeze|light/.test(n))
-    return { bg: 'linear-gradient(160deg,#0F1A10 0%,#1A2A10 60%,#0F1A10 100%)', accent: '#9EC97F', dividerWidth: 60 };
+    return { bg1:'#1A001A', bg2:'#2D0A1F', accent:'#E8B0CC', light:false };
+  if (/summer|garmi|lawn|breeze/.test(n))
+    return { bg1:'#FAF5EC', bg2:'#F5ECD8', accent:'#B5763A', light:true };
   if (/winter|sarma|velvet|heavy|snow/.test(n))
-    return { bg: 'linear-gradient(160deg,#050E1A 0%,#0D1B2A 60%,#050E1A 100%)', accent: '#8FAFD4', dividerWidth: 60 };
+    return { bg1:'#050E1A', bg2:'#0D1B2A', accent:'#8FAFD4', light:false };
   if (/rose|gulab|pink|blush/.test(n))
-    return { bg: 'linear-gradient(160deg,#1A050E 0%,#2A0A18 60%,#1A050E 100%)', accent: '#E8A0B8', dividerWidth: 60 };
+    return { bg1:'#FDF5F7', bg2:'#F7E8EE', accent:'#9B3A5A', light:true };
   if (/gold|sona|amber|zari|gilded/.test(n))
-    return { bg: 'linear-gradient(160deg,#120D00 0%,#1E1500 60%,#120D00 100%)', accent: '#D4A843', dividerWidth: 70 };
+    return { bg1:'#120D00', bg2:'#1E1500', accent:'#D4A843', light:false };
   if (/night|raat|shaam|dusk|evening|midnight|twilight/.test(n))
-    return { bg: 'linear-gradient(160deg,#04040F 0%,#0A0A1E 60%,#04040F 100%)', accent: '#A07ED4', dividerWidth: 60 };
+    return { bg1:'#04040F', bg2:'#0A0A1E', accent:'#A07ED4', light:false };
   if (/spring|bahar|bloom|flower|floral/.test(n))
-    return { bg: 'linear-gradient(160deg,#080F0A 0%,#0E1A10 60%,#080F0A 100%)', accent: '#7EC49A', dividerWidth: 60 };
+    return { bg1:'#F5FAF2', bg2:'#EBF5E4', accent:'#4A7A3A', light:true };
   if (/blue|sapphire|neel|sky/.test(n))
-    return { bg: 'linear-gradient(160deg,#040A12 0%,#081525 60%,#040A12 100%)', accent: '#70A8D8', dividerWidth: 60 };
-  // default — deep warm dark with gold accent (brand colours)
-  return { bg: 'linear-gradient(160deg,#0D0808 0%,#1A0F0F 60%,#0D0808 100%)', accent: '#C9A84C', dividerWidth: 60 };
+    return { bg1:'#F2F5FA', bg2:'#E4EBF5', accent:'#2A5080', light:true };
+  if (/bird|paradise|garden|botanical|crimson|scarlet|ruby/.test(n))
+    return { bg1:'#1A0808', bg2:'#2A0F0F', accent:'#C9A84C', light:false };
+  // default — cream editorial with burgundy (Meraki brand)
+  return { bg1:'#FAF5EC', bg2:'#F0E8D8', accent:'#7A2337', light:true };
 }
 
 async function renderCatalogPreview() {
@@ -4043,93 +4072,98 @@ async function _buildCatalogPages() {
   return { pages, collName, W, H: PAGE_H };
 }
 
-// Cover page canvas — dark themed, official logo, collection name, tagline
+// Cover page canvas — adapts between light (cream) and dark themes
 async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
+  const isLight = !!theme.light;
 
-  // Background gradient
-  const bgHex = theme.bg.match(/#[0-9A-Fa-f]{6}/g) || ['#0D0808','#1A0F0F'];
-  const grad = ctx.createLinearGradient(0, 0, W * 0.35, H);
-  grad.addColorStop(0, bgHex[0]);
-  grad.addColorStop(0.55, bgHex[1] || bgHex[0]);
-  grad.addColorStop(1, bgHex[0]);
+  // Background gradient (vertical, subtle)
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, theme.bg1);
+  grad.addColorStop(0.5, theme.bg2);
+  grad.addColorStop(1, theme.bg1);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
   // Inset border
-  const M = 52;
-  ctx.strokeStyle = theme.accent + '40';
+  const M = 60;
+  ctx.strokeStyle = theme.accent + (isLight ? '50' : '40');
   ctx.lineWidth = 1.5;
   ctx.strokeRect(M, M, W - M * 2, H - M * 2);
 
-  // Corner accent marks (L-shaped)
-  const CL = 64;
-  ctx.strokeStyle = theme.accent + '99';
+  // Corner accent L-marks — slightly larger for elegance
+  const CL = 72;
+  ctx.strokeStyle = theme.accent + (isLight ? '80' : '99');
   ctx.lineWidth = 2.5;
-  const corners = [[M-10,M-10,1,1],[W-M+10,M-10,-1,1],[M-10,H-M+10,1,-1],[W-M+10,H-M+10,-1,-1]];
-  corners.forEach(([cx, cy, sx, sy]) => {
-    ctx.beginPath(); ctx.moveTo(cx, cy + sy * CL); ctx.lineTo(cx, cy); ctx.lineTo(cx + sx * CL, cy); ctx.stroke();
+  [[M-12,M-12,1,1],[W-M+12,M-12,-1,1],[M-12,H-M+12,1,-1],[W-M+12,H-M+12,-1,-1]].forEach(([cx,cy,sx,sy]) => {
+    ctx.beginPath(); ctx.moveTo(cx, cy+sy*CL); ctx.lineTo(cx, cy); ctx.lineTo(cx+sx*CL, cy); ctx.stroke();
   });
 
-  // Subtle ornamental centre dot
-  ctx.fillStyle = theme.accent + '33';
-  ctx.beginPath(); ctx.arc(W/2, H/2, 160, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = theme.accent + '18';
-  ctx.beginPath(); ctx.arc(W/2, H/2, 220, 0, Math.PI*2); ctx.fill();
+  // Subtle background texture: thin horizontal rule across centre
+  ctx.fillStyle = theme.accent + (isLight ? '18' : '22');
+  ctx.fillRect(M + 40, H * 0.5 - 0.5, W - (M + 40) * 2, 1);
 
-  // Center content — start logo roughly 1/3 from top
-  let cy = H * 0.30;
+  // Center content — logo starts at 28% from top
+  let cy = H * 0.28;
 
-  // Logo (white-ified via composite)
+  // Logo: on light covers draw at natural size; on dark covers, white-ify
   let logoDrawn = false;
   try {
     const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
     if (logo && logo.naturalWidth > 0) {
-      const logoH = 148, logoW = logo.naturalWidth * (logoH / logo.naturalHeight);
-      const tmpC = document.createElement('canvas');
-      tmpC.width = logoW; tmpC.height = logoH;
-      const tmpCtx = tmpC.getContext('2d');
-      tmpCtx.drawImage(logo, 0, 0, logoW, logoH);
-      tmpCtx.globalCompositeOperation = 'source-in';
-      tmpCtx.fillStyle = 'rgba(255,255,255,0.92)';
-      tmpCtx.fillRect(0, 0, logoW, logoH);
-      ctx.globalAlpha = 0.88;
-      ctx.drawImage(tmpC, (W - logoW) / 2, cy - logoH / 2, logoW, logoH);
-      ctx.globalAlpha = 1.0;
-      cy += logoH / 2 + 52;
+      const logoH = 176, logoW = Math.round(logo.naturalWidth * (logoH / logo.naturalHeight));
+      if (isLight) {
+        // Draw logo at its natural colours on cream background
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(logo, (W - logoW) / 2, cy - logoH / 2, logoW, logoH);
+        ctx.globalAlpha = 1.0;
+      } else {
+        // White-ify for dark backgrounds
+        const tmpC = document.createElement('canvas');
+        tmpC.width = logoW; tmpC.height = logoH;
+        const tmpCtx = tmpC.getContext('2d');
+        tmpCtx.drawImage(logo, 0, 0, logoW, logoH);
+        tmpCtx.globalCompositeOperation = 'source-in';
+        tmpCtx.fillStyle = 'rgba(255,255,255,0.94)';
+        tmpCtx.fillRect(0, 0, logoW, logoH);
+        ctx.globalAlpha = 0.90;
+        ctx.drawImage(tmpC, (W - logoW) / 2, cy - logoH / 2, logoW, logoH);
+        ctx.globalAlpha = 1.0;
+      }
+      cy += logoH / 2 + 56;
       logoDrawn = true;
     }
   } catch(_) {}
   if (!logoDrawn) {
-    ctx.fillStyle = theme.accent;
-    ctx.font = `italic 400 32px "Playfair Display", serif`;
+    ctx.fillStyle = isLight ? theme.accent : 'rgba(255,255,255,0.9)';
+    ctx.font = `italic 400 36px "Playfair Display", serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('Meraki by Sam', W / 2, cy);
-    cy += 56;
+    cy += 64;
   }
 
-  // Divider
-  const divW = (theme.dividerWidth || 60) * 7;
-  ctx.fillStyle = theme.accent + '55';
+  // Divider line
+  const divW = 420;
+  ctx.fillStyle = theme.accent + (isLight ? '60' : '55');
   ctx.fillRect((W - divW) / 2, cy, divW, 1.5);
-  cy += 40;
+  cy += 44;
 
-  // Collection name (word-wrapped, bold Playfair)
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `700 72px "Playfair Display", serif`;
+  // Collection name — large, serif, bold
+  ctx.fillStyle = isLight ? '#1a1008' : '#ffffff';
+  ctx.font = `700 76px "Playfair Display", serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  const nameLines = _ctxMeasureLines(ctx, collName, W - 160);
-  nameLines.forEach((l, i) => ctx.fillText(l, W / 2, cy + i * 86));
-  cy += nameLines.length * 86 + 28;
+  const nameLines = _ctxMeasureLines(ctx, collName, W - 180);
+  nameLines.forEach((l, i) => ctx.fillText(l, W / 2, cy + i * 92));
+  cy += nameLines.length * 92 + 30;
 
-  // Tagline — keyword-derived, no Claude call needed (fast and consistent)
+  // Tagline
   const tn = collName.toLowerCase();
   const tagline = (
     /eid|fitr|adha/.test(tn) ? 'where festivity meets grace' :
     /wedding|bridal|shadi|nikkah/.test(tn) ? 'adorned in love & tradition' :
-    /summer|lawn|breeze|light/.test(tn) ? 'light, airy & effortlessly beautiful' :
+    /summer|lawn|breeze/.test(tn) ? 'light, airy & effortlessly beautiful' :
     /winter|velvet|snow|sarma/.test(tn) ? 'wrapped in warmth & elegance' :
     /rose|gulab|pink|blush/.test(tn) ? 'blooming in softness & grace' :
     /gold|sona|amber|zari|gilded/.test(tn) ? 'gilded in timeless luxury' :
@@ -4140,17 +4174,16 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
     /blue|sapphire|neel|sky/.test(tn) ? 'serene as the open sky' :
     'a collection by meraki'
   );
-  ctx.fillStyle = theme.accent + 'BB';
-  ctx.font = `italic 400 26px Inter, sans-serif`;
+  ctx.fillStyle = isLight ? theme.accent + 'CC' : theme.accent + 'BB';
+  ctx.font = `italic 400 28px Inter, sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText(tagline, W / 2, cy);
-  cy += 48;
 
   // Bottom attribution
-  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.fillStyle = isLight ? 'rgba(60,40,20,0.35)' : 'rgba(255,255,255,0.28)';
   ctx.font = `300 22px Inter, sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-  ctx.fillText(`MERAKI BY SAM  ·  ${year}`, W / 2, H - M - 18);
+  ctx.fillText(`MERAKI BY SAM  ·  ${year}`, W / 2, H - M - 20);
 
   return canvas.toDataURL('image/jpeg', 0.93);
 }
@@ -4824,6 +4857,78 @@ function _saveBioManual() {
     showToast('Bio saved ✓');
   }).catch(e => showToast('Save failed: ' + e.message));
 }
+
+// ─── CHANGE NAME FLOW ──────────────────────────────────────────────────────────
+
+// Track whether the name sheet is editing a saved product or the add-flow
+let _changeNameContext = 'detail'; // 'detail' | 'intake'
+
+function openChangeNameSheet(context) {
+  _changeNameContext = context || 'detail';
+  const errEl = document.getElementById('changeNameError');
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+  const input = document.getElementById('changeNameInput');
+  if (!input) return;
+  if (context === 'intake') {
+    input.value = document.getElementById('itemNameInput')?.value || '';
+  } else {
+    input.value = currentProduct?.name || '';
+  }
+  openSheet('changeNameSheet');
+  requestAnimationFrame(() => input.focus());
+}
+
+async function _saveChangedName() {
+  const input = document.getElementById('changeNameInput');
+  const errEl = document.getElementById('changeNameError');
+  const name = input?.value.trim();
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Name cannot be empty'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (errEl) { errEl.style.display = 'none'; }
+
+  if (_changeNameContext === 'intake') {
+    // Just update the add-flow input — name will be used on save
+    const nameEl = document.getElementById('itemNameInput');
+    if (nameEl) nameEl.value = name;
+    closeSheet('changeNameSheet');
+    return;
+  }
+
+  // Saved product — persist to DB
+  const p = currentProduct;
+  if (!p) { closeSheet('changeNameSheet'); return; }
+
+  const btn = document.querySelector('#changeNameSheet .btn-primary');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Saving…'; }
+
+  try {
+    await db('update', 'products', { id: p.id, data: { name } });
+    const idx = inventory.findIndex(x => x.id === p.id);
+    if (idx >= 0) { inventory[idx] = { ...inventory[idx], name }; currentProduct = inventory[idx]; }
+    // Update all visible name elements without full re-render
+    const detailNameEl = document.getElementById('detailName');
+    if (detailNameEl) detailNameEl.textContent = name;
+    closeSheet('changeNameSheet');
+    renderHome();
+    renderInventory();
+    showToast('Name updated ✓');
+  } catch(e) {
+    console.error('[ChangeName] save failed:', e.message);
+    if (errEl) { errEl.textContent = 'Could not update name. Please try again.'; errEl.style.display = 'block'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Name'; }
+  }
+}
+
+// Event delegation — survives re-renders
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action="change-product-name"]');
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  openChangeNameSheet(btn.dataset.context || 'detail');
+});
 
 async function generateDetailModelPhoto() {
   if (!currentProduct?.ideogram_prompt) { showToast('No prompt available for this item'); return; }
