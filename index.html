@@ -973,7 +973,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="detailPhotoCustomLabel" class="field-input" placeholder="Custom label..." style="flex:1;margin-bottom:0">
       <button class="btn btn-secondary btn-sm" onclick="pickDetailPhotoFile(document.getElementById('detailPhotoCustomLabel').value||'Detail')" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
     </div>
-    <input type="file" id="detailPhotoFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleDetailPhotoFile(this)">
+    <input type="file" id="detailPhotoFileInput" accept="image/*" style="display:none" onchange="handleDetailPhotoFile(this)">
   </div>
 </div>
 
@@ -3036,7 +3036,7 @@ function _renderDetailPhotoInsets() {
     <div style="position:relative;flex:0 0 auto">
       <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;display:block">
       <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
-      <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0"><i class="ti ti-x"></i></button>
+      <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:24px;height:24px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;touch-action:manipulation"><i class="ti ti-x"></i></button>
     </div>`).join('');
   const addBtn = `<div onclick="openDetailPhotoPicker()" style="flex:0 0 auto;cursor:pointer">
     <div style="width:72px;height:72px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px"><i class="ti ti-plus"></i></div>
@@ -3072,25 +3072,48 @@ async function handleDetailPhotoFile(input) {
     const dataUrl = e.target.result;
     window._detailInsetPhotos = window._detailInsetPhotos || [];
     window._detailInsetPhotos.push({ slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'), label, image: dataUrl });
-    await _saveDetailPhotos();
-    _renderDetailPhotoInsets();
-    showToast('Detail photo added');
+    try {
+      await _saveDetailPhotos();
+      _renderDetailPhotoInsets();
+      showToast('Detail photo added');
+    } catch(err) {
+      // Revert optimistic push on failure
+      window._detailInsetPhotos.pop();
+      showToast('Save failed: ' + err.message);
+    }
   };
   reader.readAsDataURL(file);
 }
 
 async function deleteDetailPhoto(idx) {
   if (!currentProduct) return;
-  window._detailInsetPhotos.splice(idx, 1);
-  await _saveDetailPhotos();
+  const removed = window._detailInsetPhotos.splice(idx, 1);
   _renderDetailPhotoInsets();
-  showToast('Removed');
+  try {
+    await _saveDetailPhotos();
+    showToast('Removed');
+  } catch(err) {
+    // Revert on failure
+    window._detailInsetPhotos.splice(idx, 0, removed[0]);
+    _renderDetailPhotoInsets();
+    showToast('Delete failed: ' + err.message);
+  }
 }
 
 async function _saveDetailPhotos() {
+  if (!currentProduct) throw new Error('No product selected');
   const photos = window._detailInsetPhotos || [];
   const value = photos.length ? JSON.stringify(photos) : null;
-  await db('update', 'products', { id: currentProduct.id, data: { detail_photos: value } });
+  // Use raw fetch to detect schema-cache fallback warning
+  const r = await fetch('/api/db', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'update', table: 'products', id: currentProduct.id, data: { detail_photos: value } })
+  });
+  const json = await r.json();
+  if (json.error) throw new Error(json.error);
+  if (json.warning) throw new Error('Schema cache stale — detail_photos column not found. Run /api/migrate to fix, then try again.');
+  // Update local cache
   const idx = inventory.findIndex(p => p.id === currentProduct.id);
   if (idx >= 0) inventory[idx] = { ...inventory[idx], detail_photos: value };
   currentProduct = { ...currentProduct, detail_photos: value };
