@@ -2737,7 +2737,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-full-bio-cards';
+const _MERAKI_BUILD = '2026-06-28-catalog-robust';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3950,45 +3950,61 @@ async function renderCatalogPreview() {
   const DETAIL_PRIORITY = ['neckline','sleeves','hemline','dupatta','embroidery','skirt-detail','border','back'];
 
   const pagesHTML = selected.map(p => {
-    const img = p.model_photo || p.photo;
-    const isSoldOut = !isProductAvailable(p);
-    const imgHTML = img
-      ? `<div class="cat-product-img-wrap"><img class="cat-product-img" src="${img}" alt="${p.name}">${isSoldOut ? '<div class="cat-sold-stamp">Sold</div>' : ''}</div>`
-      : `<div class="cat-product-img-placeholder"><i class="ti ti-hanger" style="font-size:40px"></i><span>Model image not created yet</span></div>`;
+    try {
+      const img = p.model_photo || p.photo;
+      const isSoldOut = !isProductAvailable(p);
+      const safeName = p.name || 'Untitled piece';
+      const imgHTML = img
+        ? `<div class="cat-product-img-wrap"><img class="cat-product-img" src="${img}" alt="${safeName}">${isSoldOut ? '<div class="cat-sold-stamp">Sold</div>' : ''}</div>`
+        : `<div class="cat-product-img-placeholder"><i class="ti ti-hanger" style="font-size:40px"></i><span>Photo coming soon</span></div>`;
 
-    const rawDetails = p.detail_photos
-      ? (typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos)
-      : [];
-    const sortedDetails = [...rawDetails].sort((a, b) => {
-      const ai = DETAIL_PRIORITY.indexOf(a.slot);
-      const bi = DETAIL_PRIORITY.indexOf(b.slot);
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    }).slice(0, 4);
+      // detail_photos: guard against JSON.parse returning null or non-array
+      let rawDetails = [];
+      try {
+        if (p.detail_photos) {
+          const parsed = typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos;
+          if (Array.isArray(parsed)) rawDetails = parsed;
+        }
+      } catch(_) {}
+      const sortedDetails = rawDetails.sort((a, b) => {
+        const ai = DETAIL_PRIORITY.indexOf(a.slot);
+        const bi = DETAIL_PRIORITY.indexOf(b.slot);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      }).slice(0, 4);
 
-    const insetsHTML = sortedDetails.length
-      ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">${
-          sortedDetails.map(d => `<div style="text-align:center">
-            <img src="${d.image}" alt="${d.label}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e0da">
-            <div style="font-size:9px;color:#888;margin-top:2px">${d.label}</div>
-          </div>`).join('')
-        }</div>`
-      : '';
+      const insetsHTML = sortedDetails.length
+        ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">${
+            sortedDetails.map(d => `<div style="text-align:center">
+              <img src="${d.image}" alt="${d.label || ''}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e0da">
+              <div style="font-size:9px;color:#888;margin-top:2px">${d.label || ''}</div>
+            </div>`).join('')
+          }</div>`
+        : '';
 
-    return `<div class="cat-product-page">
-      ${imgHTML}
-      <div class="cat-product-info">
-        <div class="cat-product-name">${p.name}</div>
-        ${(p.description_en || p.catalog_blurb) ? `<div class="cat-product-blurb">${p.description_en || p.catalog_blurb}</div>` : ''}
-        <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Reach out for price'}</div>
-        ${(() => {
-          if (isSoldOut) return '<div style="font-size:10px;color:#B71C1C;font-weight:600;letter-spacing:1px;margin-top:3px;text-transform:uppercase">Sold Out</div>';
-          const sizes = getAvailableSizes(p);
-          if (sizes.length) return `<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes: ${sizes.join(' · ')}</div>`;
-          return '<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes available on request</div>';
-        })()}
-        ${insetsHTML}
-      </div>
-    </div>`;
+      const bio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
+
+      return `<div class="cat-product-page">
+        ${imgHTML}
+        <div class="cat-product-info">
+          <div class="cat-product-name">${safeName}</div>
+          ${bio ? `<div class="cat-product-blurb">${bio}</div>` : ''}
+          <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Reach out for price'}</div>
+          ${(() => {
+            if (isSoldOut) return '<div style="font-size:10px;color:#B71C1C;font-weight:600;letter-spacing:1px;margin-top:3px;text-transform:uppercase">Sold Out</div>';
+            const sizes = getAvailableSizes(p);
+            if (sizes.length) return `<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes: ${sizes.join(' · ')}</div>`;
+            return '<div style="font-size:10px;color:var(--muted);margin-top:3px">Sizes available on request</div>';
+          })()}
+          ${insetsHTML}
+        </div>
+      </div>`;
+    } catch(err) {
+      console.warn('[catalog preview] Failed to render product', p?.name, err);
+      return `<div class="cat-product-page">
+        <div class="cat-product-img-placeholder"><i class="ti ti-alert-circle" style="font-size:40px;color:#c9a96e"></i><span>Could not render this piece</span></div>
+        <div class="cat-product-info"><div class="cat-product-name">${p?.name || 'Untitled piece'}</div></div>
+      </div>`;
+    }
   }).join('');
 
   document.getElementById('catalogPreviewContent').innerHTML = coverHTML + pagesHTML;
@@ -4040,13 +4056,22 @@ async function _buildCatalogImage() {
   mc.width = W;
   const mctx = mc.getContext('2d');
 
-  const cardLayouts = selected.map(p => {
-    mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
-    const nameLines = _ctxMeasureLines(mctx, p.name || 'Untitled', W - PAD * 2).slice(0, 2);
+  // Track whether any product is missing optional data (for post-render toast)
+  let anyMissingData = false;
 
-    const blurb = p.description_en || p.catalog_blurb || '';
+  const cardLayouts = selected.map(p => {
+    const safeName = (p.name || 'Untitled piece').trim();
+    mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
+    const nameLines = _ctxMeasureLines(mctx, safeName, W - PAD * 2).slice(0, 2);
+
+    // Bio: full garment analysis first, then shorter fallbacks, then generated sentence
+    const rawBio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
+    const blurb = rawBio || `${safeName} — a beautiful piece from the Meraki by Sam collection.`;
     mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
     const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
+
+    if (!p.model_photo && !p.photo) anyMissingData = true;
+    if (!p.price) anyMissingData = true;
 
     const isSoldOut = !isProductAvailable(p);
     const priceBlockH = isSoldOut ? 36 : 42 + 32;
@@ -4054,7 +4079,7 @@ async function _buildCatalogImage() {
     const bioBlockH = bioLines.length > 0 ? bioLines.length * BIO_LH + 10 : 0;
     const INFO_H = INFO_PAD_TOP + nameBlockH + bioBlockH + priceBlockH + INFO_PAD_BOT;
 
-    return { p, nameLines, bioLines, isSoldOut, INFO_H };
+    return { p, safeName, nameLines, bioLines, isSoldOut, INFO_H };
   });
 
   // ── Phase 2: normalize info panel height across all cards ────────────────
@@ -4085,23 +4110,39 @@ async function _buildCatalogImage() {
 
   let cardTop = HEADER_H;
   for (let i = 0; i < cardLayouts.length; i++) {
-    const { p, nameLines, bioLines, isSoldOut, INFO_H } = cardLayouts[i];
+    const { p, safeName, nameLines, bioLines, isSoldOut, INFO_H } = cardLayouts[i];
 
     // ── Image area ──────────────────────────────────────────────────────────
     ctx.fillStyle = '#f0ede8';
     ctx.fillRect(0, cardTop, W, IMG_H);
 
     const imgSrc = p.model_photo || p.photo;
+    let imgLoaded = false;
     if (imgSrc) {
       try {
         const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
         const img = await _loadImgWithTimeout(proxied, 10000);
-        const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
-        const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-        const dx = (W - dw) / 2;
-        const dy = cardTop + Math.max(16, (IMG_H - dh) / 2);
-        ctx.drawImage(img, dx, dy, dw, dh);
+        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
+          const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+          const dx = (W - dw) / 2;
+          const dy = cardTop + Math.max(16, (IMG_H - dh) / 2);
+          ctx.drawImage(img, dx, dy, dw, dh);
+          imgLoaded = true;
+        }
       } catch(_) {}
+    }
+    if (!imgLoaded) {
+      // Tasteful placeholder — cream background already drawn above
+      ctx.save();
+      ctx.fillStyle = '#b5aca3';
+      ctx.font = `400 32px Inter, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('Photo coming soon', W / 2, cardTop + IMG_H / 2);
+      ctx.font = `400 22px Inter, sans-serif`;
+      ctx.fillStyle = '#c9bfb7';
+      ctx.fillText(safeName, W / 2, cardTop + IMG_H / 2 + 48);
+      ctx.restore();
     }
 
     // Sold / Reserved stamp
@@ -4166,6 +4207,10 @@ async function _buildCatalogImage() {
     }
 
     cardTop += IMG_H + INFO_H + GAP;
+  }
+
+  if (anyMissingData) {
+    showToast('Some pieces are missing photos or prices — placeholders were used.');
   }
 
   return canvas.toDataURL('image/jpeg', 0.90);
