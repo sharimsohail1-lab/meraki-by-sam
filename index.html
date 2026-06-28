@@ -2621,10 +2621,10 @@ async function applyWatermark(imageUrl) {
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
     const logo = await loadImg(MERAKI_LOGO_SRC);
-    const logoW = canvas.width * 0.22;
+    const logoW = canvas.width * 0.20;
     const logoH = (logo.height / logo.width) * logoW;
-    const margin = canvas.width * 0.07;
-    ctx.globalAlpha = 0.85;
+    const margin = canvas.width * 0.12; // 12% keeps logo inside any CSS object-fit crop
+    ctx.globalAlpha = 0.80;
     ctx.drawImage(logo, canvas.width - logoW - margin, canvas.height - logoH - margin, logoW, logoH);
     ctx.globalAlpha = 1;
     return canvas.toDataURL('image/jpeg', 0.92);
@@ -4026,143 +4026,140 @@ function _loadImgWithTimeout(src, ms) {
   });
 }
 
+// Helper: wrap text to max lines, returning array of lines drawn
+function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  const words = text.split(' ');
+  let line = '';
+  const lines = [];
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+      if (lines.length >= maxLines) break;
+    } else {
+      line = test;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+  return lines.length;
+}
+
 async function _buildItemShareCard(p) {
+  // Catalog-style layout: image on top (~65%), white info panel on bottom (~35%).
+  // Mirrors the cat-product-page visual language.
   const SIZE = 1080;
+  const IMG_H = 700;   // top image area
+  const INFO_Y = IMG_H;
+  const INFO_H = SIZE - IMG_H; // 380px info panel
+  const PAD = 48;      // horizontal padding inside info panel
+
   const canvas = document.createElement('canvas');
   canvas.width = SIZE; canvas.height = SIZE;
   const ctx = canvas.getContext('2d');
 
-  // Background
-  ctx.fillStyle = '#FDF8F3';
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  // ── Image area background (cream fallback if no photo) ───────────────────
+  ctx.fillStyle = '#f0ede8';
+  ctx.fillRect(0, 0, SIZE, IMG_H);
 
-  // Load and draw main product image.
-  // Priority: use the already-rendered DOM element (avoids reloading large base64 blobs),
-  // then fall back to a fresh load with timeout.
-  let photoDrawn = false;
+  // Load product photo — prefer DOM element (already loaded, no refetch)
+  let imgEl = null;
   try {
     const domEl = document.getElementById('detailPhoto');
-    if (domEl && domEl.naturalWidth > 0) {
-      const scale = Math.max(SIZE / domEl.naturalWidth, SIZE / domEl.naturalHeight);
-      const dw = domEl.naturalWidth * scale, dh = domEl.naturalHeight * scale;
-      ctx.drawImage(domEl, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
-      photoDrawn = true;
-    }
+    if (domEl && domEl.naturalWidth > 0) imgEl = domEl;
   } catch(_) {}
-  if (!photoDrawn) {
+  if (!imgEl) {
     const imgSrc = p.model_photo || p.photo;
     if (imgSrc) {
       try {
         const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-        const img = await _loadImgWithTimeout(proxied, 8000);
-        const scale = Math.max(SIZE / img.width, SIZE / img.height);
-        const dw = img.width * scale, dh = img.height * scale;
-        ctx.drawImage(img, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
+        imgEl = await _loadImgWithTimeout(proxied, 8000);
       } catch(_) {}
     }
   }
-
-  // Gradient overlay at bottom for legibility
-  const grad = ctx.createLinearGradient(0, SIZE * 0.55, 0, SIZE);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.72)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, SIZE, SIZE);
-
-  // Detail inset (top-right corner) — pick first available inset photo
-  const detailPhotos = window._detailInsetPhotos || [];
-  if (detailPhotos.length > 0) {
-    try {
-      const insetSrc = detailPhotos[0].startsWith('data:') ? detailPhotos[0] : '/api/ideogram?url=' + encodeURIComponent(detailPhotos[0]);
-      const inset = await _loadImgWithTimeout(insetSrc, 5000);
-      const IS = SIZE * 0.22;
-      const margin = SIZE * 0.04;
-      const ix = SIZE - IS - margin, iy = margin;
-      // Rounded clip
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(ix, iy, IS, IS, 12);
-      ctx.clip();
-      const sc = Math.max(IS / inset.width, IS / inset.height);
-      const dw = inset.width * sc, dh = inset.height * sc;
-      ctx.drawImage(inset, ix + (IS - dw) / 2, iy + (IS - dh) / 2, dw, dh);
-      ctx.restore();
-      // Border
-      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.roundRect(ix, iy, IS, IS, 12);
-      ctx.stroke();
-    } catch(_) {}
+  if (imgEl) {
+    // Cover-crop into the image area
+    const scale = Math.max(SIZE / imgEl.naturalWidth, IMG_H / imgEl.naturalHeight);
+    const dw = imgEl.naturalWidth * scale, dh = imgEl.naturalHeight * scale;
+    ctx.drawImage(imgEl, (SIZE - dw) / 2, (IMG_H - dh) / 2, dw, dh);
   }
 
-  // Status stamp (SOLD / RESERVED)
+  // ── Sold / Reserved stamp — top-right corner of image (matches catalog style) ──
   if (p.status === 'sold' || p.status === 'reserved') {
-    const stamp = p.status === 'sold' ? 'SOLD' : 'RESERVED';
-    const stampColor = p.status === 'sold' ? '#C0392B' : '#7B5EA7';
-    const sw = SIZE * 0.38, sh = SIZE * 0.09;
-    const sx = SIZE * 0.04, sy = SIZE * 0.04;
+    const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
+    const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
+    const fontSize = 28;
+    ctx.font = `bold ${fontSize}px "Playfair Display", serif`;
+    const textW = ctx.measureText(label).width;
+    const sw = textW + 36, sh = 48;
+    const sx = SIZE - sw - 28, sy = 24;
     ctx.save();
-    ctx.globalAlpha = 0.92;
-    ctx.fillStyle = stampColor;
+    ctx.fillStyle = stampBg;
     ctx.beginPath();
-    ctx.roundRect(sx, sy, sw, sh, 8);
+    ctx.roundRect(sx, sy, sw, sh, 4);
     ctx.fill();
-    ctx.globalAlpha = 1;
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${SIZE * 0.055}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.letterSpacing = '0.1em';
-    ctx.fillText(stamp, sx + sw / 2, sy + sh / 2);
+    ctx.fillText(label, sx + sw / 2, sy + sh / 2);
     ctx.restore();
   }
 
-  // Text block at bottom
-  const padX = SIZE * 0.07;
-  let ty = SIZE * 0.72;
+  // ── Thin separator line at top of info panel ─────────────────────────────
+  ctx.fillStyle = '#f0ede8';
+  ctx.fillRect(0, INFO_Y, SIZE, 2);
 
-  // Product name
-  ctx.fillStyle = '#fff';
-  ctx.font = `600 ${SIZE * 0.052}px "Playfair Display", serif`;
+  // ── White info panel ──────────────────────────────────────────────────────
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, INFO_Y + 2, SIZE, INFO_H - 2);
+
+  // ── Product name (Playfair Display, like cat-product-name 20px → scaled up) ─
+  let ty = INFO_Y + 42;
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `600 52px "Playfair Display", serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  // Word-wrap name to 2 lines max
-  const nameWords = (p.name || 'Untitled').split(' ');
-  let nameLine1 = '', nameLine2 = '';
-  for (const w of nameWords) {
-    const test = nameLine1 ? nameLine1 + ' ' + w : w;
-    if (!nameLine1 || ctx.measureText(test).width <= SIZE - padX * 2) { nameLine1 = test; }
-    else { nameLine2 = (nameLine2 ? nameLine2 + ' ' : '') + w; }
-  }
-  ctx.fillText(nameLine1, padX, ty);
-  if (nameLine2) { ty += SIZE * 0.058; ctx.fillText(nameLine2, padX, ty); }
+  const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, SIZE - PAD * 2, 62, 2);
+  ty += nameLines * 62 + 16;
 
-  // Price
-  ty += SIZE * 0.065;
-  const priceText = p.price ? `$${p.price}` : 'Reach out for price';
-  ctx.font = `${SIZE * 0.038}px Inter, sans-serif`;
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.fillText(priceText, padX, ty);
-
-  // Sizes
-  const sizes = getAvailableSizes(p);
-  if (sizes.length) {
-    ty += SIZE * 0.048;
-    ctx.font = `${SIZE * 0.033}px Inter, sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.70)';
-    ctx.fillText('Available in ' + sizes.join(', '), padX, ty);
+  // ── Catalog blurb / short description ────────────────────────────────────
+  const blurb = p.catalog_blurb || p.description_en || '';
+  if (blurb) {
+    ctx.fillStyle = '#666666';
+    ctx.font = `italic 30px Inter, sans-serif`;
+    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, SIZE - PAD * 2, 42, 2);
+    ty += blurbLines * 42 + 20;
   }
 
-  // Meraki logo (bottom-right)
+  // ── Price (like cat-product-price) ───────────────────────────────────────
+  if (p.status === 'sold') {
+    ctx.fillStyle = '#B71C1C';
+    ctx.font = `600 32px Inter, sans-serif`;
+    ctx.fillText('SOLD OUT · Message for similar pieces', PAD, ty);
+    ty += 44;
+  } else {
+    ctx.fillStyle = p.price ? '#1a1a1a' : '#E65100';
+    ctx.font = `600 ${p.price ? 36 : 30}px Inter, sans-serif`;
+    ctx.fillText(p.price ? '$' + p.price : 'Reach out for price', PAD, ty);
+    ty += 50;
+
+    // Sizes
+    const sizes = getAvailableSizes(p);
+    ctx.font = `26px Inter, sans-serif`;
+    ctx.fillStyle = '#999999';
+    ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
+  }
+
+  // ── Meraki logo — bottom-right of info panel, inside safe margin ─────────
   if (MERAKI_LOGO_SRC) {
     try {
       const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
-      const logoW = SIZE * 0.22;
+      const logoW = SIZE * 0.18;
       const logoH = (logo.height / logo.width) * logoW;
-      const logoMargin = SIZE * 0.05;
-      ctx.globalAlpha = 0.88;
-      ctx.drawImage(logo, SIZE - logoW - logoMargin, SIZE - logoH - logoMargin, logoW, logoH);
+      const safeMargin = 48; // well inside any crop
+      ctx.globalAlpha = 0.70;
+      ctx.drawImage(logo, SIZE - logoW - safeMargin, SIZE - logoH - safeMargin, logoW, logoH);
       ctx.globalAlpha = 1;
     } catch(_) {}
   }
@@ -4194,11 +4191,10 @@ async function _shareItemCard(dataUrl, caption, productName) {
 
 
 async function openMktShareWorkspace() {
-  console.log('[ProductDetail] Marketing & Share clicked — build:', _MERAKI_BUILD);
   const p = currentProduct;
   if (!p) return;
   const output = document.getElementById('mktShareOutput');
-  if (!output) { console.error('[ProductShare] mktShareOutput container not found'); return; }
+  if (!output) return;
 
   window._shareTexts = [];
   window._currentShareCardUrl = null;
@@ -4210,7 +4206,7 @@ async function openMktShareWorkspace() {
   output.innerHTML =
     `<div id="mktCardSection" style="margin-bottom:18px">
       <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Share Image</div>
-      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">DEBUG: Share card section rendered — building image…</div>
+      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
     </div>
     <div id="mktCopySection" style="margin-bottom:14px">
       ${hasPkg ? buildPackageHTML(p) : '<div style="font-size:13px;color:var(--muted);padding:4px 0">No marketing copy yet — tap Generate below.</div>'}
