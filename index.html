@@ -2169,7 +2169,8 @@ MOTIF DETECTION — identify every distinctive decorative element visible across
 
 Respond with a single JSON object (no markdown, no extra text). Fields:
 - "name": short evocative English name, 3-5 words
-- "description": 2-3 sentence poetic description for customers — fabric, key colors, embroidery placement, standout details. Do NOT mention APPNA.
+- "description": 2-3 sentence detailed garment bio for customers — fabric, key colors, embroidery placement, standout details, silhouette. Garment-specific, not occasion-generic. Do NOT mention APPNA.
+- "shareBlurb": 1-2 sentence version of the description for visual share cards. Lead with the most striking visual detail. 140-220 characters max. No hashtags, no price, no CTA. Event-agnostic unless the garment has a clearly specific occasion.
 - "colors": comma-separated main colors
 - "occasion": best occasion for this garment
 - "category": one of Formal / Semi-Formal / Casual / Bridal
@@ -2228,7 +2229,7 @@ Return only the JSON object. No explanation, no markdown fences.` }
     const sku = generateSKU();
     const primaryPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
     console.log('primaryPhoto defined:', !!primaryPhoto, '| length:', primaryPhoto?.length);
-    currentAnalysis = { sku, ...parsed, _uploadedPhotoB64: primaryPhoto };
+    currentAnalysis = { sku, ...parsed, shareBlurb: parsed.shareBlurb || null, _uploadedPhotoB64: primaryPhoto };
 
     _stage = 'ui-render';
     console.log('MERAKI_ANALYSIS_STAGE: ui-render');
@@ -2305,6 +2306,7 @@ async function _doSaveProduct() {
       occasion: currentAnalysis.occasion,
       category: currentAnalysis.category,
       description_en: currentAnalysis.description,
+      share_blurb: currentAnalysis.shareBlurb || null,
       ideogram_prompt: currentAnalysis.ideogramPrompt,
       neckline: currentAnalysis.neckline || null,
       has_placket: currentAnalysis.has_placket ?? null,
@@ -4198,8 +4200,10 @@ function _loadImgWithTimeout(src, ms) {
   });
 }
 
-// Helper: wrap text to max lines, returning array of lines drawn
+// Helper: wrap text to maxLines, truncate last line with ellipsis if text overflows.
+// Returns the number of lines drawn (≤ maxLines).
 function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+  if (!text) return 0;
   const words = text.split(' ');
   let line = '';
   const lines = [];
@@ -4208,13 +4212,30 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
     if (ctx.measureText(test).width > maxWidth && line) {
       lines.push(line);
       line = word;
-      if (lines.length >= maxLines) break;
+      if (lines.length >= maxLines) { line = ''; break; }
     } else {
       line = test;
     }
   }
   if (line && lines.length < maxLines) lines.push(line);
-  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+
+  // If there are remaining words, the last line needs an ellipsis
+  const allWords = text.split(' ');
+  const drawnWords = lines.join(' ').split(' ').length;
+  const hasOverflow = drawnWords < allWords.length;
+
+  lines.forEach((l, i) => {
+    if (hasOverflow && i === lines.length - 1) {
+      // Truncate last line to fit ellipsis
+      let truncated = l;
+      while (truncated.length > 0 && ctx.measureText(truncated + '…').width > maxWidth) {
+        truncated = truncated.slice(0, truncated.lastIndexOf(' ') || truncated.length - 1);
+      }
+      ctx.fillText(truncated + '…', x, y + i * lineHeight);
+    } else {
+      ctx.fillText(l, x, y + i * lineHeight);
+    }
+  });
   return lines.length;
 }
 
@@ -4301,12 +4322,13 @@ async function _buildItemShareCard(p) {
   const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 62, 2);
   ty += nameLines * 62 + 16;
 
-  // ── Garment bio — detailed upload analysis first, catalog blurb fallback ──
-  const blurb = p.description_en || p.catalog_blurb || '';
+  // ── Garment bio for share card ────────────────────────────────────────────
+  // Priority: share_blurb (short, card-safe) → catalog_blurb → description_en
+  // All sources clamp to 4 lines with ellipsis — no invisible cutoff.
+  const blurb = p.share_blurb || p.catalog_blurb || p.description_en || '';
   if (blurb) {
     ctx.fillStyle = '#555555';
     ctx.font = `italic 26px Inter, sans-serif`;
-    // 4 lines in the 470px panel — enough for rich garment detail
     const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 4);
     ty += blurbLines * 36 + 18;
   }
@@ -4417,30 +4439,37 @@ async function generateMarketingPackage() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
   if (output) output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:12px 0">Generating marketing copy — takes about 15 seconds…</div>';
 
+  const occasionCtx = p.occasion && p.occasion !== 'not specified'
+    ? `The selected occasion is "${p.occasion}". Use occasion-specific language ONLY where it fits naturally — do not force it into every field.`
+    : 'No specific occasion is set. Keep all copy garment-focused and event-agnostic. Do NOT invent or assign an occasion (e.g. do not say "perfect for Eid" unless Eid is the selected occasion).';
+
   const prompt = `You are creating a complete marketing package for a Pakistani clothing boutique called "Meraki by Sam."
 
 Garment details:
 - Name: ${p.name}
 - Type: ${p.garment_type || 'garment'}
-- Season/Occasion: ${p.season || 'general'}
 - Colors: ${p.colors || 'not specified'}
-- Occasion: ${p.occasion || 'not specified'}
 - Category: ${p.category || 'not specified'}
 - Description: ${p.description_en || 'traditional Pakistani garment'}
 - Price: ${p.price ? '$' + p.price : 'price on request'}
 - SKU: ${p.sku}
 
+Occasion rule: ${occasionCtx}
+
+The description above is the authoritative source of garment details. Ground all copy in the actual garment — fabric, colors, embroidery, silhouette, motifs, borders — not generic occasion language.
+
 Create all of the following in this EXACT JSON format (no markdown, no extra text):
 {
-  "caption_en": "Instagram caption in English. 3-4 lines, poetic, evocative. Reference the garment's beauty, the occasion it's perfect for, the feeling of wearing it. End with a gentle call to action like 'DM to inquire'.",
-  "caption_short": "One punchy line for Instagram. Under 15 words.",
-  "caption_ur": "Instagram caption in Urdu (Nastaliq script). Same tone as caption_en but natural Urdu expression, not a direct translation. 2-3 lines.",
-  "hashtags": "20 relevant hashtags as a single space-separated string. Mix of Pakistani fashion, occasion-specific, color-specific, and boutique hashtags.",
-  "whatsapp_listing": "WhatsApp listing message. Warm and conversational. Include name, key features, price (or 'DM for price'), and SKU reference. Under 120 words. Use line breaks for readability.",
-  "story_text": "Very short text for an Instagram Story overlay. 1-2 lines maximum. Punchy. Could be a price reveal or a one-line description.",
-  "price_card": "Text for a printable price card. Format: item name on first line, key detail on second line, price on third line. Keep it simple.",
-  "sharing_angle": "One short phrase describing the best way to position this piece. Examples: 'Best for Eid', 'Good for wedding guest', 'Premium formal piece', 'Great color for mehndi'. Pick the single most relevant angle.",
-  "catalog_blurb": "2-sentence catalog entry. Professional and concise. Suitable for a printed or digital catalog page."
+  "caption_en": "Instagram caption in English. 3-4 lines. Lead with specific garment details (fabric, embroidery, silhouette). Evocative, not generic. Mention occasion only if the garment's selected occasion is specific. End with a gentle call to action like 'DM to inquire'.",
+  "caption_short": "One punchy line for Instagram. Under 15 words. Garment-specific — no generic filler.",
+  "caption_ur": "Instagram caption in Urdu (Nastaliq script). Same tone as caption_en — garment-specific, natural Urdu expression. 2-3 lines.",
+  "hashtags": "20 relevant hashtags. Grounded in: garment type, color family, embroidery/motif style, formality, and occasion only if selected. No generic filler tags. Space-separated string.",
+  "whatsapp_listing": "WhatsApp listing message. Warm and personal. Describe the garment specifically. Include name, standout features, price (or 'DM for price'), and SKU. Under 120 words. Line breaks for readability.",
+  "story_text": "Very short Instagram Story overlay. 1-2 lines. Punchy and garment-specific. Could be a key detail or price reveal.",
+  "price_card": "Printable price card text: item name / key garment detail / price. Simple, 3 lines.",
+  "sharing_angle": "One short phrase describing the best way to position this piece. Base it on the garment's actual attributes and occasion if set. Examples: 'Premium formal embroidery', 'Statement wedding-guest piece', 'Everyday elevated kameez'. Do not default to 'Best for Eid' unless Eid is the selected occasion.",
+  "catalog_blurb": "2-sentence catalog entry. Garment-specific and professional. Lead with the most distinctive visual detail. Suitable for a printed or digital catalog.",
+  "share_blurb": "1-2 sentences for a social share image card. Garment-specific. Lead with the most striking visual detail (color, embroidery, silhouette). 140-220 characters. No hashtags, no price, no CTA, no 'DM to order'. Occasion language only if the selected occasion is explicit and specific."
 }`;
 
   try {
@@ -4462,6 +4491,7 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
       price_card: pkg.price_card || null,
       sharing_angle: pkg.sharing_angle || null,
       catalog_blurb: pkg.catalog_blurb || null,
+      share_blurb: pkg.share_blurb || null,
     };
     await db('update', 'products', { id: p.id, data: update });
 
