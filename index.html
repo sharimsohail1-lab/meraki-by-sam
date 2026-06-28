@@ -1383,6 +1383,7 @@ let selectedRefPhoto = null;
 let voiceRecognition = null;
 let voiceTranscriptText = '';
 let activeImageGenProvider = localStorage.getItem('imageGenProvider') || 'fashn';
+let productTryOnProvider = 'fashn'; // local to Add/Detail — separate from Settings provider
 const MERAKI_LOGO_SRC = '/assets/meraki-logo.png';
 
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
@@ -2509,12 +2510,14 @@ async function buildGarmentComposite(photos) {
 // ─── MODEL PHOTO / IDEOGRAM ───────────────────────────────────────────────────
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
-  // Product model photo always uses FASHN (virtual try-on).
-  // Ideogram is used only in Settings → Model Templates for generating base templates.
-  await loadModelTemplates();
-  const hasAny = modelTemplates.some(r => r.image);
-  if (!hasAny) { showToast('No templates yet — go to Settings → Manage Templates first'); return; }
-  _openFashnPicker(targetImgId, outputDivId, btnId);
+  if (productTryOnProvider === 'fashn') {
+    await loadModelTemplates();
+    const hasAny = modelTemplates.some(r => r.image);
+    if (!hasAny) { showToast('No templates yet — go to Settings → Manage Templates first'); return; }
+    _openFashnPicker(targetImgId, outputDivId, btnId);
+  } else {
+    await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  }
 }
 
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
@@ -2550,10 +2553,10 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     console.log('Reference image size:', singleRef ? Math.round(singleRef.length / 1024) + ' KB' : 'none');
     console.groupEnd();
 
-    // Product try-on always uses FASHN — activeImageGenProvider only affects model template generation in Settings.
-    const provider = IMAGE_GEN_PROVIDERS['fashn'];
-    if (!provider) throw new Error('FASHN provider not registered');
-    console.log('[Meraki] Using provider: FASHN (product try-on)');
+    // Use locally-selected provider (productTryOnProvider); Settings/Model Templates use activeImageGenProvider.
+    const provider = IMAGE_GEN_PROVIDERS[productTryOnProvider] || IMAGE_GEN_PROVIDERS['fashn'];
+    if (!provider) throw new Error('No provider available');
+    console.log('[Meraki] Using provider:', provider.id, '(product try-on)');
     const url = await provider.generate(currentAnalysis.ideogramPrompt, singleRef, imageWeight);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
@@ -2567,11 +2570,13 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     const note = document.getElementById('modelPhotoStockNote');
     if (note) { note.style.display = 'block'; }
 
-    // Product try-on always uses FASHN, so always show "Try different model"
-    const retryRow = outputDivId === 'modelPhotoOutput'
-      ? document.getElementById('fashnRetryRow')
-      : document.getElementById('detailFashnRetryRow');
-    if (retryRow) retryRow.style.display = 'block';
+    // "Try different model" only makes sense for FASHN (photo picker to swap model)
+    if (productTryOnProvider === 'fashn') {
+      const retryRow = outputDivId === 'modelPhotoOutput'
+        ? document.getElementById('fashnRetryRow')
+        : document.getElementById('detailFashnRetryRow');
+      if (retryRow) retryRow.style.display = 'block';
+    }
 
     // Update "View Reference" button label to confirm composite used
     const refBtns = document.querySelectorAll('.js-view-ref-btn');
@@ -3574,6 +3579,7 @@ function _openProductDetailUI(p) {
     document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
   });
   initDetailSizeSteppers(p);
+  renderProviderPills();
   openSheet('productDetailSheet');
 }
 
@@ -4805,29 +4811,40 @@ async function setExhStatus(status) {
 // FASHN note accordingly.
 
 function renderProviderPills() {
-  // Provider pills are no longer shown in the Add / Product Detail flow.
-  // Product model photos always use FASHN. Ideogram is available in Settings → Manage Templates.
+  const pills = Object.values(IMAGE_GEN_PROVIDERS).map(p => {
+    const active = p.id === productTryOnProvider;
+    return `<button onclick="selectProductTryOnProvider('${p.id}')" style="padding:5px 12px;border-radius:20px;border:1.5px solid ${active ? 'var(--burgundy)' : 'var(--border)'};background:${active ? 'var(--burgundy)' : '#fff'};color:${active ? '#fff' : 'var(--ink)'};font-size:11px;font-weight:${active ? '600' : '400'};cursor:pointer;transition:all .15s">${p.label}</button>`;
+  }).join('');
+  const html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${pills}</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px">FASHN is best for putting the actual garment on a model. Ideogram is a fallback and may change garment details.</div>`;
+  ['intakeProviderPills', 'detailProviderPills'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.innerHTML = html; el.style.display = 'block'; }
+  });
   _applyProviderUI();
+}
+
+function selectProductTryOnProvider(id) {
+  productTryOnProvider = id;
+  renderProviderPills();
 }
 
 function selectProvider(id) {
   setImageGenProvider(id);
-  renderProviderPills();
 }
 
 function _applyProviderUI() {
-  // Product try-on (Add New Piece + Product Detail) always uses FASHN.
-  // activeImageGenProvider only affects Settings → Model Templates.
+  const isFashn = productTryOnProvider === 'fashn';
   ['intakeWeightRow', 'detailWeightRow'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
+    if (el) el.style.display = isFashn ? 'none' : '';
   });
   ['intakeFashnNote', 'detailFashnNote'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = 'block';
+    if (el) el.style.display = isFashn ? 'block' : 'none';
   });
   const creditNote = document.getElementById('intakeCreditNote');
-  if (creditNote) creditNote.textContent = 'Uses 1 try-on credit — only on tap';
+  if (creditNote) creditNote.textContent = isFashn ? 'Uses 1 try-on credit — only on tap' : 'Uses 1 Ideogram credit — only on tap';
 }
 
 // ─── FASHN MODEL PHOTO ───────────────────────────────────────────────────────
