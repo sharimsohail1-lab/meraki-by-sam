@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 
 // Metadata-only patch for detail_photos JSONB.
 // Client sends { productId, metaArray } where metaArray has NO image/cleanedImage fields.
-// Server merges into existing DB record so base64 photos are never round-tripped.
+// Server iterates its own existing records and patches only metadata fields.
+// Images are NEVER sourced from the client payload — only from the existing DB record.
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -21,7 +22,6 @@ export default async function handler(req, res) {
 
   const supabase = createClient(url, key);
 
-  // Fetch current detail_photos from DB
   const { data: rows, error: fetchErr } = await supabase
     .from('products')
     .select('detail_photos')
@@ -36,19 +36,61 @@ export default async function handler(req, res) {
     existing = Array.isArray(raw) ? raw : (raw ? JSON.parse(raw) : []);
   } catch (_) { existing = []; }
 
-  // Build id→existing map to preserve image/cleanedImage
-  const byId = {};
-  existing.forEach(d => { if (d.id) byId[d.id] = d; });
+  // Build lookup maps from client metadata (no images)
+  const incomingById = {};
+  const incomingBySlot = {};
+  metaArray.forEach(m => {
+    if (m.id) incomingById[m.id] = m;
+    if (m.slot) incomingBySlot[m.slot] = m;
+  });
 
-  // Merge: apply client metadata fields, keep server image fields
-  const merged = metaArray.map(m => {
-    const srv = byId[m.id] || {};
+  console.log('[DETAIL META SERVER] before merge', {
+    productId,
+    existing: existing.map(d => ({
+      id: d.id,
+      label: d.label,
+      slot: d.slot,
+      hasImage: !!d.image,
+      imageLength: d.image?.length || 0,
+      hasCleanedImage: !!d.cleanedImage,
+      useAsInset: d.useAsInset,
+    })),
+    incoming: metaArray.map(d => ({
+      id: d.id,
+      label: d.label,
+      hasImage: !!d.image,
+      hasCleanedImage: !!d.cleanedImage,
+      useAsInset: d.useAsInset,
+    })),
+  });
+
+  // Iterate EXISTING (server) records — never lose an image.
+  // Match incoming metadata by ID first, then slot, then positional index.
+  const merged = existing.map((srv, idx) => {
+    const incoming = (srv.id && incomingById[srv.id])
+      || (srv.slot && incomingBySlot[srv.slot])
+      || metaArray[idx];
+    if (!incoming) return srv;
     return {
-      ...srv,
-      ...m,
-      image: srv.image,
-      cleanedImage: srv.cleanedImage,
+      ...srv,                                        // preserve image, cleanedImage, all server fields
+      useAsInset: incoming.useAsInset !== undefined ? incoming.useAsInset : srv.useAsInset,
+      insetOrder: incoming.insetOrder !== undefined ? incoming.insetOrder : srv.insetOrder,
+      label: incoming.label ?? srv.label,
+      slot: incoming.slot ?? srv.slot,
+      id: srv.id || incoming.id,                    // assign ID if server record lacked one
     };
+  });
+
+  console.log('[DETAIL META SERVER] after merge', {
+    productId,
+    merged: merged.map(d => ({
+      id: d.id,
+      label: d.label,
+      hasImage: !!d.image,
+      imageLength: d.image?.length || 0,
+      hasCleanedImage: !!d.cleanedImage,
+      useAsInset: d.useAsInset,
+    })),
   });
 
   const value = merged.length ? JSON.stringify(merged) : null;

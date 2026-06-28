@@ -952,6 +952,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+      <!-- Model generation UI hidden from Product Detail — backend routes intact -->
+      <div id="detailModelGenerationBlock" style="display:none">
             <div id="detailProviderPills" style="display:none"></div>
       <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
         <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
@@ -981,6 +983,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
         </div>
       </div>
+      </div><!-- end detailModelGenerationBlock -->
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
@@ -4019,12 +4022,27 @@ async function toggleDetailPhotoInset(idx) {
 async function cleanDetailPhotoBackground(idx) {
   const photos = window._detailInsetPhotos || [];
   // ID-based lookup so stale index after re-render still resolves
-  let d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[idx];
+  const foundById = _lbCurrentPhotoId ? photos.find(p => p.id === _lbCurrentPhotoId) : null;
+  const foundByIdx = photos[idx];
+  let d = foundById || foundByIdx;
   const resolvedIdx = d ? photos.indexOf(d) : idx;
+
+  console.log('[BG CLEANUP] selected detail', {
+    currentPhotoId: _lbCurrentPhotoId,
+    currentIdx: idx,
+    foundById: !!foundById,
+    foundByIdx: !!foundByIdx,
+    label: d?.label,
+    id: d?.id,
+    hasImage: !!d?.image,
+    imageLength: d?.image?.length || 0,
+    hasCleanedImage: !!d?.cleanedImage,
+  });
+
   if (!d) throw new Error('photo not found');
 
   if (!d.image || typeof d.image !== 'string' || !d.image.startsWith('data:')) {
-    throw new Error('This photo has no image data. Please close and reopen the detail, then try again.');
+    throw new Error('Could not find this detail photo image. Please close and reopen Product Detail, then try again.');
   }
 
   console.log('[INSET BACKGROUND CLEANUP] sending to /api/remove-background', { label: d.label, slot: d.slot });
@@ -4087,6 +4105,12 @@ async function _saveDetailPhotosMeta() {
   if (!currentProduct) throw new Error('No product selected');
   const photos = window._detailInsetPhotos || [];
   const metaArray = photos.map(({ image, cleanedImage, ...meta }) => meta);
+
+  console.log('[DETAIL META CLIENT] before local update', {
+    count: photos.length,
+    photos: photos.map(d => ({ id: d.id, label: d.label, hasImage: !!d.image, imageLength: d.image?.length || 0, hasCleanedImage: !!d.cleanedImage, useAsInset: d.useAsInset })),
+  });
+
   let r;
   try {
     r = await fetch('/api/detail-photo-meta', {
@@ -4099,11 +4123,17 @@ async function _saveDetailPhotosMeta() {
   }
   const json = await r.json();
   if (json.error) throw new Error(json.error);
-  // Reflect metadata changes in local cache (keep image/cleanedImage intact in memory)
+  // Local in-memory array already has full image data — no replacement needed.
+  // Just update the serialized cache so re-open still has images.
   const serialized = photos.length ? JSON.stringify(photos) : null;
   const invIdx = inventory.findIndex(p => p.id === currentProduct.id);
   if (invIdx >= 0) inventory[invIdx] = { ...inventory[invIdx], detail_photos: serialized };
   currentProduct = { ...currentProduct, detail_photos: serialized };
+
+  console.log('[DETAIL META CLIENT] after local update', {
+    count: window._detailInsetPhotos?.length,
+    photos: (window._detailInsetPhotos || []).map(d => ({ id: d.id, label: d.label, hasImage: !!d.image, imageLength: d.image?.length || 0, hasCleanedImage: !!d.cleanedImage, useAsInset: d.useAsInset })),
+  });
 }
 
 async function _saveDetailPhotos() {
