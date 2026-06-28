@@ -2873,6 +2873,8 @@ function _lbRefresh() {
   const badge = document.getElementById('lbCleanBadge');
   badge.style.display = d.cleanedImage ? 'block' : 'none';
   const insetBtn = document.getElementById('lbInsetBtn');
+  // Always reset disabled — prevents stuck state from prior save
+  insetBtn.disabled = false;
   if (d.useAsInset) {
     insetBtn.textContent = '✓ Showing in share/catalog';
     insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--burgundy);color:#fff';
@@ -2902,9 +2904,12 @@ async function _lbToggleInset() {
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
     await toggleDetailPhotoInset(_lbCurrentIdx);
-    _lbRefresh();
-  } catch(_) {
+    // Flash "Saved ✓" briefly, then refresh to the new stable state
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { if (_lbCurrentIdx !== null) _lbRefresh(); else { btn.disabled = false; } }, 700);
+  } catch(err) {
     btn.disabled = false; btn.innerHTML = origHTML;
+    showToast('Could not update inset: ' + err.message);
   }
 }
 
@@ -3173,7 +3178,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-bg-removal-fix';
+const _MERAKI_BUILD = '2026-06-28-inset-toggle-fix';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3968,14 +3973,20 @@ async function deleteDetailPhoto(idx) {
   }
 }
 
-// Returns without rendering — callers (_lbToggleInset, direct use) handle re-render
+// Saves the toggle, re-renders thumbnails, throws on failure (caller handles button reset).
 async function toggleDetailPhotoInset(idx) {
   const photos = window._detailInsetPhotos || [];
   if (!photos[idx]) return;
+  const photoId = photos[idx].id;
+  const pending = window._detailPhotoPending || (window._detailPhotoPending = { toggle: new Set(), delete: new Set(), clean: new Set() });
+  // Prevent double-submit for the same photo
+  if (photoId && pending.toggle.has(photoId)) return;
+  if (photoId) pending.toggle.add(photoId);
+
   const prev = !!photos[idx].useAsInset;
-  // Enforce max 2 active insets
   const activeCount = photos.filter(d => d.useAsInset).length;
   if (!prev && activeCount >= 2) {
+    if (photoId) pending.toggle.delete(photoId);
     showToast('Max 2 insets. Turn one off first.');
     return;
   }
@@ -3984,14 +3995,17 @@ async function toggleDetailPhotoInset(idx) {
   photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order++; } else { d.insetOrder = null; } });
   try {
     await _saveDetailPhotos();
-    showToast(!prev ? 'Will appear in share/catalog' : 'Removed from share/catalog');
+    _renderDetailPhotoInsets();
   } catch(err) {
+    // Revert optimistic change
     photos[idx] = { ...photos[idx], useAsInset: prev };
     let order2 = 1;
     photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order2++; } else { d.insetOrder = null; } });
+    _renderDetailPhotoInsets();
     throw err;
+  } finally {
+    if (photoId) pending.toggle.delete(photoId);
   }
-  _renderDetailPhotoInsets();
 }
 
 // Background removal via /api/remove-background (server-side remove.bg proxy).
@@ -4060,19 +4074,29 @@ async function _saveDetailPhotos() {
   if (!currentProduct) throw new Error('No product selected');
   const photos = window._detailInsetPhotos || [];
   const value = photos.length ? JSON.stringify(photos) : null;
-  // Use raw fetch to detect schema-cache fallback warning
-  const r = await fetch('/api/db', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'update', table: 'products', id: currentProduct.id, data: { detail_photos: value } })
-  });
+  console.log('[DETAIL PHOTO SAVE] start', { productId: currentProduct.id, count: photos.length });
+  let r;
+  try {
+    r = await fetch('/api/db', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', table: 'products', id: currentProduct.id, data: { detail_photos: value } })
+    });
+  } catch(netErr) {
+    console.warn('[DETAIL PHOTO SAVE] network error', { productId: currentProduct?.id, error: netErr?.message });
+    throw new Error('Network error saving photos: ' + netErr.message);
+  }
   const json = await r.json();
-  if (json.error) throw new Error(json.error);
+  if (json.error) {
+    console.warn('[DETAIL PHOTO SAVE] failed', { productId: currentProduct?.id, error: json.error });
+    throw new Error(json.error);
+  }
   if (json.warning) throw new Error('Schema cache stale — detail_photos column not found. Run /api/migrate to fix, then try again.');
-  // Update local cache
-  const idx = inventory.findIndex(p => p.id === currentProduct.id);
-  if (idx >= 0) inventory[idx] = { ...inventory[idx], detail_photos: value };
+  // Update local cache only after confirmed DB write
+  const invIdx = inventory.findIndex(p => p.id === currentProduct.id);
+  if (invIdx >= 0) inventory[invIdx] = { ...inventory[invIdx], detail_photos: value };
   currentProduct = { ...currentProduct, detail_photos: value };
+  console.log('[DETAIL PHOTO SAVE] success', { productId: currentProduct.id });
 }
 
 function toggleCollRename() {
@@ -4472,8 +4496,22 @@ function _openProductDetailUI(p) {
   try {
     if (_dpRaw) _dpParsed = typeof _dpRaw === 'string' ? JSON.parse(_dpRaw) : _dpRaw;
   } catch(_) {}
-  window._detailInsetPhotos = Array.isArray(_dpParsed) ? _dpParsed : [];
+  const _rawPhotos = Array.isArray(_dpParsed) ? _dpParsed : [];
+  // Assign stable IDs to any photo that lacks one — lives inside JSONB, persists on next save
+  let _idsAssigned = false;
+  _rawPhotos.forEach(d => {
+    if (!d.id) { d.id = 'detail_' + Math.random().toString(36).slice(2, 10); _idsAssigned = true; }
+  });
+  window._detailInsetPhotos = _rawPhotos;
+  // Reset pending state for this product session — clears any stuck flags from previous product
+  window._detailPhotoPending = { toggle: new Set(), delete: new Set(), clean: new Set() };
   _renderDetailPhotoInsets();
+  // Persist newly assigned IDs without blocking the UI
+  if (_idsAssigned && p.id) {
+    const _idFixVal = _rawPhotos.length ? JSON.stringify(_rawPhotos) : null;
+    fetch('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', table: 'products', id: p.id, data: { detail_photos: _idFixVal } }) }).catch(() => {});
+  }
 
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
