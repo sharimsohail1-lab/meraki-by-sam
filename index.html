@@ -568,7 +568,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div id="analysisText" style="white-space:pre-wrap"></div>
           </div>
           <div id="modelPhotoSection" style="margin-top:14px">
-                        <div id="intakeProviderPills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+                        <div id="intakeProviderPills" style="display:none"></div>
             <div id="intakeFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
               <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better than Ideogram.
             </div>
@@ -585,7 +585,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
               <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
             </button>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-6px;margin-bottom:10px">
-              <span id="intakeCreditNote" style="font-size:11px;color:var(--muted)">Uses 1 Ideogram credit — only on tap</span>
+              <span id="intakeCreditNote" style="font-size:11px;color:var(--muted)">Uses 1 FASHN credit — only on tap</span>
               <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:2px 0;text-decoration:underline">View reference</button>
             </div>
             <div id="modelPhotoOutput" style="display:none">
@@ -780,6 +780,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- CATALOG MISSING PRICE WARNING -->
+<div class="sheet-overlay" id="catalogPriceWarnSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:8px">Missing Prices</div>
+    <div id="catalogPriceWarnMsg" style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5"></div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('catalogPriceWarnSheet');_showCatalogPreview()">Continue Anyway</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('catalogPriceWarnSheet')">Go Back</button>
+  </div>
+</div>
+
 <!-- FASHN MODEL PICKER SHEET -->
 <div class="sheet-overlay" id="fashnPickerSheet" onclick="closeSheetOutside(event,'fashnPickerSheet')">
   <div class="sheet" style="height:85vh">
@@ -906,6 +917,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </button>
       <div id="marketingPackageOutput" style="display:none"></div>
     </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-secondary" id="shareThisPieceBtn" onclick="generateItemSharePackage()">
+        <i class="ti ti-share"></i> Share This Piece
+      </button>
+      <div id="itemShareOutput" style="display:none;margin-top:10px"></div>
+    </div>
     <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 10px" id="detailDesc"></div>
     <div class="field-label" id="t-updateStatus">Update Status</div>
     <div class="status-row">
@@ -918,7 +935,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
-            <div id="detailProviderPills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+            <div id="detailProviderPills" style="display:none"></div>
       <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
         <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
       </div>
@@ -2498,14 +2515,12 @@ async function buildGarmentComposite(photos) {
 // ─── MODEL PHOTO / IDEOGRAM ───────────────────────────────────────────────────
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
-  if (activeImageGenProvider === 'fashn') {
-    await loadModelTemplates();
-    const hasAny = modelTemplates.some(r => r.image);
-    if (!hasAny) { showToast('No templates generated yet — go to Settings → Manage Templates first'); return; }
-    _openFashnPicker(targetImgId, outputDivId, btnId);
-    return;
-  }
-  await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  // Product model photo always uses FASHN (virtual try-on).
+  // Ideogram is used only in Settings → Model Templates for generating base templates.
+  await loadModelTemplates();
+  const hasAny = modelTemplates.some(r => r.image);
+  if (!hasAny) { showToast('No templates yet — go to Settings → Manage Templates first'); return; }
+  _openFashnPicker(targetImgId, outputDivId, btnId);
 }
 
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
@@ -2608,7 +2623,7 @@ async function applyWatermark(imageUrl) {
     const logo = await loadImg(MERAKI_LOGO_SRC);
     const logoW = canvas.width * 0.22;
     const logoH = (logo.height / logo.width) * logoW;
-    const margin = canvas.width * 0.03;
+    const margin = canvas.width * 0.07;
     ctx.globalAlpha = 0.85;
     ctx.drawImage(logo, canvas.width - logoW - margin, canvas.height - logoH - margin, logoW, logoH);
     ctx.globalAlpha = 1;
@@ -3550,6 +3565,7 @@ function _openProductDetailUI(p) {
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = p.collection_name || '';
   document.getElementById('detailModelOutput').style.display = 'none';
+  document.getElementById('itemShareOutput').style.display = 'none';
   document.querySelectorAll('.js-view-ref-btn').forEach(b => b.style.display = 'none');
   document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
   renderMarketingPackageCache(p);
@@ -3795,6 +3811,20 @@ function goToCatalogSelection() {
 
 function goToCatalogPreview() {
   if (catalogSelected.size === 0) { showToast('Select at least one item'); return; }
+  const missingPrice = catalogItems.filter(p => catalogSelected.has(p.id) && !p.price);
+  if (missingPrice.length) {
+    const names = missingPrice.map(p => p.name).join(', ');
+    const msg = missingPrice.length === 1
+      ? `"${names}" has no price — it will show "Reach out for price" in the catalog.`
+      : `${missingPrice.length} pieces have no price — they will show "Reach out for price" in the catalog:\n${names}`;
+    openSheet('catalogPriceWarnSheet');
+    document.getElementById('catalogPriceWarnMsg').textContent = msg;
+    return;
+  }
+  _showCatalogPreview();
+}
+
+function _showCatalogPreview() {
   document.getElementById('catalogSelScreen').style.display = 'none';
   document.getElementById('catalogPreviewScreen').style.display = 'flex';
   renderCatalogPreview();
@@ -3937,10 +3967,9 @@ async function renderCatalogPreview() {
     return `<div class="cat-product-page">
       ${imgHTML}
       <div class="cat-product-info">
-        <div class="cat-product-sku">${p.sku}</div>
         <div class="cat-product-name">${p.name}</div>
         ${p.catalog_blurb ? `<div class="cat-product-blurb">${p.catalog_blurb}</div>` : ''}
-        <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Price on request'}</div>
+        <div class="${p.price ? 'cat-product-price' : 'cat-product-noprice'}">${p.price ? '$' + p.price : 'Reach out for price'}</div>
         ${(() => {
           if (isSoldOut) return '<div style="font-size:10px;color:#B71C1C;font-weight:600;letter-spacing:1px;margin-top:3px;text-transform:uppercase">Sold Out</div>';
           const sizes = getAvailableSizes(p);
@@ -3981,6 +4010,80 @@ function shareCatalogWhatsApp() {
   const msg = `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
   const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
   window.open(url, '_blank');
+}
+
+async function generateItemSharePackage() {
+  if (!currentProduct) return;
+  const p = currentProduct;
+  const btn = document.getElementById('shareThisPieceBtn');
+  const output = document.getElementById('itemShareOutput');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+  output.style.display = 'block';
+  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Generating share copy…</div>';
+
+  const priceText = p.price ? `$${p.price}` : 'Reach out for price';
+  const sizes = getAvailableSizes(p);
+  const sizeText = sizes.length ? sizes.join(', ') : null;
+  const isSold = !isProductAvailable(p);
+  const statusNote = p.status === 'sold' ? 'SOLD OUT' : p.status === 'reserved' ? 'RESERVED' : 'available';
+
+  const prompt = `You are writing individual item share copy for a Pakistani clothing boutique called "Meraki by Sam."
+
+Piece details:
+- Name: ${p.name}
+- Type: ${p.garment_type || 'garment'}
+- Season/Occasion: ${p.season || 'general'}
+- Colors: ${p.colors || 'not specified'}
+- Price: ${priceText}
+- Sizes available: ${sizeText || 'not specified'}
+- Status: ${statusNote}
+- Description: ${p.description_en || 'traditional Pakistani garment'}
+
+${isSold ? 'IMPORTANT: This piece is sold. Do NOT imply it is available. Frame WhatsApp/Instagram as "recently sold — DM for similar pieces." Story text should say SOLD.' : ''}
+
+Write three outputs separated by these exact markers:
+===WHATSAPP===
+A warm, friendly WhatsApp message (2-4 sentences). Customer-to-customer tone. Include name, price (or "reach out for price"), sizes if available. End with "Message me to reserve ✨" (or "Message me for similar pieces" if sold).
+===INSTAGRAM===
+A polished Instagram caption (3-5 sentences + hashtags on a new line). Evocative, boutique tone. Mention occasion/style. Include availability language if in stock.
+===STORY===
+Very short story text (1-2 lines max). Suitable for an Instagram story. If available: "DM to order" or "Limited sizes." If sold: "SOLD ✨ DM for similar."`;
+
+  try {
+    const raw = await callClaude([{ role: 'user', content: prompt }], '', 400);
+    const parseSection = (marker, next) => {
+      const start = raw.indexOf(marker);
+      if (start === -1) return null;
+      const end = next ? raw.indexOf(next) : raw.length;
+      return raw.slice(start + marker.length, end === -1 ? raw.length : end).trim();
+    };
+    const whatsapp = parseSection('===WHATSAPP===', '===INSTAGRAM===');
+    const instagram = parseSection('===INSTAGRAM===', '===STORY===');
+    const story = parseSection('===STORY===', null);
+
+    const warn = [];
+    if (!p.price) warn.push('No price — showing "Reach out for price"');
+    if (!p.model_photo && !p.photo) warn.push('No photo available');
+    if (!sizeText) warn.push('No sizes added');
+
+    const warnHTML = warn.length
+      ? `<div style="font-size:11px;color:#C08000;background:#FFF8E1;border-radius:6px;padding:6px 10px;margin-bottom:10px">${warn.join(' · ')}</div>`
+      : '';
+
+    const section = (label, text) => text ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}</div>
+        <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text}</div>
+        <button onclick="navigator.clipboard.writeText(${JSON.stringify(text)}).then(()=>showToast('Copied'))" style="margin-top:4px;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0"><i class="ti ti-copy"></i> Copy</button>
+      </div>` : '';
+
+    output.innerHTML = warnHTML + section('WhatsApp', whatsapp) + section('Instagram Caption', instagram) + section('Story Text', story);
+  } catch(e) {
+    output.innerHTML = `<div style="color:var(--error);font-size:13px">Failed: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-share"></i> Share This Piece';
 }
 
 async function generateMarketingPackage() {
@@ -4552,13 +4655,8 @@ async function setExhStatus(status) {
 // FASHN note accordingly.
 
 function renderProviderPills() {
-  ['intakeProviderPills', 'detailProviderPills'].forEach(containerId => {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-    el.innerHTML = Object.values(IMAGE_GEN_PROVIDERS).map(p =>
-      `<button onclick="selectProvider('${p.id}')" id="provPill_${containerId}_${p.id}" style="padding:4px 10px;border-radius:20px;border:1.5px solid var(--burgundy);font-size:11px;font-weight:600;cursor:pointer;background:${p.id === activeImageGenProvider ? 'var(--burgundy)' : 'white'};color:${p.id === activeImageGenProvider ? 'white' : 'var(--burgundy)'};">${p.label}</button>`
-    ).join('');
-  });
+  // Provider pills are no longer shown in the Add / Product Detail flow.
+  // Product model photos always use FASHN. Ideogram is available in Settings → Manage Templates.
   _applyProviderUI();
 }
 
