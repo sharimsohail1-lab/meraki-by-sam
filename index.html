@@ -872,7 +872,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()" style="flex:1;margin:0"><i class="ti ti-package"></i> Marketing Package</button>
         <button class="btn btn-secondary btn-sm" onclick="toggleCollRename()" style="padding:0 12px;height:38px" title="Rename"><i class="ti ti-pencil"></i></button>
       </div>
-      <button class="btn btn-primary" onclick="openCatalogBuilder(currentCollection)" style="margin:0"><i class="ti ti-book"></i> Create Collection Catalog</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="openCatalogBuilder(currentCollection)" style="flex:1;margin:0"><i class="ti ti-book"></i> Catalog</button>
+        <button class="btn btn-secondary" onclick="openCollAddPiecesSheet()" style="flex:1;margin:0"><i class="ti ti-plus"></i> Add Pieces</button>
+      </div>
     </div>
     <div id="collRenameRow" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);gap:6px;flex-direction:row">
       <input type="text" id="collRenameInput" class="field-input" style="flex:1;margin-bottom:0;font-size:13px" placeholder="Collection name...">
@@ -892,7 +895,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeSheet('productDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
-    <div id="detailPhotoInsets" style="display:none;gap:6px;flex-wrap:wrap;margin:8px 0 4px"></div>
+    <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
     <div class="detail-name" id="detailName"></div>
@@ -953,6 +956,38 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button class="btn btn-primary" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
       <button class="btn btn-red" onclick="deleteProduct()"><i class="ti ti-trash"></i> Remove from Inventory</button>
     </div>
+  </div>
+</div>
+
+<!-- DETAIL PHOTO TYPE PICKER SHEET -->
+<div class="sheet-overlay" id="detailPhotoPickerSheet" onclick="closeSheetOutside(event,'detailPhotoPickerSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-weight:600;font-size:15px">Add Detail Photo</div>
+      <button onclick="closeSheet('detailPhotoPickerSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Choose what part of the garment you're photographing.</div>
+    <div id="detailPhotoTypeGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px"></div>
+    <div style="display:flex;gap:8px;margin-bottom:4px">
+      <input type="text" id="detailPhotoCustomLabel" class="field-input" placeholder="Custom label..." style="flex:1;margin-bottom:0">
+      <button class="btn btn-secondary btn-sm" onclick="pickDetailPhotoFile(document.getElementById('detailPhotoCustomLabel').value||'Detail')" style="padding:0 14px;white-space:nowrap;margin-bottom:0">Use</button>
+    </div>
+    <input type="file" id="detailPhotoFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleDetailPhotoFile(this)">
+  </div>
+</div>
+
+<!-- COLLECTION ADD PIECES SHEET -->
+<div class="sheet-overlay" id="collAddPiecesSheet" onclick="closeSheetOutside(event,'collAddPiecesSheet')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-weight:600;font-size:15px">Add Pieces to Collection</div>
+      <button onclick="closeSheet('collAddPiecesSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Tap a product to select or deselect it.</div>
+    <div id="collAddPiecesGrid" style="display:flex;flex-direction:column;gap:8px"></div>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px" onclick="saveCollAddPieces()"><i class="ti ti-check"></i> Add Selected</button>
   </div>
 </div>
 
@@ -2849,36 +2884,216 @@ function openCollectionDetail(name) {
     pkgOut.innerHTML = '';
   }
 
-  // Catalog list — photo + name + meta + price side by side
+  _renderCollDetailItems(items);
+  openSheet('collectionDetailSheet');
+}
+
+// ── Collection Detail helpers ─────────────────────────────────────────────────
+
+function _collReadinessBadges(p) {
+  const badges = [];
+  if (!p.price) badges.push(`<span style="font-size:10px;background:#fff3cd;color:#856404;border-radius:3px;padding:1px 5px">No price</span>`);
+  if (!p.model_photo) badges.push(`<span style="font-size:10px;background:#f8f9fa;color:var(--muted);border-radius:3px;padding:1px 5px">No model photo</span>`);
+  if (!getSizeInventory(p) && isProductAvailable(p)) badges.push(`<span style="font-size:10px;background:#fff3cd;color:#856404;border-radius:3px;padding:1px 5px">No sizes</span>`);
+  if (!p.caption_en) badges.push(`<span style="font-size:10px;background:#f8f9fa;color:var(--muted);border-radius:3px;padding:1px 5px">No marketing</span>`);
+  return badges.join('');
+}
+
+function _renderCollDetailItems(items) {
   const itemsEl = document.getElementById('collDetailItems');
   if (!items.length) {
-    itemsEl.innerHTML = '<div class="empty" style="padding:30px 0"><i class="ti ti-hanger"></i><p>No items in this collection yet.</p></div>';
-  } else {
-    const idxBase = window._collItemActions ? window._collItemActions.length : 0;
-    window._collItemActions = window._collItemActions || [];
-    itemsEl.innerHTML = items.map((p, i) => {
-      const idx = idxBase + i;
-      window._collItemActions[idx] = p.id;
-      const _dPhoto = p.model_photo || p.photo;
-      const photoHTML = _dPhoto
-        ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
-        : `<div class="catalog-item-photo">👗</div>`;
-      const meta = [p.garment_type, p.season, p.colors].filter(Boolean).join(' · ');
-      return `<div class="catalog-item" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${idx}]),200)">
+    itemsEl.innerHTML = '<div class="empty" style="padding:30px 0"><i class="ti ti-hanger"></i><p>No items in this collection yet.<br>Tap Add Pieces to add some.</p></div>';
+    return;
+  }
+  window._collItemActions = [];
+  itemsEl.innerHTML = items.map((p, i) => {
+    window._collItemActions[i] = p.id;
+    const _dPhoto = p.model_photo || p.photo;
+    const photoHTML = _dPhoto
+      ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
+      : `<div class="catalog-item-photo" style="display:flex;align-items:center;justify-content:center;font-size:24px">👗</div>`;
+    const meta = [p.garment_type, p.season].filter(Boolean).join(' · ');
+    const sizeSummary = getAvailableSizeSummary(p);
+    const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
+    const readiness = _collReadinessBadges(p);
+    return `<div style="display:flex;align-items:flex-start;gap:0;background:white;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin-bottom:0">
+      <div style="cursor:pointer;flex:1;display:flex;gap:10px;align-items:flex-start;padding:10px" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${i}]),180)">
         ${photoHTML}
-        <div class="catalog-item-body">
-          <div class="catalog-item-name">${p.name}</div>
-          ${meta ? `<div class="catalog-item-meta">${meta}</div>` : ''}
-          <div class="catalog-item-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price set'}</div>
-          ${p.caption_en ? '<span style="font-size:10px;color:var(--emerald-mid)">✓ Has marketing package</span>' : ''}
-          ${productNudge(p)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px">${p.name}</div>
+          ${meta ? `<div style="font-size:11px;color:var(--muted);margin-bottom:3px">${meta}</div>` : ''}
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:12px;font-weight:600;color:${p.price ? 'var(--ink)' : 'var(--muted)'}">${p.price ? '$' + p.price : 'No price'}</span>
+            <span style="font-size:10px;color:${statusColor};font-weight:600">${p.status}</span>
+          </div>
+          ${sizeSummary ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">${sizeSummary}</div>` : ''}
+          ${readiness ? `<div style="display:flex;gap:3px;flex-wrap:wrap">${readiness}</div>` : ''}
         </div>
-        <i class="ti ti-chevron-right" style="color:var(--muted);font-size:14px;flex-shrink:0;margin-top:4px"></i>
+        <i class="ti ti-chevron-right" style="color:var(--muted);font-size:14px;flex-shrink:0;margin-top:2px"></i>
+      </div>
+      <button onclick="removeFromCollection('${p.id}')" style="background:none;border:none;border-left:1px solid var(--border);padding:10px 12px;color:var(--muted);cursor:pointer;font-size:20px;align-self:stretch;display:flex;align-items:center" title="Remove from collection"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+}
+
+async function removeFromCollection(productId) {
+  const p = inventory.find(x => x.id === productId);
+  if (!p) return;
+  if (!confirm(`Remove "${p.name}" from this collection? The item stays in Stock.`)) return;
+  try {
+    await db('update', 'products', { id: productId, data: { collection_name: null } });
+    p.collection_name = null;
+    // Refresh collection detail
+    const remaining = currentCollection === null
+      ? inventory.filter(x => !x.collection_name)
+      : inventory.filter(x => x.collection_name === currentCollection);
+    document.getElementById('collDetailMeta').textContent = `${remaining.length} pieces · ${remaining.filter(x => isProductAvailable(x)).length} available`;
+    document.getElementById('collCoverSub').textContent = `${remaining.length} piece${remaining.length !== 1 ? 's' : ''} · ${remaining.filter(x => isProductAvailable(x)).length} available`;
+    _renderCollDetailItems(remaining);
+    renderCollections();
+    showToast('Removed from collection');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+// ── Add Pieces to Collection ──────────────────────────────────────────────────
+
+let _collAddPiecesSelected = new Set();
+
+function openCollAddPiecesSheet() {
+  if (currentCollection === null) { showToast('Cannot add pieces to Uncollected Items'); return; }
+  _collAddPiecesSelected = new Set();
+  const inCollection = new Set(inventory.filter(p => p.collection_name === currentCollection).map(p => p.id));
+  // Show all items NOT already in this collection
+  const candidates = inventory.filter(p => !inCollection.has(p.id));
+  const grid = document.getElementById('collAddPiecesGrid');
+  if (!candidates.length) {
+    grid.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">All items are already in this collection.</div>';
+  } else {
+    grid.innerHTML = candidates.map(p => {
+      const photo = p.model_photo || p.photo;
+      const collLabel = p.collection_name ? `<span style="font-size:10px;color:var(--muted)">In: ${p.collection_name}</span>` : '';
+      const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
+      return `<div id="collAddPiece_${p.id}" onclick="toggleCollAddPiece('${p.id}')" style="display:flex;gap:10px;align-items:center;padding:10px;background:white;border-radius:10px;border:2px solid var(--border);cursor:pointer">
+        ${photo ? `<img src="${photo}" style="width:48px;height:60px;object-fit:cover;border-radius:6px;flex-shrink:0">` : `<div style="width:48px;height:60px;border-radius:6px;flex-shrink:0;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:20px">👗</div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${p.name}</div>
+          <div style="font-size:11px;color:var(--muted)">${p.sku} · <span style="color:${statusColor}">${p.status}</span></div>
+          ${p.price ? `<div style="font-size:12px;color:var(--ink)">$${p.price}</div>` : ''}
+          ${collLabel}
+        </div>
+        <i class="ti ti-circle" id="collAddPieceCheck_${p.id}" style="font-size:20px;color:var(--border);flex-shrink:0"></i>
       </div>`;
     }).join('');
   }
+  openSheet('collAddPiecesSheet');
+}
 
-  openSheet('collectionDetailSheet');
+function toggleCollAddPiece(productId) {
+  const el = document.getElementById('collAddPiece_' + productId);
+  const icon = document.getElementById('collAddPieceCheck_' + productId);
+  if (_collAddPiecesSelected.has(productId)) {
+    _collAddPiecesSelected.delete(productId);
+    el.style.borderColor = 'var(--border)';
+    icon.className = 'ti ti-circle';
+    icon.style.color = 'var(--border)';
+  } else {
+    _collAddPiecesSelected.add(productId);
+    el.style.borderColor = 'var(--burgundy)';
+    icon.className = 'ti ti-circle-check';
+    icon.style.color = 'var(--burgundy)';
+  }
+}
+
+async function saveCollAddPieces() {
+  if (!_collAddPiecesSelected.size) { showToast('Select at least one item'); return; }
+  try {
+    for (const productId of _collAddPiecesSelected) {
+      await db('update', 'products', { id: productId, data: { collection_name: currentCollection } });
+      const p = inventory.find(x => x.id === productId);
+      if (p) p.collection_name = currentCollection;
+    }
+    closeSheet('collAddPiecesSheet');
+    // Refresh collection detail
+    const items = inventory.filter(p => p.collection_name === currentCollection);
+    document.getElementById('collDetailMeta').textContent = `${items.length} pieces · ${items.filter(p => isProductAvailable(p)).length} available`;
+    document.getElementById('collCoverSub').textContent = `${items.length} piece${items.length !== 1 ? 's' : ''} · ${items.filter(p => isProductAvailable(p)).length} available`;
+    _renderCollDetailItems(items);
+    renderCollections();
+    showToast(`Added ${_collAddPiecesSelected.size} item${_collAddPiecesSelected.size !== 1 ? 's' : ''} to collection`);
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+// ── Detail photos from Product Detail ────────────────────────────────────────
+
+const DETAIL_PHOTO_LABELS = ['Neckline', 'Sleeves', 'Hemline / Border', 'Back View', 'Dupatta', 'Embroidery', 'Lining', 'Buttons / Hooks', 'Mirror Work', 'Full Look'];
+let _pendingDetailPhotoLabel = null;
+
+function _renderDetailPhotoInsets() {
+  const insetsEl = document.getElementById('detailPhotoInsets');
+  if (!insetsEl) return;
+  const photos = window._detailInsetPhotos || [];
+  const thumbs = photos.map((d, i) => `
+    <div style="position:relative;flex:0 0 auto">
+      <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;display:block">
+      <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
+      <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0"><i class="ti ti-x"></i></button>
+    </div>`).join('');
+  const addBtn = `<div onclick="openDetailPhotoPicker()" style="flex:0 0 auto;cursor:pointer">
+    <div style="width:72px;height:72px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px"><i class="ti ti-plus"></i></div>
+    <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">Add detail</div>
+  </div>`;
+  insetsEl.innerHTML = thumbs + addBtn;
+  insetsEl.style.display = 'flex';
+}
+
+function openDetailPhotoPicker() {
+  const grid = document.getElementById('detailPhotoTypeGrid');
+  grid.innerHTML = DETAIL_PHOTO_LABELS.map(label =>
+    `<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:6px 4px;text-align:center" onclick="pickDetailPhotoFile('${label}')">${label}</button>`
+  ).join('');
+  document.getElementById('detailPhotoCustomLabel').value = '';
+  openSheet('detailPhotoPickerSheet');
+}
+
+function pickDetailPhotoFile(label) {
+  _pendingDetailPhotoLabel = label || 'Detail';
+  closeSheet('detailPhotoPickerSheet');
+  const input = document.getElementById('detailPhotoFileInput');
+  input.value = '';
+  input.click();
+}
+
+async function handleDetailPhotoFile(input) {
+  const file = input.files[0];
+  if (!file || !currentProduct) return;
+  const label = _pendingDetailPhotoLabel || 'Detail';
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const dataUrl = e.target.result;
+    window._detailInsetPhotos = window._detailInsetPhotos || [];
+    window._detailInsetPhotos.push({ slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'), label, image: dataUrl });
+    await _saveDetailPhotos();
+    _renderDetailPhotoInsets();
+    showToast('Detail photo added');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function deleteDetailPhoto(idx) {
+  if (!currentProduct) return;
+  window._detailInsetPhotos.splice(idx, 1);
+  await _saveDetailPhotos();
+  _renderDetailPhotoInsets();
+  showToast('Removed');
+}
+
+async function _saveDetailPhotos() {
+  const photos = window._detailInsetPhotos || [];
+  const value = photos.length ? JSON.stringify(photos) : null;
+  await db('update', 'products', { id: currentProduct.id, data: { detail_photos: value } });
+  const idx = inventory.findIndex(p => p.id === currentProduct.id);
+  if (idx >= 0) inventory[idx] = { ...inventory[idx], detail_photos: value };
+  currentProduct = { ...currentProduct, detail_photos: value };
 }
 
 function toggleCollRename() {
@@ -3232,23 +3447,11 @@ function openProductDetail(id) {
   document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
   document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
 
-  // Detail photo insets
-  const insetsEl = document.getElementById('detailPhotoInsets');
-  const detailPhotosData = p.detail_photos
+  // Detail photo insets — always render with add button
+  window._detailInsetPhotos = p.detail_photos
     ? (typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos)
     : [];
-  if (detailPhotosData.length) {
-    insetsEl.style.display = 'flex';
-    window._detailInsetPhotos = detailPhotosData;
-    insetsEl.innerHTML = detailPhotosData.map((d, i) => `
-      <div onclick="_openDetailPhotoLightbox(${i})" style="cursor:pointer;flex:0 0 auto">
-        <img src="${d.image}" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">
-        <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">${d.label}</div>
-      </div>`).join('');
-  } else {
-    insetsEl.style.display = 'none';
-    insetsEl.innerHTML = '';
-  }
+  _renderDetailPhotoInsets();
 
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
