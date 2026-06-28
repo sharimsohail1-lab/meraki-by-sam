@@ -2737,7 +2737,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-catalog-robust';
+const _MERAKI_BUILD = '2026-06-28-catalog-preview-unblocked';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3821,23 +3821,30 @@ function goToCatalogSelection() {
 
 function goToCatalogPreview() {
   if (catalogSelected.size === 0) { showToast('Select at least one item'); return; }
-  const missingPrice = catalogItems.filter(p => catalogSelected.has(p.id) && !p.price);
-  if (missingPrice.length) {
-    const names = missingPrice.map(p => p.name).join(', ');
-    const msg = missingPrice.length === 1
-      ? `"${names}" has no price — it will show "Reach out for price" in the catalog.`
-      : `${missingPrice.length} pieces have no price — they will show "Reach out for price" in the catalog:\n${names}`;
-    openSheet('catalogPriceWarnSheet');
-    document.getElementById('catalogPriceWarnMsg').textContent = msg;
-    return;
-  }
+  // Warnings about missing price/photo are shown inline inside the preview.
+  // Only block if zero items selected.
   _showCatalogPreview();
 }
 
 function _showCatalogPreview() {
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  console.log('[Meraki] Opening catalog preview', {
+    build: _MERAKI_BUILD,
+    count: selected.length,
+    products: selected.map(p => ({
+      id: p.id, name: p.name,
+      hasModelPhoto: !!p.model_photo, hasPhoto: !!p.photo,
+      price: p.price,
+      detailPhotosType: typeof p.detail_photos,
+      detailPhotos: p.detail_photos
+    }))
+  });
   document.getElementById('catalogSelScreen').style.display = 'none';
   document.getElementById('catalogPreviewScreen').style.display = 'flex';
-  renderCatalogPreview();
+  renderCatalogPreview().catch(err => {
+    console.error('[Meraki] renderCatalogPreview failed', err);
+    showToast('Catalog preview failed: ' + (err.message || String(err)));
+  });
 }
 
 function renderCatalogSelection() {
