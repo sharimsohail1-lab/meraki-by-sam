@@ -1859,9 +1859,32 @@ function _populateProviderSelect() {
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function closeModalOutside(e, id) { if (e.target === document.getElementById(id)) closeModal(id); }
-function openSheet(id) { document.getElementById(id).classList.add('open'); }
+const _sheetOpenResets = {};
+function openSheet(id) {
+  if (_sheetOpenResets[id]) _sheetOpenResets[id]();
+  document.getElementById(id).classList.add('open');
+}
 function closeSheet(id) { document.getElementById(id).classList.remove('open'); }
 function closeSheetOutside(e, id) { if (e.target === document.getElementById(id)) closeSheet(id); }
+
+// Sheet open resets — called by openSheet() before revealing a sheet.
+// Each entry resets async button state so sheets always open clean.
+_sheetOpenResets['deleteCollectionSheet'] = () => {
+  const btn = document.getElementById('confirmDeleteCollBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Yes, Delete Collection'; }
+};
+_sheetOpenResets['deleteProductSheet'] = () => {
+  const btn = document.getElementById('confirmDeleteProductBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Yes, Delete Permanently'; }
+};
+_sheetOpenResets['collAddPiecesSheet'] = () => {
+  const btn = document.getElementById('saveCollAddPiecesBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Add Selected'; }
+};
+_sheetOpenResets['newCollectionSheet'] = () => {
+  const btn = document.getElementById('saveNewCollBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Save Collection'; }
+};
 
 function toggleLang() {
   lang = lang === 'en' ? 'ur' : 'en';
@@ -2915,7 +2938,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-multi-collection';
+const _MERAKI_BUILD = '2026-06-28-sheet-state-resets';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3455,6 +3478,7 @@ async function deleteCollection() {
     // Remove from archived names if present
     archivedCollectionNames.delete(currentCollection);
     await _saveArchivedCollections();
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Yes, Delete Collection'; }
     closeSheet('deleteCollectionSheet');
     closeSheet('collectionDetailSheet');
     renderCollections();
@@ -4277,6 +4301,7 @@ async function deleteProduct() {
     await db('delete', 'products', { id: currentProduct.id });
     const deletedId = currentProduct.id;
     inventory = inventory.filter(p => p.id !== deletedId);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Yes, Delete Permanently'; }
     closeSheet('deleteProductSheet');
     closeSheet('productDetailSheet');
     closeSheet('collectionDetailSheet');
