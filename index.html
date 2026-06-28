@@ -2401,9 +2401,39 @@ async function _doSaveProduct() {
   // Collect detail-role photos into a JSONB array by slot
   const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
   const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
-  const detailPhotosArr = Object.entries(uploadedPhotos)
+
+  // Predefined detail slots (role === 'detail' in PHOTO_SLOTS)
+  const preDefinedDetails = Object.entries(uploadedPhotos)
     .filter(([id, p]) => slotMap[id]?.role === 'detail' && p.dataUrl)
-    .map(([id, p]) => ({ slot: id, label: slotMap[id].label, image: p.dataUrl }));
+    .map(([id, p]) => ({ _id: id, slot: id, label: slotMap[id].label, image: p.dataUrl, source: 'upload' }));
+
+  // Custom extra slots — treat as detail photos (they're close-ups Sam explicitly added)
+  const extraSlotIdSet = new Set(extraSlots.map(s => s.id));
+  const extraDetails = Object.entries(uploadedPhotos)
+    .filter(([id, p]) => extraSlotIdSet.has(id) && p.dataUrl)
+    .map(([id, p]) => {
+      const slotDef = extraSlots.find(s => s.id === id);
+      const label = slotDef?.label || id;
+      return { _id: id, slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'), label, image: p.dataUrl, source: 'upload' };
+    });
+
+  // Combine — predefined first (higher priority), then custom extras
+  const allDetails = [...preDefinedDetails, ...extraDetails];
+
+  // Auto-assign useAsInset: true to best 2 by label match
+  const _INSET_PRIORITY_KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'skirt-detail', 'buttons', 'mirror'];
+  const _sortedForInset = allDetails.slice().sort((a, b) => {
+    const sa = _INSET_PRIORITY_KEYS.findIndex(k => (a.slot + ' ' + a.label).toLowerCase().includes(k));
+    const sb = _INSET_PRIORITY_KEYS.findIndex(k => (b.slot + ' ' + b.label).toLowerCase().includes(k));
+    return (sa === -1 ? 999 : sa) - (sb === -1 ? 999 : sb);
+  });
+  const _insetSet = new Set(_sortedForInset.slice(0, 2).map(e => e._id));
+
+  let _insetOrder = 1;
+  const detailPhotosArr = allDetails.map(e => {
+    const isInset = _insetSet.has(e._id);
+    return { slot: e.slot, label: e.label, image: e.image, useAsInset: isInset, insetOrder: isInset ? _insetOrder++ : null, source: e.source };
+  });
   const detail_photos = detailPhotosArr.length ? JSON.stringify(detailPhotosArr) : null;
 
   // Collect size inventory from intake steppers (only save if any size > 0)
@@ -2938,7 +2968,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-sheet-state-resets';
+const _MERAKI_BUILD = '2026-06-28-detail-photo-insets';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3617,13 +3647,24 @@ function _renderDetailPhotoInsets() {
   const insetsEl = document.getElementById('detailPhotoInsets');
   if (!insetsEl) return;
   const photos = window._detailInsetPhotos || [];
-  const thumbs = photos.map((d, i) => `
-    <div style="position:relative;flex:0 0 auto">
-      <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;display:block">
-      <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
-      <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:24px;height:24px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;touch-action:manipulation"><i class="ti ti-x"></i></button>
-    </div>`).join('');
-  const addBtn = `<div onclick="openDetailPhotoPicker()" style="flex:0 0 auto;cursor:pointer">
+  const thumbs = photos.map((d, i) => {
+    const isInset = !!d.useAsInset;
+    const pillStyle = isInset
+      ? 'background:var(--burgundy);color:#fff;border:none'
+      : 'background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border)';
+    return `
+    <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
+      <div style="position:relative">
+        <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${isInset ? '2px solid var(--burgundy)' : '1px solid var(--border)'};cursor:pointer;display:block">
+        <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;touch-action:manipulation" title="Remove photo"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
+      <button id="insetToggleBtn_${i}" onclick="toggleDetailPhotoInset(${i})" style="width:72px;font-size:9px;font-weight:600;padding:3px 0;border-radius:4px;cursor:pointer;margin-top:2px;touch-action:manipulation;${pillStyle}">
+        ${isInset ? '✓ Inset' : 'Inset'}
+      </button>
+    </div>`;
+  }).join('');
+  const addBtn = `<div onclick="openDetailPhotoPicker()" style="flex:0 0 auto;cursor:pointer;display:flex;flex-direction:column;align-items:center">
     <div style="width:72px;height:72px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px"><i class="ti ti-plus"></i></div>
     <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">Add detail</div>
   </div>`;
@@ -3656,7 +3697,17 @@ async function handleDetailPhotoFile(input) {
   reader.onload = async e => {
     const dataUrl = e.target.result;
     window._detailInsetPhotos = window._detailInsetPhotos || [];
-    window._detailInsetPhotos.push({ slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'), label, image: dataUrl });
+    const currentInsets = window._detailInsetPhotos.filter(d => d.useAsInset === true);
+    const useAsInset = currentInsets.length < 2;
+    const insetOrder = useAsInset ? currentInsets.length + 1 : null;
+    window._detailInsetPhotos.push({
+      slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      label,
+      image: dataUrl,
+      useAsInset,
+      insetOrder,
+      source: 'product_detail',
+    });
     try {
       await _saveDetailPhotos();
       _renderDetailPhotoInsets();
@@ -3682,6 +3733,30 @@ async function deleteDetailPhoto(idx) {
     window._detailInsetPhotos.splice(idx, 0, removed[0]);
     _renderDetailPhotoInsets();
     showToast('Delete failed: ' + err.message);
+  }
+}
+
+async function toggleDetailPhotoInset(idx) {
+  const photos = window._detailInsetPhotos || [];
+  if (!photos[idx]) return;
+  const btn = document.getElementById('insetToggleBtn_' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const prev = !!photos[idx].useAsInset;
+  photos[idx] = { ...photos[idx], useAsInset: !prev };
+  // Recalculate insetOrder for all active insets in array order
+  let order = 1;
+  photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order++; } else { d.insetOrder = null; } });
+  try {
+    await _saveDetailPhotos();
+    _renderDetailPhotoInsets();
+    showToast(!prev ? 'Will appear in share cards and catalog' : 'Removed from share cards and catalog');
+  } catch(err) {
+    // Revert flip and recalculate
+    photos[idx] = { ...photos[idx], useAsInset: prev };
+    let order2 = 1;
+    photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order2++; } else { d.insetOrder = null; } });
+    _renderDetailPhotoInsets();
+    showToast('Could not save: ' + err.message);
   }
 }
 
@@ -4739,6 +4814,85 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
 }
 
 // Single product page canvas — full bio, no truncation, same dimensions as cover
+// Returns up to 2 inset photos ready to draw. If none are explicitly marked,
+// auto-picks the best 1 by label match (read-only, does not save changes).
+function _parseDetailPhotosForInsets(p) {
+  let arr = [];
+  try {
+    const raw = p.detail_photos;
+    if (!raw) return [];
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    arr = parsed.filter(d => d && d.image);
+  } catch(_) { return []; }
+  if (!arr.length) return [];
+
+  let insets = arr.filter(d => d.useAsInset === true);
+
+  // Fallback: if nothing is explicitly toggled, auto-pick the best 1 by label
+  if (!insets.length) {
+    const KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'buttons', 'mirror'];
+    const best = arr.slice().sort((a, b) => {
+      const la = (a.label || a.slot || '').toLowerCase();
+      const lb = (b.label || b.slot || '').toLowerCase();
+      const sa = KEYS.findIndex(k => la.includes(k));
+      const sb = KEYS.findIndex(k => lb.includes(k));
+      return (sa === -1 ? 999 : sa) - (sb === -1 ? 999 : sb);
+    });
+    const lc = (best[0]?.label || best[0]?.slot || '').toLowerCase();
+    if (best[0] && KEYS.some(k => lc.includes(k))) insets = [best[0]];
+  }
+
+  insets.sort((a, b) => (a.insetOrder ?? 999) - (b.insetOrder ?? 999));
+  return insets.slice(0, 2);
+}
+
+// Draws up to 2 detail insets into the image area of a catalog or share card canvas.
+// Placement: bottom-left, stacked horizontally, clear of SOLD stamp (top-right) and watermark (bottom-right).
+async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
+  if (!insetPhotos.length) return;
+  const SIZE = 210;
+  const MARGIN = 28;
+  const GAP = 14;
+  const BORDER = 5;
+  const RADIUS = 12;
+
+  for (let i = 0; i < insetPhotos.length; i++) {
+    const x = MARGIN + i * (SIZE + GAP);
+    const y = IMG_H - SIZE - MARGIN;
+
+    let img = null;
+    try { img = await _loadImgWithTimeout(insetPhotos[i].image, 8000); } catch(_) { continue; }
+    if (!img || img.naturalWidth === 0) continue;
+
+    // Shadow beneath the frame
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.32)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 5;
+    ctx.fillStyle = '#f5f0ea';
+    ctx.beginPath(); ctx.roundRect(x, y, SIZE, SIZE, RADIUS); ctx.fill();
+    ctx.restore();
+
+    // Clip and draw image (object-fit cover into inner square)
+    ctx.save();
+    const inner = SIZE - BORDER * 2;
+    ctx.beginPath(); ctx.roundRect(x + BORDER, y + BORDER, inner, inner, Math.max(2, RADIUS - BORDER)); ctx.clip();
+    const scale = Math.max(inner / img.naturalWidth, inner / img.naturalHeight);
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    ctx.drawImage(img, x + BORDER + (inner - dw) / 2, y + BORDER + (inner - dh) / 2, dw, dh);
+    ctx.restore();
+
+    // Cream border stroke on top
+    ctx.save();
+    ctx.strokeStyle = '#f5f0ea';
+    ctx.lineWidth = BORDER;
+    ctx.beginPath(); ctx.roundRect(x + BORDER / 2, y + BORDER / 2, SIZE - BORDER, SIZE - BORDER, RADIUS); ctx.stroke();
+    ctx.restore();
+  }
+}
+
 async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, layout) {
   const { p, safeName, nameLines, bioLines, isSoldOut } = layout;
   const canvas = document.createElement('canvas');
@@ -4785,6 +4939,9 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
     ctx.fillText(label, sx + sw / 2, sy + sh / 2);
     ctx.restore();
   }
+
+  // Detail photo insets — bottom-left of image area, clear of stamp and watermark
+  await _drawDetailInsets(ctx, _parseDetailPhotosForInsets(p), W, IMG_H);
 
   // Info panel
   const infoTop = IMG_H;
@@ -5063,6 +5220,9 @@ async function _buildItemShareCard(p) {
     ctx.fillText(label, sx + sw / 2, sy + sh / 2);
     ctx.restore();
   }
+
+  // ── Detail photo insets — bottom-left of image area ───────────────────────
+  await _drawDetailInsets(ctx, _parseDetailPhotosForInsets(p), W, IMG_H);
 
   // ── Separator + white info panel ──────────────────────────────────────────
   ctx.fillStyle = '#f0ede8';
