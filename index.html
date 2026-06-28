@@ -676,11 +676,16 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button class="tab-pill" onclick="filterStock('reserved',this)" id="t-filterRes">Reserved</button>
           <button class="tab-pill" onclick="filterStock('sold',this)" id="t-filterSold">Sold</button>
           <button class="tab-pill" onclick="filterStock('needs-price',this)" id="t-filterNeeds">⚠ Needs Price</button>
+          <button class="tab-pill" onclick="filterStock('archived',this)" id="stockFilterArchived">Archived</button>
         </div>
         <div class="inventory-grid" id="inventoryGrid"></div>
       </div>
       <div id="stockCollectionsSection" style="display:none">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div class="tab-pills" style="margin-bottom:0">
+            <button class="tab-pill active" id="collFilterActiveBtn" onclick="setCollFilter('active',this)">Active</button>
+            <button class="tab-pill" id="collFilterArchivedBtn" onclick="setCollFilter('archived',this)">Archived</button>
+          </div>
           <button class="btn btn-primary btn-sm" onclick="openNewCollectionSheet()"><i class="ti ti-plus"></i> New Collection</button>
         </div>
         <div id="collectionsGrid"></div>
@@ -902,7 +907,14 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div id="collPkgOutput" style="display:none;padding:0 16px 14px;border-bottom:1px solid var(--border)"></div>
     <!-- Catalog item list -->
-    <div id="collDetailItems" style="padding:0 16px 24px"></div>
+    <div id="collDetailItems" style="padding:0 16px 16px"></div>
+    <!-- Manage Collection -->
+    <div id="collManageSection" style="padding:0 16px 24px;border-top:1px solid #e8e0d8;padding-top:14px;margin-top:4px">
+      <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Manage Collection</div>
+      <button id="archiveCollBtn" class="btn" style="width:100%;background:#fff;color:#7a4500;border:1.5px solid #c8a060;font-weight:600;margin-bottom:8px" onclick="archiveCollection(this)"><i class="ti ti-archive"></i> Archive Collection</button>
+      <button id="restoreCollBtn" class="btn" style="width:100%;background:#fff;color:var(--emerald-mid);border:1.5px solid var(--emerald-mid);font-weight:600;margin-bottom:8px;display:none" onclick="restoreCollection(this)"><i class="ti ti-archive-off"></i> Restore Collection</button>
+      <button id="deleteCollBtn" class="btn" style="width:100%;background:#fff;color:#c0392b;border:1.5px solid #c0392b;font-weight:600" onclick="openSheet('deleteCollectionSheet')"><i class="ti ti-trash"></i> Delete Collection</button>
+    </div>
   </div>
 </div>
 
@@ -979,8 +991,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Notes</div>
       <textarea id="detailNotesInput" class="field-input" placeholder="Any notes..."></textarea>
       <button class="btn btn-primary" id="saveProductEditsBtn" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f0d0d0">
-        <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:#c0392b;text-transform:uppercase;margin-bottom:8px">Danger Zone</div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e8e0d8">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Manage Product</div>
+        <button id="archiveProductBtn" class="btn" style="width:100%;background:#fff;color:#7a4500;border:1.5px solid #c8a060;font-weight:600;margin-bottom:8px" onclick="archiveProduct(this)"><i class="ti ti-archive"></i> Archive Product</button>
+        <button id="restoreProductBtn" class="btn" style="width:100%;background:#fff;color:var(--emerald-mid);border:1.5px solid var(--emerald-mid);font-weight:600;margin-bottom:8px;display:none" onclick="restoreProduct(this)"><i class="ti ti-archive-off"></i> Restore Product</button>
         <button class="btn" style="width:100%;background:#fff;color:#c0392b;border:1.5px solid #c0392b;font-weight:600" onclick="openSheet('deleteProductSheet')"><i class="ti ti-trash"></i> Delete Product</button>
       </div>
     </div>
@@ -1081,6 +1095,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- DELETE COLLECTION CONFIRMATION -->
+<div class="sheet-overlay" id="deleteCollectionSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px">Delete Collection?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Products will stay in Stock but will no longer belong to this collection. <strong>This cannot be undone.</strong> To keep the collection hidden but recoverable, Archive instead.</div>
+    <button class="btn" id="confirmDeleteCollBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px" onclick="deleteCollection()"><i class="ti ti-trash"></i> Yes, Delete Collection</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('deleteCollectionSheet')">Cancel</button>
+  </div>
+</div>
+
 <!-- SAVE WITHOUT MODEL PHOTO CONFIRMATION -->
 <div class="sheet-overlay" id="saveWithoutModelSheet">
   <div class="sheet" style="min-height:auto">
@@ -1097,8 +1122,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   <div class="sheet" style="min-height:auto">
     <div class="sheet-handle"></div>
     <div style="font-weight:700;font-size:16px;margin-bottom:8px">Delete Product?</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will remove this item from Stock and any collection. <strong>This cannot be undone.</strong></div>
-    <button class="btn" id="confirmDeleteProductBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px" onclick="deleteProduct()"><i class="ti ti-trash"></i> Delete Product</button>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This permanently removes this product from Stock, collections, and marketing. <strong>This cannot be undone.</strong> To keep the record but hide it, Archive instead.</div>
+    <button class="btn" id="confirmDeleteProductBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px" onclick="deleteProduct()"><i class="ti ti-trash"></i> Yes, Delete Permanently</button>
     <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('deleteProductSheet')">Cancel</button>
   </div>
 </div>
@@ -1945,19 +1970,19 @@ function buildSmartRecommendations() {
   }
 
   // URGENT: items without prices
-  const noPrice = inventory.filter(p => isProductAvailable(p) && !p.price);
+  const noPrice = inventory.filter(p => !p.is_archived && isProductAvailable(p) && !p.price);
   if (noPrice.length) {
     recs.push({ type: 'urgent', icon: '💰', title: `${noPrice.length} item${noPrice.length > 1 ? 's' : ''} still need${noPrice.length === 1 ? 's' : ''} a price`, sub: 'Set prices so customers know what to expect', action: () => { showScreen('stock'); filterStock('needs-price', document.querySelector('#stockFilterPills .tab-pill:last-child')); } });
   }
 
   // URGENT: items with no marketing package
-  const noPackage = inventory.filter(p => isProductAvailable(p) && !p.caption_en);
+  const noPackage = inventory.filter(p => !p.is_archived && isProductAvailable(p) && !p.caption_en);
   if (noPackage.length) {
     recs.push({ type: 'urgent', icon: '📦', title: `${noPackage.length} piece${noPackage.length > 1 ? 's' : ''} ${noPackage.length > 1 ? 'have' : 'has'} no marketing content`, sub: 'Open each piece and tap "Create Marketing Package"', action: () => showScreen('stock') });
   }
 
   // INFO: available items with no size data
-  const noSizes = inventory.filter(p => isProductAvailable(p) && !getSizeInventory(p));
+  const noSizes = inventory.filter(p => !p.is_archived && isProductAvailable(p) && !getSizeInventory(p));
   if (noSizes.length) {
     recs.push({ type: 'info', icon: '📐', title: `${noSizes.length} item${noSizes.length > 1 ? 's' : ''} missing size info`, sub: 'Open each piece in Stock and add size counts', action: () => showScreen('stock') });
   }
@@ -1988,13 +2013,13 @@ function buildSmartRecommendations() {
 
   // INFO: old available pieces (>45 days unsold)
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 45);
-  const oldPieces = inventory.filter(p => isProductAvailable(p) && new Date(p.created_at) < cutoff);
+  const oldPieces = inventory.filter(p => !p.is_archived && isProductAvailable(p) && new Date(p.created_at) < cutoff);
   if (oldPieces.length) {
     recs.push({ type: 'info', icon: '🔄', title: `${oldPieces.length} older piece${oldPieces.length > 1 ? 's' : ''} could use fresh promotion`, sub: 'Generate new marketing content to re-share on WhatsApp', action: () => showScreen('stock') });
   }
 
   // GOOD: pieces available and ready
-  const availableItems = inventory.filter(p => isProductAvailable(p));
+  const availableItems = inventory.filter(p => !p.is_archived && isProductAvailable(p));
   if (availableItems.length > 0 && !noPackage.length && !noPrice.length) {
     recs.push({ type: 'good', icon: '✅', title: `${availableItems.length} piece${availableItems.length > 1 ? 's' : ''} ready to share`, sub: 'All available items are priced and have marketing content', action: () => showScreen('stock') });
   }
@@ -2889,7 +2914,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-collections-workflow';
+const _MERAKI_BUILD = '2026-06-28-archive-delete';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -2994,6 +3019,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── STOCK ────────────────────────────────────────────────────────────────────
 let stockFilter = 'all';
 let stockView = 'items';
+let collFilter = 'active'; // 'active' | 'archived'
+let archivedCollectionNames = new Set(); // loaded from settings table
 
 function setStockView(view, btn) {
   stockView = view;
@@ -3013,16 +3040,55 @@ function filterStock(f, btn) {
   renderInventory();
 }
 
+function setCollFilter(f, btn) {
+  collFilter = f;
+  document.querySelectorAll('#collFilterActiveBtn,#collFilterArchivedBtn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderCollections();
+}
+
 function renderCollections() {
   window._collActions = [];
   const grid = document.getElementById('collectionsGrid');
+
+  if (collFilter === 'archived') {
+    // Show only archived collections
+    const archivedList = [...archivedCollectionNames];
+    if (!archivedList.length) {
+      grid.innerHTML = '<div class="empty"><i class="ti ti-archive"></i><p>No archived collections.</p></div>';
+      return;
+    }
+    let html = '';
+    for (const name of archivedList) {
+      const items = inventory.filter(p => p.collection_name === name);
+      const collIdx = window._collActions.length;
+      window._collActions.push(name);
+      const thumbs = items.slice(0, 3).map(p =>
+        (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
+      ).join('');
+      html += `<div class="collection-card" onclick="openCollectionDetail(window._collActions[${collIdx}])" style="opacity:0.75">
+        <div class="collection-thumb-row">${thumbs || '<div class="collection-thumb-placeholder">📦</div>'}</div>
+        <div class="collection-info">
+          <div class="collection-name-text">${name}</div>
+          <div class="collection-sub">${items.length} piece${items.length !== 1 ? 's' : ''} · <span style="color:#7a4500">Archived</span></div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--muted);font-size:16px;flex-shrink:0"></i>
+      </div>`;
+    }
+    grid.innerHTML = html;
+    return;
+  }
+
+  // Active view — exclude archived products and archived collections
+  const activeInventory = inventory.filter(p => !p.is_archived);
   const grouped = {};
-  for (const p of inventory) {
+  for (const p of activeInventory) {
     const key = p.collection_name || '__none__';
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(p);
   }
-  const collections = Object.entries(grouped).filter(([k]) => k !== '__none__');
+  const collections = Object.entries(grouped)
+    .filter(([k]) => k !== '__none__' && !archivedCollectionNames.has(k));
   const uncollected = grouped['__none__'] || [];
 
   if (!collections.length && !uncollected.length) {
@@ -3095,6 +3161,22 @@ function openCollectionDetail(name) {
   }
 
   _renderCollDetailItems(items);
+
+  // Archive/Restore/Delete section — hide for Uncollected Items (name === null)
+  const manageSection = document.getElementById('collManageSection');
+  const archCollBtn = document.getElementById('archiveCollBtn');
+  const restCollBtn = document.getElementById('restoreCollBtn');
+  const delCollBtn = document.getElementById('deleteCollBtn');
+  if (name === null) {
+    if (manageSection) manageSection.style.display = 'none';
+  } else {
+    if (manageSection) manageSection.style.display = 'block';
+    const isArch = archivedCollectionNames.has(name);
+    if (archCollBtn) { archCollBtn.style.display = isArch ? 'none' : 'block'; archCollBtn.disabled = false; archCollBtn.innerHTML = '<i class="ti ti-archive"></i> Archive Collection'; }
+    if (restCollBtn) { restCollBtn.style.display = isArch ? 'block' : 'none'; restCollBtn.disabled = false; restCollBtn.innerHTML = '<i class="ti ti-archive-off"></i> Restore Collection'; }
+    if (delCollBtn) { delCollBtn.disabled = false; delCollBtn.innerHTML = '<i class="ti ti-trash"></i> Delete Collection'; }
+  }
+
   openSheet('collectionDetailSheet');
 }
 
@@ -3177,8 +3259,8 @@ function openCollAddPiecesSheet() {
   if (currentCollection === null) { showToast('Cannot add pieces to Uncollected Items'); return; }
   _collAddPiecesSelected = new Set();
   const inCollection = new Set(inventory.filter(p => p.collection_name === currentCollection).map(p => p.id));
-  // Show all items NOT already in this collection
-  const candidates = inventory.filter(p => !inCollection.has(p.id));
+  // Show active items NOT already in this collection
+  const candidates = inventory.filter(p => !inCollection.has(p.id) && !p.is_archived);
   const grid = document.getElementById('collAddPiecesGrid');
   if (!candidates.length) {
     grid.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">All items are already in this collection.</div>';
@@ -3246,6 +3328,78 @@ async function saveCollAddPieces(btn) {
   }
 }
 
+// ── Collection Archive / Restore / Delete ─────────────────────────────────────
+
+async function _saveArchivedCollections() {
+  await saveSetting('archived_collections', JSON.stringify([...archivedCollectionNames]));
+}
+
+async function archiveCollection(btn) {
+  if (!currentCollection) return;
+  if (!confirm(`Archive "${currentCollection}"? Products stay in Stock, but this collection will be hidden from active views and Add New Piece. You can restore it later.`)) return;
+  const defaultHTML = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Archiving…'; }
+  try {
+    archivedCollectionNames.add(currentCollection);
+    await _saveArchivedCollections();
+    if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Archived ✓'; }
+    setTimeout(() => {
+      closeSheet('collectionDetailSheet');
+      if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
+      renderCollections();
+      showToast(`"${currentCollection}" archived`);
+    }, 700);
+  } catch(e) {
+    archivedCollectionNames.delete(currentCollection);
+    if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
+    showToast('Could not archive: ' + e.message);
+  }
+}
+
+async function restoreCollection(btn) {
+  if (!currentCollection) return;
+  const defaultHTML = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Restoring…'; }
+  try {
+    archivedCollectionNames.delete(currentCollection);
+    await _saveArchivedCollections();
+    if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Restored ✓'; }
+    const archCollBtn = document.getElementById('archiveCollBtn');
+    if (btn) { setTimeout(() => { btn.style.display = 'none'; btn.disabled = false; btn.innerHTML = defaultHTML; }, 600); }
+    if (archCollBtn) { setTimeout(() => { archCollBtn.style.display = 'block'; }, 600); }
+    renderCollections();
+    showToast(`"${currentCollection}" restored`);
+  } catch(e) {
+    archivedCollectionNames.add(currentCollection);
+    if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
+    showToast('Could not restore: ' + e.message);
+  }
+}
+
+async function deleteCollection() {
+  if (!currentCollection) return;
+  const btn = document.getElementById('confirmDeleteCollBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Deleting…'; }
+  try {
+    // Clear collection_name from all products in this collection
+    const members = inventory.filter(p => p.collection_name === currentCollection);
+    for (const p of members) {
+      await db('update', 'products', { id: p.id, data: { collection_name: null } });
+      p.collection_name = null;
+    }
+    // Remove from archived names if present
+    archivedCollectionNames.delete(currentCollection);
+    await _saveArchivedCollections();
+    closeSheet('deleteCollectionSheet');
+    closeSheet('collectionDetailSheet');
+    renderCollections();
+    showToast(`Collection deleted. ${members.length} product${members.length !== 1 ? 's' : ''} returned to Stock.`);
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Yes, Delete Collection'; }
+    showToast('Could not delete: ' + e.message);
+  }
+}
+
 // ── New Collection (create from Collections tab) ──────────────────────────────
 
 let _newCollSelected = new Set();
@@ -3264,11 +3418,12 @@ function _renderNewCollPieces() {
   _updateNewCollCount();
   const grid = document.getElementById('newCollPiecesGrid');
   if (!grid) return;
-  if (!inventory.length) {
-    grid.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">No items in Stock yet.</div>';
+  const activeInventory = inventory.filter(p => !p.is_archived);
+  if (!activeInventory.length) {
+    grid.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">No active items in Stock yet.</div>';
     return;
   }
-  grid.innerHTML = inventory.map(p => {
+  grid.innerHTML = activeInventory.map(p => {
     const photo = p.model_photo || p.photo;
     const collLabel = p.collection_name ? `<span style="font-size:10px;color:var(--muted)">Currently in: ${p.collection_name}</span>` : '';
     const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
@@ -3547,8 +3702,11 @@ Create a collection-level marketing package in this EXACT JSON format (no markdo
 
 // ─── COLLECTION NAME SUGGESTIONS ──────────────────────────────────────────────
 function allCollectionNames() {
-  // Supports comma-separated multi-collection values
-  const all = inventory.flatMap(p => (p.collection_name || '').split(',').map(s => s.trim())).filter(Boolean);
+  const all = inventory
+    .filter(p => !p.is_archived)
+    .flatMap(p => (p.collection_name || '').split(',').map(s => s.trim()))
+    .filter(Boolean)
+    .filter(n => !archivedCollectionNames.has(n));
   return [...new Set(all)];
 }
 
@@ -3754,13 +3912,18 @@ function applyItemNameSuggestion(el, name) {
 
 function renderInventory() {
   let items = inventory;
-  if (stockFilter === 'needs-price') items = items.filter(p => !p.price);
-  else if (stockFilter === 'available') items = items.filter(p => isProductAvailable(p));
-  else if (stockFilter !== 'all') items = items.filter(p => p.status === stockFilter);
+  if (stockFilter === 'archived') {
+    items = items.filter(p => p.is_archived);
+  } else {
+    items = items.filter(p => !p.is_archived);
+    if (stockFilter === 'needs-price') items = items.filter(p => !p.price);
+    else if (stockFilter === 'available') items = items.filter(p => isProductAvailable(p));
+    else if (stockFilter !== 'all') items = items.filter(p => p.status === stockFilter);
+  }
   document.getElementById('stockCount').textContent = items.length + ' items';
   const grid = document.getElementById('inventoryGrid');
   if (!items.length) {
-    grid.innerHTML = `<div class="empty" style="grid-column:span 2"><i class="ti ti-hanger"></i><p>${stockFilter === 'all' ? 'No items yet. Tap Add to get started.' : 'No items in this category.'}</p></div>`;
+    grid.innerHTML = `<div class="empty" style="grid-column:span 2"><i class="ti ti-hanger"></i><p>${stockFilter === 'archived' ? 'No archived products.' : stockFilter === 'all' ? 'No items yet. Tap Add to get started.' : 'No items in this category.'}</p></div>`;
     return;
   }
   const _stockActions = [];
@@ -3781,8 +3944,9 @@ function renderInventory() {
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
+        ${p.is_archived ? '<span class="nudge-chip" style="background:#f0e8d8;color:#7a4500">Archived</span>' : ''}
         ${sizeSummary}
-        ${productNudge(p)}
+        ${p.is_archived ? '' : productNudge(p)}
       </div>
       <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket(window._stockActions[${_si}])" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
         <i class="ti ti-package"></i>${p.caption_en ? ' Package ✓' : ' Market'}
@@ -3859,6 +4023,11 @@ function _openProductDetailUI(p) {
   });
   initDetailSizeSteppers(p);
   renderProviderPills();
+  // Archive / Restore button visibility
+  const archBtn = document.getElementById('archiveProductBtn');
+  const restBtn = document.getElementById('restoreProductBtn');
+  if (archBtn) { archBtn.style.display = p.is_archived ? 'none' : 'block'; archBtn.disabled = false; archBtn.innerHTML = '<i class="ti ti-archive"></i> Archive Product'; }
+  if (restBtn) { restBtn.style.display = p.is_archived ? 'block' : 'none'; restBtn.disabled = false; restBtn.innerHTML = '<i class="ti ti-archive-off"></i> Restore Product'; }
   openSheet('productDetailSheet');
 }
 
@@ -3977,6 +4146,45 @@ async function saveProductEdits() {
   }
 }
 
+async function archiveProduct(btn) {
+  if (!currentProduct) return;
+  if (!confirm('Archive this product? It will be hidden from active Stock, catalogs, and collection pickers, but you can restore it later from Stock → Archived.')) return;
+  const defaultHTML = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Archiving…'; }
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: { is_archived: true } });
+    currentProduct.is_archived = true;
+    const restBtn = document.getElementById('restoreProductBtn');
+    if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.innerHTML = defaultHTML; }
+    if (restBtn) { restBtn.style.display = 'block'; restBtn.disabled = false; }
+    renderInventory();
+    renderCollections();
+    showToast('Product archived');
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
+    showToast('Could not archive: ' + e.message);
+  }
+}
+
+async function restoreProduct(btn) {
+  if (!currentProduct) return;
+  const defaultHTML = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Restoring…'; }
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: { is_archived: false } });
+    currentProduct.is_archived = false;
+    const archBtn = document.getElementById('archiveProductBtn');
+    if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.innerHTML = defaultHTML; }
+    if (archBtn) { archBtn.style.display = 'block'; archBtn.disabled = false; }
+    renderInventory();
+    renderCollections();
+    showToast('Product restored');
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
+    showToast('Could not restore: ' + e.message);
+  }
+}
+
 async function deleteProduct() {
   if (!currentProduct) return;
   const btn = document.getElementById('confirmDeleteProductBtn');
@@ -4079,9 +4287,10 @@ let catalogItems = [];
 
 function openCatalogBuilder(collectionName) {
   catalogCollection = collectionName;
-  catalogItems = collectionName === null
+  catalogItems = (collectionName === null
     ? inventory.filter(p => !p.collection_name)
-    : inventory.filter(p => p.collection_name === collectionName);
+    : inventory.filter(p => p.collection_name === collectionName)
+  ).filter(p => !p.is_archived);
 
   // Default: include available + reserved, exclude sold/sold-out
   catalogSelected = new Set(catalogItems.filter(p => isProductAvailable(p) || p.status === 'reserved').map(p => p.id));
@@ -5774,12 +5983,15 @@ async function loadAppSettings() {
     if (active?.value) {
       activeModelTemplateId = active.value;
       localStorage.setItem('activeModelTemplateId', active.value);
-      // sync fashnModelPhoto from DB template if not already in localStorage (not needed for cfs-auto)
       if (active.value !== 'cfs-auto' && !localStorage.getItem('fashnModelPhoto')) {
         const tmplRows = await db('select', 'model_templates', {}) || [];
         const row = tmplRows.find(r => r.def_id === active.value);
         if (row?.image) localStorage.setItem('fashnModelPhoto', row.image);
       }
+    }
+    const archRow = rows.find(r => r.key === 'archived_collections');
+    if (archRow?.value) {
+      try { archivedCollectionNames = new Set(JSON.parse(archRow.value)); } catch(_) {}
     }
   } catch(e) { /* settings table may not exist yet */ }
 }
