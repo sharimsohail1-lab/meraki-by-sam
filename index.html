@@ -2234,16 +2234,42 @@ async function analyzePhoto() {
     // Each photo is preceded by a text label so Claude knows its role.
     const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
     const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
+    // Extra slots are always detail — they're custom close-ups Sam explicitly added.
+    const _analysisExtraIds = new Set(extraSlots.map(s => s.id));
 
     const structuralPhotos = Object.entries(uploadedPhotos)
-      .filter(([id]) => (slotMap[id]?.role || 'structural') === 'structural')
+      .filter(([id]) => !_analysisExtraIds.has(id) && (slotMap[id]?.role || 'structural') === 'structural')
       .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
     const detailPhotos = Object.entries(uploadedPhotos)
-      .filter(([id]) => slotMap[id]?.role === 'detail')
+      .filter(([id]) => _analysisExtraIds.has(id) || slotMap[id]?.role === 'detail')
       .sort(([a], [b]) => (slotMap[b]?.priority || 0) - (slotMap[a]?.priority || 0));
 
-    console.log('structuralPhotos:', structuralPhotos.map(([id, p]) => ({ id, type: p.file?.type, dataUrlLen: p.dataUrl?.length, hasComma: p.dataUrl?.includes(',') })));
-    console.log('detailPhotos:', detailPhotos.map(([id, p]) => ({ id, type: p.file?.type, dataUrlLen: p.dataUrl?.length, hasComma: p.dataUrl?.includes(',') })));
+    // Claude only accepts these image media types. Remap HEIC/HEIF (iPhone) → jpeg.
+    const _CLAUDE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+    function _prepPhotoBlock(id, p, role) {
+      if (!p.dataUrl) { console.warn('[ANALYSIS] skip', id, '— no dataUrl'); return null; }
+      const commaIdx = p.dataUrl.indexOf(',');
+      if (commaIdx === -1) { console.warn('[ANALYSIS] skip', id, '— malformed dataUrl (no comma)'); return null; }
+      const b64 = p.dataUrl.slice(commaIdx + 1);
+      if (!b64) { console.warn('[ANALYSIS] skip', id, '— empty base64'); return null; }
+      const headerMime = (p.dataUrl.slice(5, commaIdx).split(';')[0]) || '';
+      let mediaType = p.file?.type || headerMime || 'image/jpeg';
+      if (!_CLAUDE_MEDIA_TYPES.has(mediaType)) {
+        if (/heic|heif/i.test(mediaType)) {
+          console.warn('[ANALYSIS] remapped', mediaType, '→ image/jpeg for:', id, '(HEIC from iPhone — FileReader already re-encoded as JPEG)');
+          mediaType = 'image/jpeg';
+        } else {
+          console.warn('[ANALYSIS] skip', id, '— unsupported media type:', mediaType, '(Claude only accepts jpeg/png/gif/webp)');
+          showToast('One photo format not supported — try replacing it with a JPEG.');
+          return null;
+        }
+      }
+      console.log('[ANALYSIS]', role, id, '| type:', mediaType, '| b64len:', b64.length);
+      return { b64, mediaType };
+    }
+
+    console.log('[ANALYSIS] structural slots:', structuralPhotos.map(([id]) => id));
+    console.log('[ANALYSIS] detail slots:', detailPhotos.map(([id]) => id));
 
     _stage = 'build-payload';
     console.log('MERAKI_ANALYSIS_STAGE: build-payload');
@@ -2251,24 +2277,26 @@ async function analyzePhoto() {
     if (structuralPhotos.length) {
       photoContent.push({ type: 'text', text: '=== STRUCTURAL PHOTOS (define garment layout, silhouette, proportions) ===' });
       structuralPhotos.forEach(([id, p]) => {
-        const b64 = p.dataUrl.split(',')[1];
-        const mediaType = p.file?.type || 'image/jpeg';
-        console.log('  structural slot:', id, '| mediaType:', mediaType, '| b64 length:', b64?.length, '| b64 defined:', !!b64);
+        const prep = _prepPhotoBlock(id, p, 'structural');
+        if (!prep) return;
         photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — STRUCTURAL]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: prep.mediaType, data: prep.b64 } });
       });
     }
     if (detailPhotos.length) {
       photoContent.push({ type: 'text', text: '=== DETAIL PHOTOS (close-up references only — extract embroidery/texture info; do NOT use to redefine garment structure or layout) ===' });
       detailPhotos.forEach(([id, p]) => {
-        const b64 = p.dataUrl.split(',')[1];
-        const mediaType = p.file?.type || 'image/jpeg';
-        console.log('  detail slot:', id, '| mediaType:', mediaType, '| b64 length:', b64?.length, '| b64 defined:', !!b64);
-        photoContent.push({ type: 'text', text: `[${slotMap[id]?.label || id} — DETAIL REFERENCE]` });
-        photoContent.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } });
+        const prep = _prepPhotoBlock(id, p, 'detail');
+        if (!prep) return;
+        const label = _analysisExtraIds.has(id) ? (extraSlots.find(s => s.id === id)?.label || id) : (slotMap[id]?.label || id);
+        photoContent.push({ type: 'text', text: `[${label} — DETAIL REFERENCE]` });
+        photoContent.push({ type: 'image', source: { type: 'base64', media_type: prep.mediaType, data: prep.b64 } });
       });
     }
-    console.log('photoContent blocks:', photoContent.length);
+    // Require at least one structural photo made it through validation
+    const structuralInPayload = photoContent.filter(b => b.type === 'image').length;
+    if (structuralInPayload === 0) throw new Error('No valid photos — please replace photos and try again.');
+    console.log('[ANALYSIS] photoContent blocks:', photoContent.length, '| image blocks:', structuralInPayload);
 
     _stage = 'claude-request';
     console.log('MERAKI_ANALYSIS_STAGE: claude-request');
@@ -2420,14 +2448,27 @@ async function _doSaveProduct() {
   // Combine — predefined first (higher priority), then custom extras
   const allDetails = [...preDefinedDetails, ...extraDetails];
 
-  // Auto-assign useAsInset: true to best 2 by label match
-  const _INSET_PRIORITY_KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'skirt-detail', 'buttons', 'mirror'];
+  // Auto-assign useAsInset: true to best detail photos.
+  // Custom extra slots Sam added always qualify (she explicitly created them for close-ups).
+  // Predefined detail slots qualify only when they match a known detail-area keyword.
+  // Front/back/full-look structural photos never become insets automatically.
+  const _INSET_PRIORITY_KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'skirt-detail', 'skirt detail', 'buttons', 'mirror', 'cuff', 'daman', 'trouser', 'lace', 'sequin', 'zari', 'motif'];
   const _sortedForInset = allDetails.slice().sort((a, b) => {
-    const sa = _INSET_PRIORITY_KEYS.findIndex(k => (a.slot + ' ' + a.label).toLowerCase().includes(k));
-    const sb = _INSET_PRIORITY_KEYS.findIndex(k => (b.slot + ' ' + b.label).toLowerCase().includes(k));
-    return (sa === -1 ? 999 : sa) - (sb === -1 ? 999 : sb);
+    const la = (a.slot + ' ' + a.label).toLowerCase();
+    const lb = (b.slot + ' ' + b.label).toLowerCase();
+    const sa = _INSET_PRIORITY_KEYS.findIndex(k => la.includes(k));
+    const sb = _INSET_PRIORITY_KEYS.findIndex(k => lb.includes(k));
+    // Extra slots: score as 500 if no keyword match (still prefer over unmatched predefined)
+    const isExtraA = extraSlotIdSet.has(a._id);
+    const isExtraB = extraSlotIdSet.has(b._id);
+    return (sa === -1 ? (isExtraA ? 500 : 999) : sa) - (sb === -1 ? (isExtraB ? 500 : 999) : sb);
   });
-  const _insetSet = new Set(_sortedForInset.slice(0, 2).map(e => e._id));
+  // Only auto-select photos that are true detail candidates (keyword match or custom extra slot)
+  const _insetCandidates = _sortedForInset.filter(e => {
+    const score = _INSET_PRIORITY_KEYS.findIndex(k => (e.slot + ' ' + e.label).toLowerCase().includes(k));
+    return score !== -1 || extraSlotIdSet.has(e._id);
+  });
+  const _insetSet = new Set(_insetCandidates.slice(0, 2).map(e => e._id));
 
   let _insetOrder = 1;
   const detailPhotosArr = allDetails.map(e => {
@@ -2968,7 +3009,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-inset-polish';
+const _MERAKI_BUILD = '2026-06-28-analysis-inset-fix';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -4864,12 +4905,18 @@ function _parseDetailPhotosForInsets(p) {
 }
 
 // Draws up to 2 detail insets into the image area of a catalog or share card canvas.
-// Placement: bottom-left, stacked horizontally, clear of SOLD stamp (top-right) and watermark (bottom-right).
+// prepareInsetImage: local framing only (no AI background removal).
+// Center-crops to 82% of shorter dimension to reduce edge clutter, then applies
+// subtle brightness/contrast/saturation polish. Returns a 400×400 canvas.
 async function prepareInsetImage(img) {
+  if (!img || img.naturalWidth === 0 || img.naturalHeight === 0) {
+    throw new Error('image has zero dimensions');
+  }
   const SIZE = 400;
   const oc = document.createElement('canvas');
   oc.width = SIZE; oc.height = SIZE;
   const octx = oc.getContext('2d');
+  if (!octx) throw new Error('could not get 2d context');
   const srcSize = Math.min(img.naturalWidth, img.naturalHeight) * 0.82;
   const srcX = (img.naturalWidth - srcSize) / 2;
   const srcY = (img.naturalHeight - srcSize) / 2;
@@ -4896,7 +4943,12 @@ async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
     if (!img || img.naturalWidth === 0) continue;
 
     let source = img;
-    try { source = await prepareInsetImage(img); } catch(_) { /* fall through to raw */ }
+    try {
+      source = await prepareInsetImage(img);
+      console.log('[INSET CLEANUP] framed', { label: insetPhotos[i].label, slot: insetPhotos[i].slot, hasCrop: !!insetPhotos[i].crop, usedCleaned: !!insetPhotos[i].cleanedImage });
+    } catch(err) {
+      console.warn('[INSET CLEANUP] failed, using original', { label: insetPhotos[i].label, slot: insetPhotos[i].slot, reason: err?.message || String(err) });
+    }
 
     // Shadow beneath the frame
     ctx.save();
