@@ -911,17 +911,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="detail-sku" id="detailSKU"></div>
     <div class="detail-name" id="detailName"></div>
     <div class="detail-meta" id="detailMeta"></div>
-    <div id="marketingPackageSection">
-      <button class="btn btn-gold" id="createPkgBtn" onclick="generateMarketingPackage()">
-        <i class="ti ti-package"></i> Create Marketing Package
+    <div id="mktShareSection">
+      <button class="btn btn-gold" id="mktShareBtn" onclick="openMktShareWorkspace()">
+        <i class="ti ti-package"></i> Marketing &amp; Share
       </button>
-      <div id="marketingPackageOutput" style="display:none"></div>
-    </div>
-    <div style="margin-top:10px">
-      <button class="btn btn-secondary" id="shareThisPieceBtn" onclick="generateItemSharePackage()">
-        <i class="ti ti-share"></i> Share This Piece
-      </button>
-      <div id="itemShareOutput" style="display:none;margin-top:10px"></div>
+      <div id="mktShareOutput" style="display:none;margin-top:12px"></div>
     </div>
     <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 10px" id="detailDesc"></div>
     <div class="field-label" id="t-updateStatus">Update Status</div>
@@ -3566,10 +3560,14 @@ function _openProductDetailUI(p) {
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = p.collection_name || '';
   document.getElementById('detailModelOutput').style.display = 'none';
-  document.getElementById('itemShareOutput').style.display = 'none';
+  const _mso = document.getElementById('mktShareOutput');
+  if (_mso) { _mso.style.display = 'none'; _mso.innerHTML = ''; }
+  window._currentShareCardUrl = null;
   document.querySelectorAll('.js-view-ref-btn').forEach(b => b.style.display = 'none');
   document.getElementById('detailNudgeBanner').innerHTML = productDetailNudge(p);
-  renderMarketingPackageCache(p);
+  // Update Marketing & Share button label based on whether package already exists
+  const _msb = document.getElementById('mktShareBtn');
+  if (_msb) _msb.innerHTML = `<i class="ti ti-package"></i> Marketing &amp; Share`;
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
   document.getElementById('reservedForInput').value = p.reserved_for || '';
   ['available','reserved','sold'].forEach(s => {
@@ -4030,17 +4028,30 @@ async function _buildItemShareCard(p) {
   ctx.fillStyle = '#FDF8F3';
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Load and draw main product image (model_photo preferred, then photo)
-  const imgSrc = p.model_photo || p.photo;
-  if (imgSrc) {
-    try {
-      const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-      const img = await _loadImgWithTimeout(proxied, 8000);
-      // Cover-fit: fill canvas, crop center
-      const scale = Math.max(SIZE / img.width, SIZE / img.height);
-      const dw = img.width * scale, dh = img.height * scale;
-      ctx.drawImage(img, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
-    } catch(_) {}
+  // Load and draw main product image.
+  // Priority: use the already-rendered DOM element (avoids reloading large base64 blobs),
+  // then fall back to a fresh load with timeout.
+  let photoDrawn = false;
+  try {
+    const domEl = document.getElementById('detailPhoto');
+    if (domEl && domEl.naturalWidth > 0) {
+      const scale = Math.max(SIZE / domEl.naturalWidth, SIZE / domEl.naturalHeight);
+      const dw = domEl.naturalWidth * scale, dh = domEl.naturalHeight * scale;
+      ctx.drawImage(domEl, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
+      photoDrawn = true;
+    }
+  } catch(_) {}
+  if (!photoDrawn) {
+    const imgSrc = p.model_photo || p.photo;
+    if (imgSrc) {
+      try {
+        const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
+        const img = await _loadImgWithTimeout(proxied, 8000);
+        const scale = Math.max(SIZE / img.width, SIZE / img.height);
+        const dw = img.width * scale, dh = img.height * scale;
+        ctx.drawImage(img, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
+      } catch(_) {}
+    }
   }
 
   // Gradient overlay at bottom for legibility
@@ -4173,135 +4184,67 @@ async function _shareItemCard(dataUrl, caption, productName) {
   triggerDownload(dataUrl, filename);
 }
 
-async function _generateItemShareCopy(p) {
-  const priceText = p.price ? `$${p.price}` : 'Reach out for price';
-  const sizes = getAvailableSizes(p);
-  const sizeText = sizes.length ? sizes.join(', ') : null;
-  const isSold = !isProductAvailable(p);
-  const statusNote = p.status === 'sold' ? 'SOLD OUT' : p.status === 'reserved' ? 'RESERVED' : 'available';
-  const prompt = `You are writing individual item share copy for a Pakistani clothing boutique called "Meraki by Sam."
 
-Piece details:
-- Name: ${p.name}
-- Type: ${p.garment_type || 'garment'}
-- Season/Occasion: ${p.season || 'general'}
-- Colors: ${p.colors || 'not specified'}
-- Price: ${priceText}
-- Sizes available: ${sizeText || 'not specified'}
-- Status: ${statusNote}
-- Description: ${p.description_en || 'traditional Pakistani garment'}
-
-${isSold ? 'IMPORTANT: This piece is sold. Do NOT imply it is available. Frame WhatsApp/Instagram as "recently sold — DM for similar pieces." Story text should say SOLD.' : ''}
-
-Write three outputs separated by these exact markers:
-===WHATSAPP===
-A warm, friendly WhatsApp message (2-4 sentences). Customer-to-customer tone. Include name, price (or "reach out for price"), sizes if available. End with "Message me to reserve ✨" (or "Message me for similar pieces" if sold).
-===INSTAGRAM===
-A polished Instagram caption (3-5 sentences + hashtags on a new line). Evocative, boutique tone. Mention occasion/style. Include availability language if in stock.
-===STORY===
-Very short story text (1-2 lines max). Suitable for an Instagram story. If available: "DM to order" or "Limited sizes." If sold: "SOLD ✨ DM for similar."`;
-  const raw = await callClaude([{ role: 'user', content: prompt }], '', 400);
-  const parseSection = (marker, next) => {
-    const start = raw.indexOf(marker);
-    if (start === -1) return null;
-    const end = next ? raw.indexOf(next) : raw.length;
-    return raw.slice(start + marker.length, end === -1 ? raw.length : end).trim();
-  };
-  const warn = [];
-  if (!p.price) warn.push('No price — showing "Reach out for price"');
-  if (!p.model_photo && !p.photo) warn.push('No photo available for card');
-  if (!sizeText) warn.push('No sizes added');
-  return {
-    whatsapp: parseSection('===WHATSAPP===', '===INSTAGRAM==='),
-    instagram: parseSection('===INSTAGRAM===', '===STORY==='),
-    story: parseSection('===STORY===', null),
-    warn
-  };
-}
-
-async function generateItemSharePackage() {
-  if (!currentProduct) return;
+async function openMktShareWorkspace() {
   const p = currentProduct;
-  const btn = document.getElementById('shareThisPieceBtn');
-  const output = document.getElementById('itemShareOutput');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+  if (!p) return;
+  const output = document.getElementById('mktShareOutput');
+  if (!output) return;
+
   window._shareTexts = [];
   window._currentShareCardUrl = null;
-
-  // Show full structure immediately — card section + copy placeholder
   output.style.display = 'block';
+
+  const hasPkg = !!(p.caption_en || p.whatsapp_listing || p.story_text);
+  const pkgBtnLabel = hasPkg ? 'Regenerate Marketing Copy' : 'Generate Marketing Copy';
+
   output.innerHTML =
-    `<div id="itemShareCardSection" style="margin-bottom:18px">
+    `<div id="mktCardSection" style="margin-bottom:18px">
       <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Share Image</div>
-      <div id="itemShareCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
+      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
     </div>
-    <div id="itemShareTextArea"><div style="font-size:12px;color:var(--muted);padding:4px 0">Generating copy…</div></div>`;
+    <div id="mktCopySection" style="margin-bottom:14px">
+      ${hasPkg ? buildPackageHTML(p) : '<div style="font-size:13px;color:var(--muted);padding:4px 0">No marketing copy yet — tap Generate below.</div>'}
+    </div>
+    <div style="padding-top:12px;border-top:1px solid var(--border)">
+      <button class="btn btn-gold" id="mktGenBtn" onclick="generateMarketingPackage()" style="width:100%">
+        <i class="ti ti-package"></i> ${pkgBtnLabel}
+      </button>
+      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.5">
+        Some apps, especially Instagram, may require pasting the caption manually.
+      </div>
+    </div>`;
 
-  // Run card + copy in parallel — neither blocks the other
-  const [cardResult, copyResult] = await Promise.allSettled([
-    _buildItemShareCard(p),
-    _generateItemShareCopy(p)
-  ]);
-
-  // --- Card section ---
-  const cardArea = document.getElementById('itemShareCardArea');
-  if (cardArea) {
-    if (cardResult.status === 'fulfilled' && cardResult.value) {
-      window._currentShareCardUrl = cardResult.value;
-      const canWebShare = typeof navigator.share === 'function';
-      const safeName = (p.name || 'piece').replace(/[^a-z0-9]/gi, '-');
-      const safeNameOnclick = (p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      cardArea.innerHTML =
-        `<img src="${cardResult.value}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
-        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
-          ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
-          <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${safeName}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
-        </div>
-        ${!canWebShare ? '<div style="font-size:11px;color:var(--muted)">Sharing not supported in this browser — download the image and copy a caption below.</div>' : ''}`;
-    } else {
-      cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Could not generate share image. Copy the captions below.</div>';
-    }
+  // Build share card (uses already-loaded DOM image — fast and reliable)
+  try {
+    const cardUrl = await _buildItemShareCard(p);
+    window._currentShareCardUrl = cardUrl;
+    // Use WhatsApp message as default share caption, fall back to English caption
+    window._shareTexts[0] = p.whatsapp_listing || p.caption_en || '';
+    const canWebShare = typeof navigator.share === 'function';
+    const safeName = (p.name || 'piece').replace(/[^a-z0-9]/gi, '-');
+    const safeNameOnclick = (p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const cardEl = document.getElementById('mktCardArea');
+    if (cardEl) cardEl.innerHTML =
+      `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
+        ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
+        <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${safeName}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
+      </div>
+      ${!canWebShare ? '<div style="font-size:11px;color:var(--muted)">Download the image and copy a caption below to share.</div>' : ''}`;
+  } catch(e) {
+    const cardEl = document.getElementById('mktCardArea');
+    if (cardEl) cardEl.innerHTML = '<div style="font-size:12px;color:var(--muted)">Could not generate share image. Copy the captions below.</div>';
   }
-
-  // --- Text copy sections ---
-  const textArea = document.getElementById('itemShareTextArea');
-  if (textArea) {
-    if (copyResult.status === 'rejected') {
-      textArea.innerHTML = `<div style="color:var(--error);font-size:13px">Failed to generate copy: ${copyResult.reason?.message}</div>`;
-    } else {
-      const { whatsapp, instagram, story, warn } = copyResult.value;
-      const warnHTML = warn.length
-        ? `<div style="font-size:11px;color:#C08000;background:#FFF8E1;border-radius:6px;padding:6px 10px;margin-bottom:10px">${warn.join(' · ')}</div>`
-        : '';
-      window._shareTexts = [];
-      const section = (label, text, note) => {
-        if (!text) return '';
-        const idx = window._shareTexts.length;
-        window._shareTexts.push(text);
-        return `<div style="margin-bottom:14px">
-          <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}${note ? `<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;color:var(--muted)">${note}</span>` : ''}</div>
-          <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text.replace(/</g,'&lt;')}</div>
-          <button onclick="navigator.clipboard.writeText(window._shareTexts[${idx}]).then(()=>showToast('Copied'))" style="margin-top:6px;background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:11px;color:var(--burgundy);cursor:pointer;padding:3px 12px"><i class="ti ti-copy"></i> Copy</button>
-        </div>`;
-      };
-      textArea.innerHTML = warnHTML + section('WhatsApp', whatsapp) + section('Instagram Caption', instagram, '· paste caption manually') + section('Story Text', story);
-    }
-  }
-
-  btn.disabled = false;
-  btn.innerHTML = '<i class="ti ti-share"></i> Share This Piece';
 }
 
 async function generateMarketingPackage() {
   if (!currentProduct) return;
   const p = currentProduct;
-  const btn = document.getElementById('createPkgBtn');
-  const output = document.getElementById('marketingPackageOutput');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
-  output.style.display = 'block';
-  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:12px 0">Creating your marketing package — this takes about 15 seconds...</div>';
+  const btn = document.getElementById('mktGenBtn');
+  const output = document.getElementById('mktCopySection');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
+  if (output) output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:12px 0">Generating marketing copy — takes about 15 seconds…</div>';
 
   const prompt = `You are creating a complete marketing package for a Pakistani clothing boutique called "Meraki by Sam."
 
@@ -4356,15 +4299,15 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
     Object.assign(inventory[idx], update);
     currentProduct = inventory[idx];
 
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-package"></i> Regenerate Marketing Package';
-    output.innerHTML = buildPackageHTML(currentProduct);
-    showToast('Package saved ✓');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-package"></i> Regenerate Marketing Copy'; }
+    if (output) output.innerHTML = buildPackageHTML(currentProduct);
+    // Update share caption reference if card is already shown
+    window._shareTexts[0] = currentProduct.whatsapp_listing || currentProduct.caption_en || '';
+    showToast('Marketing copy saved ✓');
     buildSmartRecommendations();
   } catch(e) {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-package"></i> Create Marketing Package';
-    output.innerHTML = '<div style="font-size:12px;color:var(--burgundy);padding:8px 0">Error: ' + e.message + '</div>';
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-package"></i> Generate Marketing Copy'; }
+    if (output) output.innerHTML = '<div style="font-size:12px;color:var(--burgundy);padding:8px 0">Error: ' + e.message + '</div>';
   }
 }
 
