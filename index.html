@@ -4884,11 +4884,7 @@ function _applyProviderUI() {
     if (el) el.style.display = 'block';
   });
   const creditNote = document.getElementById('intakeCreditNote');
-  if (creditNote) {
-    creditNote.textContent = isFashn
-      ? 'Uses 1 FASHN credit — only on tap'
-      : 'Uses 1 Ideogram credit — only on tap';
-  }
+  if (creditNote) creditNote.textContent = 'Uses 1 try-on credit — only on tap';
 }
 
 // ─── FASHN MODEL PHOTO ───────────────────────────────────────────────────────
