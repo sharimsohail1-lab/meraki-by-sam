@@ -2968,7 +2968,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-detail-photo-insets';
+const _MERAKI_BUILD = '2026-06-28-inset-polish';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3653,7 +3653,7 @@ function _renderDetailPhotoInsets() {
       ? 'background:var(--burgundy);color:#fff;border:none'
       : 'background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border)';
     return `
-    <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
+    <div id="_detailThumb_${i}" style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
       <div style="position:relative">
         <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${isInset ? '2px solid var(--burgundy)' : '1px solid var(--border)'};cursor:pointer;display:block">
         <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;touch-action:manipulation" title="Remove photo"><i class="ti ti-x"></i></button>
@@ -3693,6 +3693,21 @@ async function handleDetailPhotoFile(input) {
   const file = input.files[0];
   if (!file || !currentProduct) return;
   const label = _pendingDetailPhotoLabel || 'Detail';
+
+  // Show "Adding…" placeholder immediately — before FileReader even runs
+  const insetsEl = document.getElementById('detailPhotoInsets');
+  if (insetsEl) {
+    const ph = document.createElement('div');
+    ph.id = '_detailAddPlaceholder';
+    ph.style.cssText = 'flex:0 0 auto;display:flex;flex-direction:column;align-items:center;opacity:0.7';
+    ph.innerHTML = `
+      <div style="width:72px;height:72px;border-radius:8px;border:1px dashed var(--border);background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center">
+        <div class="loading" style="scale:0.55"><span></span><span></span><span></span></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;width:72px">Adding…</div>`;
+    insetsEl.insertBefore(ph, insetsEl.lastElementChild);
+  }
+
   const reader = new FileReader();
   reader.onload = async e => {
     const dataUrl = e.target.result;
@@ -3713,9 +3728,9 @@ async function handleDetailPhotoFile(input) {
       _renderDetailPhotoInsets();
       showToast('Detail photo added');
     } catch(err) {
-      // Revert optimistic push on failure
+      document.getElementById('_detailAddPlaceholder')?.remove();
       window._detailInsetPhotos.pop();
-      showToast('Save failed: ' + err.message);
+      showToast('Could not add detail photo: ' + err.message);
     }
   };
   reader.readAsDataURL(file);
@@ -3723,16 +3738,17 @@ async function handleDetailPhotoFile(input) {
 
 async function deleteDetailPhoto(idx) {
   if (!currentProduct) return;
+  const thumbEl = document.getElementById('_detailThumb_' + idx);
+  if (thumbEl) { thumbEl.style.opacity = '0.3'; thumbEl.style.pointerEvents = 'none'; }
   const removed = window._detailInsetPhotos.splice(idx, 1);
-  _renderDetailPhotoInsets();
   try {
     await _saveDetailPhotos();
-    showToast('Removed');
+    _renderDetailPhotoInsets();
+    showToast('Detail photo removed');
   } catch(err) {
-    // Revert on failure
     window._detailInsetPhotos.splice(idx, 0, removed[0]);
     _renderDetailPhotoInsets();
-    showToast('Delete failed: ' + err.message);
+    showToast('Could not delete: ' + err.message);
   }
 }
 
@@ -4849,6 +4865,20 @@ function _parseDetailPhotosForInsets(p) {
 
 // Draws up to 2 detail insets into the image area of a catalog or share card canvas.
 // Placement: bottom-left, stacked horizontally, clear of SOLD stamp (top-right) and watermark (bottom-right).
+async function prepareInsetImage(img) {
+  const SIZE = 400;
+  const oc = document.createElement('canvas');
+  oc.width = SIZE; oc.height = SIZE;
+  const octx = oc.getContext('2d');
+  const srcSize = Math.min(img.naturalWidth, img.naturalHeight) * 0.82;
+  const srcX = (img.naturalWidth - srcSize) / 2;
+  const srcY = (img.naturalHeight - srcSize) / 2;
+  octx.filter = 'brightness(1.07) contrast(1.05) saturate(1.04)';
+  octx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, SIZE, SIZE);
+  octx.filter = 'none';
+  return oc;
+}
+
 async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
   if (!insetPhotos.length) return;
   const SIZE = 210;
@@ -4858,12 +4888,15 @@ async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
   const RADIUS = 12;
 
   for (let i = 0; i < insetPhotos.length; i++) {
-    const x = MARGIN + i * (SIZE + GAP);
-    const y = IMG_H - SIZE - MARGIN;
+    const x = MARGIN;
+    const y = IMG_H - SIZE - MARGIN - i * (SIZE + GAP);
 
     let img = null;
     try { img = await _loadImgWithTimeout(insetPhotos[i].image, 8000); } catch(_) { continue; }
     if (!img || img.naturalWidth === 0) continue;
+
+    let source = img;
+    try { source = await prepareInsetImage(img); } catch(_) { /* fall through to raw */ }
 
     // Shadow beneath the frame
     ctx.save();
@@ -4875,13 +4908,14 @@ async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
     ctx.beginPath(); ctx.roundRect(x, y, SIZE, SIZE, RADIUS); ctx.fill();
     ctx.restore();
 
-    // Clip and draw image (object-fit cover into inner square)
+    // Clip and draw prepared image
     ctx.save();
     const inner = SIZE - BORDER * 2;
     ctx.beginPath(); ctx.roundRect(x + BORDER, y + BORDER, inner, inner, Math.max(2, RADIUS - BORDER)); ctx.clip();
-    const scale = Math.max(inner / img.naturalWidth, inner / img.naturalHeight);
-    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-    ctx.drawImage(img, x + BORDER + (inner - dw) / 2, y + BORDER + (inner - dh) / 2, dw, dh);
+    const sw = source.naturalWidth || source.width, sh = source.naturalHeight || source.height;
+    const scale = Math.max(inner / sw, inner / sh);
+    const dw = sw * scale, dh = sh * scale;
+    ctx.drawImage(source, x + BORDER + (inner - dw) / 2, y + BORDER + (inner - dh) / 2, dw, dh);
     ctx.restore();
 
     // Cream border stroke on top
