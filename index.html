@@ -4057,8 +4057,13 @@ async function _buildCatalogImage() {
     return { p, nameLines, bioLines, isSoldOut, INFO_H };
   });
 
-  // ── Phase 2: compute total canvas height ──────────────────────────────────
-  const totalCardsH = cardLayouts.reduce((sum, c) => sum + IMG_H + c.INFO_H, 0);
+  // ── Phase 2: normalize info panel height across all cards ────────────────
+  // Every card uses the same height (tallest bio wins) so the catalog looks
+  // consistent. Shorter bios get extra white space; longer bios always fit.
+  const MAX_INFO_H = Math.max(...cardLayouts.map(c => c.INFO_H));
+  cardLayouts.forEach(c => { c.INFO_H = MAX_INFO_H; });
+
+  const totalCardsH = selected.length * (IMG_H + MAX_INFO_H);
   const TOTAL_H = HEADER_H + totalCardsH + (selected.length - 1) * GAP + GAP;
 
   // ── Phase 3: draw ─────────────────────────────────────────────────────────
