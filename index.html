@@ -2911,16 +2911,24 @@ async function _lbToggleInset() {
 async function _lbCleanBackground() {
   if (_lbCurrentIdx === null) return;
   const btn = document.getElementById('lbCleanBtn');
+  const origHTML = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader-2"></i> Cleaning…';
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Cleaning background…';
   try {
     await cleanDetailPhotoBackground(_lbCurrentIdx);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-check"></i> Background cleaned ✓';
     _lbRefresh();
     _renderDetailPhotoInsets();
   } catch(err) {
     btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-wand"></i> Clean background';
-    showToast('Could not clean background: ' + err.message);
+    btn.innerHTML = origHTML;
+    // Surface setup-not-done error plainly; other errors include the reason
+    const msg = err.message.includes('REMOVE_BG_API_KEY')
+      ? 'Background cleanup is not set up yet.'
+      : err.message;
+    showToast(msg);
+    console.warn('[INSET BACKGROUND CLEANUP] UI error', { reason: err.message });
   }
 }
 
@@ -3165,7 +3173,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-inset-ux-v2';
+const _MERAKI_BUILD = '2026-06-28-bg-removal-fix';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3986,55 +3994,66 @@ async function toggleDetailPhotoInset(idx) {
   _renderDetailPhotoInsets();
 }
 
-// Real ML background removal via @imgly/background-removal (CDN, lazy-loaded).
-// Runs entirely in the browser — no API key, no external call, ~40MB WASM on first use.
+// Background removal via /api/remove-background (server-side remove.bg proxy).
+// Requires REMOVE_BG_API_KEY in Vercel environment variables.
 // Called only when Sam explicitly taps "Clean background".
-let _imglyBgRemoval = null;
 async function cleanDetailPhotoBackground(idx) {
   const photos = window._detailInsetPhotos || [];
   const d = photos[idx];
   if (!d) throw new Error('photo not found');
 
-  // Lazy-load the library first time only
-  if (!_imglyBgRemoval) {
-    showToast('Loading background removal (first time only, ~40 MB)…');
-    try {
-      const mod = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/web/index.mjs');
-      _imglyBgRemoval = mod;
-    } catch(loadErr) {
-      throw new Error('Could not load background removal library: ' + loadErr.message);
-    }
-  }
+  console.log('[INSET BACKGROUND CLEANUP] sending to /api/remove-background', { label: d.label, slot: d.slot });
 
-  const { removeBackground } = _imglyBgRemoval;
-
-  // Convert dataUrl → Blob for the library
-  const res = await fetch(d.image);
-  const blob = await res.blob();
-
-  let resultBlob;
+  // Re-encode the photo to JPEG via canvas before sending (normalize format, cap size).
+  // This avoids sending large base64 payloads and ensures a supported input format.
+  let imageToSend = d.image;
   try {
-    resultBlob = await removeBackground(blob, {
-      model: 'medium',          // medium = best quality/speed tradeoff
-      output: { format: 'image/png' }
+    imageToSend = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const cx = c.getContext('2d'); cx.drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.88));
+      };
+      img.onerror = reject;
+      img.src = d.image;
     });
-  } catch(rmErr) {
-    console.warn('[INSET BACKGROUND CLEANUP] failed', { label: d.label, slot: d.slot, method: 'imgly', reason: rmErr?.message || rmErr });
-    throw new Error('Background removal failed: ' + (rmErr?.message || 'unknown error'));
+  } catch(_) { /* send original if re-encode fails */ }
+
+  let resp;
+  try {
+    resp = await fetch('/api/remove-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_b64: imageToSend }),
+    });
+  } catch(netErr) {
+    console.warn('[INSET BACKGROUND CLEANUP] network error', { label: d.label, reason: netErr?.message });
+    throw new Error('Could not reach background cleanup service. Check your connection.');
   }
 
-  // Convert result Blob → data URL
-  const cleanedDataUrl = await new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(resultBlob);
-  });
+  const json = await resp.json();
 
-  photos[idx] = { ...photos[idx], cleanedImage: cleanedDataUrl, cleanedAt: new Date().toISOString(), cleanMethod: 'imgly' };
+  if (!resp.ok) {
+    const reason = json.error || `Server error ${resp.status}`;
+    console.warn('[INSET BACKGROUND CLEANUP] server error', { label: d.label, slot: d.slot, status: resp.status, reason });
+    // Surface configuration error clearly
+    if (resp.status === 503) throw new Error('Background removal is not set up yet. Ask your developer to add REMOVE_BG_API_KEY to the server.');
+    throw new Error('Background cleanup failed: ' + reason);
+  }
+
+  if (!json.cleanedImage) {
+    console.warn('[INSET BACKGROUND CLEANUP] no cleanedImage in response', { label: d.label });
+    throw new Error('Background cleanup returned no image.');
+  }
+
+  photos[idx] = { ...photos[idx], cleanedImage: json.cleanedImage, cleanedAt: new Date().toISOString(), cleanMethod: 'remove.bg' };
   await _saveDetailPhotos();
 
-  console.log('[INSET BACKGROUND CLEANUP] success', { label: d.label, method: 'imgly', hasCleanedImage: true });
+  console.log('[INSET BACKGROUND CLEANUP] success', { label: d.label, slot: d.slot, method: 'remove.bg', hasCleanedImage: true });
 }
 
 async function _saveDetailPhotos() {
