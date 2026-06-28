@@ -4012,6 +4012,159 @@ function shareCatalogWhatsApp() {
   window.open(url, '_blank');
 }
 
+async function _buildItemShareCard(p) {
+  const SIZE = 1080;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE; canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#FDF8F3';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Load and draw main product image (model_photo preferred, then photo)
+  const imgSrc = p.model_photo || p.photo;
+  if (imgSrc) {
+    try {
+      const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
+      const img = await loadImg(proxied);
+      // Cover-fit: fill canvas, crop center
+      const scale = Math.max(SIZE / img.width, SIZE / img.height);
+      const dw = img.width * scale, dh = img.height * scale;
+      ctx.drawImage(img, (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh);
+    } catch(_) {}
+  }
+
+  // Gradient overlay at bottom for legibility
+  const grad = ctx.createLinearGradient(0, SIZE * 0.55, 0, SIZE);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.72)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Detail inset (top-right corner) — pick first available inset photo
+  const detailPhotos = window._detailInsetPhotos || [];
+  if (detailPhotos.length > 0) {
+    try {
+      const insetSrc = detailPhotos[0].startsWith('data:') ? detailPhotos[0] : '/api/ideogram?url=' + encodeURIComponent(detailPhotos[0]);
+      const inset = await loadImg(insetSrc);
+      const IS = SIZE * 0.22;
+      const margin = SIZE * 0.04;
+      const ix = SIZE - IS - margin, iy = margin;
+      // Rounded clip
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(ix, iy, IS, IS, 12);
+      ctx.clip();
+      const sc = Math.max(IS / inset.width, IS / inset.height);
+      const dw = inset.width * sc, dh = inset.height * sc;
+      ctx.drawImage(inset, ix + (IS - dw) / 2, iy + (IS - dh) / 2, dw, dh);
+      ctx.restore();
+      // Border
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(ix, iy, IS, IS, 12);
+      ctx.stroke();
+    } catch(_) {}
+  }
+
+  // Status stamp (SOLD / RESERVED)
+  if (p.status === 'sold' || p.status === 'reserved') {
+    const stamp = p.status === 'sold' ? 'SOLD' : 'RESERVED';
+    const stampColor = p.status === 'sold' ? '#C0392B' : '#7B5EA7';
+    const sw = SIZE * 0.38, sh = SIZE * 0.09;
+    const sx = SIZE * 0.04, sy = SIZE * 0.04;
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = stampColor;
+    ctx.beginPath();
+    ctx.roundRect(sx, sy, sw, sh, 8);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${SIZE * 0.055}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.1em';
+    ctx.fillText(stamp, sx + sw / 2, sy + sh / 2);
+    ctx.restore();
+  }
+
+  // Text block at bottom
+  const padX = SIZE * 0.07;
+  let ty = SIZE * 0.72;
+
+  // Product name
+  ctx.fillStyle = '#fff';
+  ctx.font = `600 ${SIZE * 0.052}px "Playfair Display", serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  // Word-wrap name to 2 lines max
+  const nameWords = (p.name || 'Untitled').split(' ');
+  let nameLine1 = '', nameLine2 = '';
+  for (const w of nameWords) {
+    const test = nameLine1 ? nameLine1 + ' ' + w : w;
+    if (!nameLine1 || ctx.measureText(test).width <= SIZE - padX * 2) { nameLine1 = test; }
+    else { nameLine2 = (nameLine2 ? nameLine2 + ' ' : '') + w; }
+  }
+  ctx.fillText(nameLine1, padX, ty);
+  if (nameLine2) { ty += SIZE * 0.058; ctx.fillText(nameLine2, padX, ty); }
+
+  // Price
+  ty += SIZE * 0.065;
+  const priceText = p.price ? `$${p.price}` : 'Reach out for price';
+  ctx.font = `${SIZE * 0.038}px Inter, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillText(priceText, padX, ty);
+
+  // Sizes
+  const sizes = getAvailableSizes(p);
+  if (sizes.length) {
+    ty += SIZE * 0.048;
+    ctx.font = `${SIZE * 0.033}px Inter, sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.70)';
+    ctx.fillText('Available in ' + sizes.join(', '), padX, ty);
+  }
+
+  // Meraki logo (bottom-right)
+  if (MERAKI_LOGO_SRC) {
+    try {
+      const logo = await loadImg(MERAKI_LOGO_SRC);
+      const logoW = SIZE * 0.22;
+      const logoH = (logo.height / logo.width) * logoW;
+      const logoMargin = SIZE * 0.05;
+      ctx.globalAlpha = 0.88;
+      ctx.drawImage(logo, SIZE - logoW - logoMargin, SIZE - logoH - logoMargin, logoW, logoH);
+      ctx.globalAlpha = 1;
+    } catch(_) {}
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+async function _shareItemCard(dataUrl, caption, productName) {
+  const filename = 'Meraki-' + (productName || 'piece').replace(/[^a-z0-9]/gi, '-') + '.jpg';
+  if (typeof navigator.share === 'function') {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], filename, { type: 'image/jpeg' });
+      const shareData = { files: [file], text: caption || '', title: 'Meraki by Sam — ' + (productName || '') };
+      if (navigator.canShare && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        return;
+      }
+      // Files not supported — share text only
+      await navigator.share({ text: caption || '', title: 'Meraki by Sam — ' + (productName || '') });
+      return;
+    } catch(e) {
+      if (e.name === 'AbortError') return; // user cancelled — not an error
+      // Fall through to download
+    }
+  }
+  triggerDownload(dataUrl, filename);
+}
+
 async function generateItemSharePackage() {
   if (!currentProduct) return;
   const p = currentProduct;
@@ -4020,7 +4173,7 @@ async function generateItemSharePackage() {
   btn.disabled = true;
   btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
   output.style.display = 'block';
-  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Generating share copy…</div>';
+  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Generating share card & copy…</div>';
 
   const priceText = p.price ? `$${p.price}` : 'Reach out for price';
   const sizes = getAvailableSizes(p);
@@ -4064,7 +4217,7 @@ Very short story text (1-2 lines max). Suitable for an Instagram story. If avail
 
     const warn = [];
     if (!p.price) warn.push('No price — showing "Reach out for price"');
-    if (!p.model_photo && !p.photo) warn.push('No photo available');
+    if (!p.model_photo && !p.photo) warn.push('No photo available for card');
     if (!sizeText) warn.push('No sizes added');
 
     const warnHTML = warn.length
@@ -4072,18 +4225,46 @@ Very short story text (1-2 lines max). Suitable for an Instagram story. If avail
       : '';
 
     window._shareTexts = [];
-    const section = (label, text) => {
+    const section = (label, text, note) => {
       if (!text) return '';
       const idx = window._shareTexts.length;
       window._shareTexts.push(text);
       return `<div style="margin-bottom:14px">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}</div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}${note ? `<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;color:var(--muted)">${note}</span>` : ''}</div>
         <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text.replace(/</g,'&lt;')}</div>
         <button onclick="navigator.clipboard.writeText(window._shareTexts[${idx}]).then(()=>showToast('Copied'))" style="margin-top:6px;background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:11px;color:var(--burgundy);cursor:pointer;padding:3px 12px"><i class="ti ti-copy"></i> Copy</button>
       </div>`;
     };
 
-    output.innerHTML = warnHTML + section('WhatsApp', whatsapp) + section('Instagram Caption', instagram) + section('Story Text', story);
+    // Show text sections immediately, then build card asynchronously
+    output.innerHTML = warnHTML +
+      `<div id="itemShareCardSection" style="margin-bottom:18px;text-align:center">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;text-align:left">Share Image</div>
+        <div id="itemShareCardLoading" style="font-size:12px;color:var(--muted);padding:12px 0">Building share card…</div>
+      </div>` +
+      section('WhatsApp', whatsapp) +
+      section('Instagram Caption', instagram, '· paste caption manually') +
+      section('Story Text', story);
+
+    // Build card in background (don't let card failure wipe the text copy sections)
+    try {
+      const cardUrl = await _buildItemShareCard(p);
+      window._currentShareCardUrl = cardUrl;
+      const whatsappCaption = whatsapp || '';
+      const cardIdx = window._shareTexts.length;
+      window._shareTexts.push(whatsappCaption);
+      const canWebShare = typeof navigator.share === 'function';
+      const cardEl = document.getElementById('itemShareCardLoading');
+      if (cardEl) cardEl.outerHTML =
+        `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[${cardIdx}],'${(p.name||'').replace(/'/g,"\\'")}').catch(()=>{})" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
+          <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${(p.name||'piece').replace(/[^a-z0-9]/gi,'-')}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
+        </div>`;
+    } catch(e) {
+      const cardEl = document.getElementById('itemShareCardLoading');
+      if (cardEl) cardEl.textContent = 'Could not build share card.';
+    }
   } catch(e) {
     output.innerHTML = `<div style="color:var(--error);font-size:13px">Failed: ${e.message}</div>`;
   }
