@@ -2556,8 +2556,10 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     console.log('Reference image size:', singleRef ? Math.round(singleRef.length / 1024) + ' KB' : 'none');
     console.groupEnd();
 
-    const provider = IMAGE_GEN_PROVIDERS[activeImageGenProvider] || IMAGE_GEN_PROVIDERS['ideogram'];
-    console.log('[Meraki] Using provider:', provider.label);
+    // Product try-on always uses FASHN — activeImageGenProvider only affects model template generation in Settings.
+    const provider = IMAGE_GEN_PROVIDERS['fashn'];
+    if (!provider) throw new Error('FASHN provider not registered');
+    console.log('[Meraki] Using provider: FASHN (product try-on)');
     const url = await provider.generate(currentAnalysis.ideogramPrompt, singleRef, imageWeight);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
@@ -2571,12 +2573,11 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     const note = document.getElementById('modelPhotoStockNote');
     if (note) { note.style.display = 'block'; }
 
-    // Show "Try different model" button when FASHN was used
-    const isFashn = activeImageGenProvider === 'fashn';
+    // Product try-on always uses FASHN, so always show "Try different model"
     const retryRow = outputDivId === 'modelPhotoOutput'
       ? document.getElementById('fashnRetryRow')
       : document.getElementById('detailFashnRetryRow');
-    if (retryRow) retryRow.style.display = isFashn ? 'block' : 'none';
+    if (retryRow) retryRow.style.display = 'block';
 
     // Update "View Reference" button label to confirm composite used
     const refBtns = document.querySelectorAll('.js-view-ref-btn');
@@ -4872,14 +4873,15 @@ function selectProvider(id) {
 }
 
 function _applyProviderUI() {
-  const isFashn = activeImageGenProvider === 'fashn';
+  // Product try-on (Add New Piece + Product Detail) always uses FASHN.
+  // activeImageGenProvider only affects Settings → Model Templates.
   ['intakeWeightRow', 'detailWeightRow'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = isFashn ? 'none' : '';
+    if (el) el.style.display = 'none';
   });
   ['intakeFashnNote', 'detailFashnNote'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.style.display = isFashn ? 'block' : 'none';
+    if (el) el.style.display = 'block';
   });
   const creditNote = document.getElementById('intakeCreditNote');
   if (creditNote) {
