@@ -1084,28 +1084,27 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <input type="file" id="lbReplaceFileInput" accept="image/*" style="display:none" onchange="_lbHandleReplace(this)">
 
 <!-- DETAIL PHOTO CROP OVERLAY — sits above lightbox -->
-<div id="detailCropOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:#111;flex-direction:column">
-  <div style="height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.08)">
-    <button onclick="_cancelCrop()" style="color:rgba(255,255,255,0.7);background:none;border:none;font-size:15px;cursor:pointer;padding:8px 0;touch-action:manipulation">Cancel</button>
+<!-- DETAIL PHOTO CROP OVERLAY — iPhone-style pinch/drag crop -->
+<div id="detailCropOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:#000;flex-direction:column;overscroll-behavior:contain">
+  <!-- header -->
+  <div style="height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0">
+    <button onclick="_cancelCrop()" style="color:rgba(255,255,255,0.75);background:none;border:none;font-size:15px;cursor:pointer;padding:8px 4px;touch-action:manipulation">Cancel</button>
     <div id="cropLabel" style="color:#fff;font-size:15px;font-weight:600;font-family:'Playfair Display',serif"></div>
-    <button id="cropSaveBtn" onclick="_saveCrop()" style="color:#c9a84c;background:none;border:none;font-size:15px;font-weight:700;cursor:pointer;padding:8px 0;touch-action:manipulation">Save</button>
+    <button id="cropSaveBtn" onclick="_saveCrop()" style="color:#c9a84c;background:none;border:none;font-size:15px;font-weight:700;cursor:pointer;padding:8px 4px;touch-action:manipulation">Save</button>
   </div>
-  <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:16px">
-    <div style="position:relative">
-      <canvas id="cropPreviewCanvas" style="border-radius:12px;display:block;touch-action:none;cursor:grab"></canvas>
-      <div style="position:absolute;inset:0;pointer-events:none;border-radius:12px;border:2px solid rgba(201,168,76,0.6);box-shadow:0 0 0 9999px rgba(0,0,0,0.55)"></div>
-    </div>
+  <!-- interactive crop area — fills remaining space -->
+  <div id="cropInteractArea" style="flex:1;position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab">
+    <!-- dim overlay with cut-out frame — pointer-events:none so touches pass through to the area -->
+    <div id="cropDimOverlay" style="position:absolute;inset:0;pointer-events:none;z-index:2"></div>
+    <!-- the image being cropped, positioned absolutely, transformed via JS -->
+    <img id="cropImg" src="" alt="" style="position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;touch-action:none;pointer-events:none;user-select:none;-webkit-user-select:none;display:block">
+    <!-- crop frame border — sits on top, pointer-events:none -->
+    <div id="cropFrame" style="position:absolute;pointer-events:none;z-index:3;border-radius:12px;border:2px solid rgba(201,168,76,0.85);box-sizing:border-box"></div>
   </div>
-  <div style="padding:12px 20px 36px;flex-shrink:0">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-      <i class="ti ti-zoom-out" style="color:rgba(255,255,255,0.5);font-size:18px;flex-shrink:0"></i>
-      <input type="range" id="cropZoomSlider" min="100" max="400" value="100" step="5" style="flex:1;accent-color:#c9a84c;height:4px" oninput="_onCropZoomSlider(this.value)">
-      <i class="ti ti-zoom-in" style="color:rgba(255,255,255,0.5);font-size:18px;flex-shrink:0"></i>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button onclick="_resetCropToDefault()" style="flex:1;padding:12px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:10px;font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Reset</button>
-    </div>
-    <div style="font-size:11px;color:rgba(255,255,255,0.35);text-align:center;margin-top:10px">Drag to reposition · Pinch or slider to zoom</div>
+  <!-- footer -->
+  <div style="padding:16px 20px 40px;flex-shrink:0;display:flex;flex-direction:column;gap:10px">
+    <button onclick="_resetCropToDefault()" style="width:100%;padding:13px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.75);border-radius:10px;font-size:14px;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Reset</button>
+    <div style="font-size:11px;color:rgba(255,255,255,0.3);text-align:center">Drag to reposition · Pinch to zoom</div>
   </div>
 </div>
 
@@ -2985,27 +2984,26 @@ async function _lbCleanBackground() {
   }
 }
 
-// ── Crop / reframe ─────────────────────────────────────────────────────────
-const CROP_FRAME_PX = 280;
-let _cropState = null; // { idx, photoId, img, imgNW, imgNH, baseScale, userScale, dx, dy, dragging, lastX, lastY, touches }
+// ── Crop / reframe (iPhone-style: CSS transform on <img>, canvas only at save) ─
+// _cs = crop state. translateX/translateY are the pixel offset of the image's
+// top-left corner relative to the interact area's top-left corner.
+let _cs = null;
 
 function _lbOpenCrop() {
   const photos = window._detailInsetPhotos || [];
   const d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
   if (!d || !d.image) return;
-  const idx = photos.indexOf(d);
-  _openCropUI(idx);
+  _openCropUI(photos.indexOf(d));
 }
 
 function _lbResetCrop() {
   const photos = window._detailInsetPhotos || [];
-  let d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
+  const d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
   if (!d) return;
   delete d.croppedImage;
   delete d.crop;
   delete d.croppedAt;
   _lbRefresh();
-  // Save without images not needed — croppedImage is image data, must do full save
   _saveDetailPhotos().catch(err => showToast('Save failed: ' + err.message));
 }
 
@@ -3013,49 +3011,216 @@ function _openCropUI(idx) {
   const photos = window._detailInsetPhotos || [];
   const d = photos[idx];
   if (!d || !d.image) return;
+
   const overlay = document.getElementById('detailCropOverlay');
   overlay.style.display = 'flex';
   document.getElementById('cropLabel').textContent = d.label || 'Adjust inset';
-  const img = new Image();
+
+  const img = document.getElementById('cropImg');
   img.onload = () => {
-    const imgNW = img.naturalWidth;
-    const imgNH = img.naturalHeight;
-    const baseScale = CROP_FRAME_PX / Math.min(imgNW, imgNH);
-    // Restore saved crop or default
-    let userScale = 1, dx = 0, dy = 0;
-    if (d.crop) { userScale = d.crop.userScale || 1; dx = d.crop.dx || 0; dy = d.crop.dy || 0; }
-    _cropState = { idx, photoId: d.id, img, imgNW, imgNH, baseScale, userScale, dx, dy, dragging: false, lastX: 0, lastY: 0, touches: [] };
-    const slider = document.getElementById('cropZoomSlider');
-    slider.value = Math.round(userScale * 100);
-    const canvas = document.getElementById('cropPreviewCanvas');
-    canvas.width = CROP_FRAME_PX;
-    canvas.height = CROP_FRAME_PX;
-    _drawCropPreview();
-    _initCropEvents(canvas);
+    // Measure the interact area after layout
+    requestAnimationFrame(() => {
+      const area = document.getElementById('cropInteractArea');
+      const aW = area.clientWidth;
+      const aH = area.clientHeight;
+      const frameSize = Math.min(aW, aH, 300);
+      const frameLeft = (aW - frameSize) / 2;
+      const frameTop  = (aH - frameSize) / 2;
+
+      // Position and size the frame border overlay
+      const frame = document.getElementById('cropFrame');
+      frame.style.left   = frameLeft + 'px';
+      frame.style.top    = frameTop  + 'px';
+      frame.style.width  = frameSize + 'px';
+      frame.style.height = frameSize + 'px';
+
+      // Build the dim overlay: four dark rectangles surrounding the frame
+      _updateCropDim(aW, aH, frameLeft, frameTop, frameSize);
+
+      // cover-scale: shortest image side fills the frame
+      const iW = img.naturalWidth;
+      const iH = img.naturalHeight;
+      const minSide = Math.min(iW, iH);
+      const baseScale = frameSize / minSide;  // guarantees image covers frame at scale=1
+
+      let scale = baseScale;
+      let tx, ty;
+
+      if (d.crop) {
+        // Restore saved crop — saved values are already in screen-px space at save time
+        scale = d.crop.scale || baseScale;
+        tx = d.crop.tx !== undefined ? d.crop.tx : frameLeft + (frameSize - iW * scale) / 2;
+        ty = d.crop.ty !== undefined ? d.crop.ty : frameTop  + (frameSize - iH * scale) / 2;
+      } else {
+        // Default: image centred on frame
+        tx = frameLeft + (frameSize - iW * scale) / 2;
+        ty = frameTop  + (frameSize - iH * scale) / 2;
+      }
+
+      _cs = { idx, photoId: d.id, iW, iH, baseScale, scale, tx, ty, frameLeft, frameTop, frameSize, aW, aH };
+      _applyCropTransform();
+      _initCropTouchEvents(area);
+    });
   };
   img.src = d.image;
 }
 
+function _updateCropDim(aW, aH, fL, fT, fS) {
+  // Four semi-transparent rects: top, bottom, left, right
+  const dim = document.getElementById('cropDimOverlay');
+  const c = 'rgba(0,0,0,0.55)';
+  dim.innerHTML =
+    `<div style="position:absolute;left:0;top:0;width:${aW}px;height:${fT}px;background:${c}"></div>` +
+    `<div style="position:absolute;left:0;top:${fT+fS}px;width:${aW}px;height:${aH-fT-fS}px;background:${c}"></div>` +
+    `<div style="position:absolute;left:0;top:${fT}px;width:${fL}px;height:${fS}px;background:${c}"></div>` +
+    `<div style="position:absolute;left:${fL+fS}px;top:${fT}px;width:${aW-fL-fS}px;height:${fS}px;background:${c}"></div>`;
+}
+
+function _applyCropTransform() {
+  if (!_cs) return;
+  const img = document.getElementById('cropImg');
+  img.style.transform = `translate(${_cs.tx}px, ${_cs.ty}px) scale(${_cs.scale})`;
+  img.style.transformOrigin = '0 0';
+  img.style.width  = _cs.iW + 'px';
+  img.style.height = _cs.iH + 'px';
+}
+
+// Clamp tx/ty so the image always covers the crop frame
+function _clampCropXY(tx, ty, scale) {
+  if (!_cs) return { tx, ty };
+  const { iW, iH, frameLeft: fL, frameTop: fT, frameSize: fS } = _cs;
+  const imgW = iW * scale;
+  const imgH = iH * scale;
+  // image right edge must be >= frame right edge  → tx <= fL+fS - imgW
+  // image left edge must be <= frame left edge    → tx >= fL
+  // (if image smaller than frame: keep centred, but we enforce minScale elsewhere)
+  const maxTx = fL;
+  const minTx = fL + fS - imgW;
+  const maxTy = fT;
+  const minTy = fT + fS - imgH;
+  return {
+    tx: Math.max(minTx, Math.min(maxTx, tx)),
+    ty: Math.max(minTy, Math.min(maxTy, ty)),
+  };
+}
+
+let _cropEventsAttached = false;
+function _initCropTouchEvents(area) {
+  if (_cropEventsAttached) return; // reuse; state is in _cs
+  _cropEventsAttached = true;
+
+  let t1 = null, t2 = null;         // active touches by identifier
+  let startScale, startDist;
+  let startTx, startTy;             // tx/ty at gesture start
+  let startMidX, startMidY;         // midpoint of pinch at gesture start (for zoom-to-point)
+
+  function getTouch(id, list) { for (let t of list) if (t.identifier === id) return t; return null; }
+
+  area.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const touches = e.changedTouches;
+    if (!t1) { t1 = { id: touches[0].identifier, x: touches[0].clientX, y: touches[0].clientY }; }
+    // second finger
+    if (!t2 && e.touches.length >= 2) {
+      const second = e.touches[1];
+      t2 = { id: second.identifier, x: second.clientX, y: second.clientY };
+    }
+    if (t1 && t2 && _cs) {
+      // Pinch start
+      const cur1 = getTouch(t1.id, e.touches) || t1;
+      const cur2 = getTouch(t2.id, e.touches) || t2;
+      startDist = Math.hypot(cur2.clientX - cur1.clientX, cur2.clientY - cur1.clientY);
+      startScale = _cs.scale;
+      startTx = _cs.tx;
+      startTy = _cs.ty;
+      startMidX = (cur1.clientX + cur2.clientX) / 2;
+      startMidY = (cur1.clientY + cur2.clientY) / 2;
+    } else if (t1 && _cs) {
+      // Pan start
+      startTx = _cs.tx;
+      startTy = _cs.ty;
+      const cur1 = getTouch(t1.id, e.touches) || t1;
+      t1 = { id: t1.id, x: cur1.clientX, y: cur1.clientY };
+    }
+  }, { passive: false });
+
+  area.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!_cs) return;
+    if (t1 && t2) {
+      // Two-finger pinch + pan
+      const cur1 = getTouch(t1.id, e.touches);
+      const cur2 = getTouch(t2.id, e.touches);
+      if (!cur1 || !cur2) return;
+      const dist = Math.hypot(cur2.clientX - cur1.clientX, cur2.clientY - cur1.clientY);
+      const ratio = startDist > 0 ? dist / startDist : 1;
+      const newScale = Math.max(_cs.baseScale, Math.min(_cs.baseScale * 5, startScale * ratio));
+      // Zoom around the pinch midpoint
+      const midX = (cur1.clientX + cur2.clientX) / 2;
+      const midY = (cur1.clientY + cur2.clientY) / 2;
+      const panDx = midX - startMidX;
+      const panDy = midY - startMidY;
+      // When scale changes, adjust translation so the point under the pinch midpoint stays fixed
+      const scaleRatio = newScale / startScale;
+      let newTx = startMidX + (startTx - startMidX) * scaleRatio + panDx;
+      let newTy = startMidY + (startTy - startMidY) * scaleRatio + panDy;
+      const clamped = _clampCropXY(newTx, newTy, newScale);
+      _cs.scale = newScale;
+      _cs.tx = clamped.tx;
+      _cs.ty = clamped.ty;
+      _applyCropTransform();
+    } else if (t1) {
+      // Single finger pan
+      const cur1 = getTouch(t1.id, e.touches);
+      if (!cur1) return;
+      const ddx = cur1.clientX - t1.x;
+      const ddy = cur1.clientY - t1.y;
+      const clamped = _clampCropXY(startTx + ddx, startTy + ddy, _cs.scale);
+      _cs.tx = clamped.tx;
+      _cs.ty = clamped.ty;
+      _applyCropTransform();
+    }
+  }, { passive: false });
+
+  area.addEventListener('touchend', e => {
+    e.preventDefault();
+    const remaining = new Set(Array.from(e.touches).map(t => t.identifier));
+    if (t1 && !remaining.has(t1.id)) t1 = null;
+    if (t2 && !remaining.has(t2.id)) t2 = null;
+    // If one finger lifted, reset pan start so next single-finger move is smooth
+    if (t1 && !t2 && _cs) {
+      const cur1 = getTouch(t1.id, e.touches);
+      if (cur1) { t1 = { id: t1.id, x: cur1.clientX, y: cur1.clientY }; startTx = _cs.tx; startTy = _cs.ty; }
+    }
+  }, { passive: false });
+
+  area.addEventListener('touchcancel', e => {
+    t1 = null; t2 = null;
+  }, { passive: false });
+}
+
 function _cancelCrop() {
   document.getElementById('detailCropOverlay').style.display = 'none';
-  _cropState = null;
+  _cs = null;
 }
 
 async function _saveCrop() {
-  if (!_cropState) return;
+  if (!_cs) return;
   const btn = document.getElementById('cropSaveBtn');
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
-    const { img, imgNW, imgNH, baseScale, userScale, dx, dy, idx, photoId } = _cropState;
-    const displayScale = baseScale * userScale;
-    const srcW = CROP_FRAME_PX / displayScale;
-    const srcH = CROP_FRAME_PX / displayScale;
-    const srcX = (imgNW / 2) - (srcW / 2) - dx / displayScale;
-    const srcY = (imgNH / 2) - (srcH / 2) - dy / displayScale;
+    const { iW, iH, scale, tx, ty, frameLeft: fL, frameTop: fT, frameSize: fS, idx, photoId } = _cs;
+    // Convert frame coordinates back to source image coordinates
+    // tx = left edge of image in screen px; fL = left edge of frame
+    const srcX = (fL - tx) / scale;
+    const srcY = (fT - ty) / scale;
+    const srcW = fS / scale;
+    const srcH = fS / scale;
     const out = document.createElement('canvas');
     out.width = 600; out.height = 600;
     const ctx = out.getContext('2d');
+    const img = document.getElementById('cropImg');
     ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, 600, 600);
     const croppedImage = out.toDataURL('image/jpeg', 0.88);
     const photos = window._detailInsetPhotos || [];
@@ -3063,10 +3228,10 @@ async function _saveCrop() {
     if (d) {
       d.croppedImage = croppedImage;
       d.croppedAt = new Date().toISOString();
-      d.crop = { userScale, dx, dy };
+      d.crop = { scale, tx, ty };
     }
     document.getElementById('detailCropOverlay').style.display = 'none';
-    _cropState = null;
+    _cs = null;
     _lbRefresh();
     await _saveDetailPhotos();
   } catch (err) {
@@ -3078,106 +3243,12 @@ async function _saveCrop() {
 }
 
 function _resetCropToDefault() {
-  if (!_cropState) return;
-  _cropState.userScale = 1;
-  _cropState.dx = 0;
-  _cropState.dy = 0;
-  document.getElementById('cropZoomSlider').value = 100;
-  _drawCropPreview();
-}
-
-function _onCropZoomSlider(val) {
-  if (!_cropState) return;
-  _cropState.userScale = parseInt(val, 10) / 100;
-  const clamped = _clampCropOffset(_cropState.dx, _cropState.dy, _cropState.userScale);
-  _cropState.dx = clamped.dx;
-  _cropState.dy = clamped.dy;
-  _drawCropPreview();
-}
-
-function _drawCropPreview() {
-  if (!_cropState) return;
-  const { img, imgNW, imgNH, baseScale, userScale, dx, dy } = _cropState;
-  const canvas = document.getElementById('cropPreviewCanvas');
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, CROP_FRAME_PX, CROP_FRAME_PX);
-  const displayScale = baseScale * userScale;
-  const drawW = imgNW * displayScale;
-  const drawH = imgNH * displayScale;
-  const cx = CROP_FRAME_PX / 2 - drawW / 2 + dx;
-  const cy = CROP_FRAME_PX / 2 - drawH / 2 + dy;
-  ctx.drawImage(img, cx, cy, drawW, drawH);
-}
-
-function _clampCropOffset(dx, dy, userScale) {
-  if (!_cropState) return { dx, dy };
-  const { imgNW, imgNH, baseScale } = _cropState;
-  const displayScale = baseScale * userScale;
-  const drawW = imgNW * displayScale;
-  const drawH = imgNH * displayScale;
-  const maxDx = Math.max(0, (drawW - CROP_FRAME_PX) / 2);
-  const maxDy = Math.max(0, (drawH - CROP_FRAME_PX) / 2);
-  return { dx: Math.max(-maxDx, Math.min(maxDx, dx)), dy: Math.max(-maxDy, Math.min(maxDy, dy)) };
-}
-
-function _initCropEvents(canvas) {
-  // Remove old listeners by replacing canvas clone (simple approach)
-  const clone = canvas.cloneNode(true);
-  canvas.parentNode.replaceChild(clone, clone); // no-op but sets up fresh
-  // Use the actual canvas element in DOM
-  const c = document.getElementById('cropPreviewCanvas');
-
-  // Pointer drag
-  c.addEventListener('pointerdown', e => {
-    if (!_cropState) return;
-    if (e.touches || _cropState.touches.length > 1) return;
-    _cropState.dragging = true;
-    _cropState.lastX = e.clientX;
-    _cropState.lastY = e.clientY;
-    c.setPointerCapture(e.pointerId);
-  });
-  c.addEventListener('pointermove', e => {
-    if (!_cropState || !_cropState.dragging || _cropState.touches.length > 1) return;
-    const ddx = e.clientX - _cropState.lastX;
-    const ddy = e.clientY - _cropState.lastY;
-    _cropState.lastX = e.clientX;
-    _cropState.lastY = e.clientY;
-    const clamped = _clampCropOffset(_cropState.dx + ddx, _cropState.dy + ddy, _cropState.userScale);
-    _cropState.dx = clamped.dx;
-    _cropState.dy = clamped.dy;
-    _drawCropPreview();
-  });
-  c.addEventListener('pointerup', () => { if (_cropState) _cropState.dragging = false; });
-  c.addEventListener('pointercancel', () => { if (_cropState) _cropState.dragging = false; });
-
-  // Pinch zoom
-  c.addEventListener('touchstart', e => {
-    if (!_cropState) return;
-    _cropState.touches = Array.from(e.touches);
-    if (_cropState.touches.length >= 2) _cropState.dragging = false;
-  }, { passive: true });
-  c.addEventListener('touchmove', e => {
-    if (!_cropState || _cropState.touches.length < 2 || e.touches.length < 2) return;
-    e.preventDefault();
-    const prev = _cropState.touches;
-    const cur = Array.from(e.touches);
-    const prevDist = Math.hypot(prev[0].clientX - prev[1].clientX, prev[0].clientY - prev[1].clientY);
-    const curDist = Math.hypot(cur[0].clientX - cur[1].clientX, cur[0].clientY - cur[1].clientY);
-    if (prevDist > 0) {
-      const ratio = curDist / prevDist;
-      const newScale = Math.max(1, Math.min(4, _cropState.userScale * ratio));
-      _cropState.userScale = newScale;
-      document.getElementById('cropZoomSlider').value = Math.round(newScale * 100);
-      const clamped = _clampCropOffset(_cropState.dx, _cropState.dy, newScale);
-      _cropState.dx = clamped.dx;
-      _cropState.dy = clamped.dy;
-      _drawCropPreview();
-    }
-    _cropState.touches = cur;
-  }, { passive: false });
-  c.addEventListener('touchend', e => {
-    if (_cropState) _cropState.touches = Array.from(e.touches);
-  }, { passive: true });
+  if (!_cs) return;
+  const { iW, iH, baseScale, frameLeft: fL, frameTop: fT, frameSize: fS } = _cs;
+  _cs.scale = baseScale;
+  _cs.tx = fL + (fS - iW * baseScale) / 2;
+  _cs.ty = fT + (fS - iH * baseScale) / 2;
+  _applyCropTransform();
 }
 // ── End crop / reframe ──────────────────────────────────────────────────────
 
