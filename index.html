@@ -2737,7 +2737,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-catalog-share';
+const _MERAKI_BUILD = '2026-06-28-full-bio-cards';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -4026,17 +4026,44 @@ async function _buildCatalogImage() {
   if (!selected.length) throw new Error('No products selected');
 
   const W = 1080;
-  // Each product card: image area + info panel + gap between cards
-  const IMG_H = 1350; // tall enough for full-length model, contain-fit (no crop)
-  const INFO_H = 460; // 4-line garment bio + name + price/sizes
+  const IMG_H = 1350; // tall enough for full-length model, contain-fit
   const GAP = 24;
   const PAD = 48;
-  const CARD_H = IMG_H + INFO_H;
-  const TOTAL_H = selected.length * CARD_H + (selected.length - 1) * GAP + GAP * 2;
+  const NAME_LH = 58, NAME_SIZE = 48;
+  const BIO_LH = 36, BIO_SIZE = 26;
+  const INFO_PAD_TOP = 36, INFO_PAD_BOT = 48;
+  const HEADER_H = GAP * 2;
 
+  // ── Phase 1: measure all product text to compute per-card info heights ────
+  // We need a scratch canvas to measure text before allocating the real one.
+  const mc = document.createElement('canvas');
+  mc.width = W;
+  const mctx = mc.getContext('2d');
+
+  const cardLayouts = selected.map(p => {
+    mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
+    const nameLines = _ctxMeasureLines(mctx, p.name || 'Untitled', W - PAD * 2).slice(0, 2);
+
+    const blurb = p.description_en || p.catalog_blurb || '';
+    mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
+    const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
+
+    const isSoldOut = !isProductAvailable(p);
+    const priceBlockH = isSoldOut ? 36 : 42 + 32;
+    const nameBlockH = nameLines.length * NAME_LH + 10;
+    const bioBlockH = bioLines.length > 0 ? bioLines.length * BIO_LH + 10 : 0;
+    const INFO_H = INFO_PAD_TOP + nameBlockH + bioBlockH + priceBlockH + INFO_PAD_BOT;
+
+    return { p, nameLines, bioLines, isSoldOut, INFO_H };
+  });
+
+  // ── Phase 2: compute total canvas height ──────────────────────────────────
+  const totalCardsH = cardLayouts.reduce((sum, c) => sum + IMG_H + c.INFO_H, 0);
+  const TOTAL_H = HEADER_H + totalCardsH + (selected.length - 1) * GAP + GAP;
+
+  // ── Phase 3: draw ─────────────────────────────────────────────────────────
   const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = TOTAL_H;
+  canvas.width = W; canvas.height = TOTAL_H;
   const ctx = canvas.getContext('2d');
 
   // Cream background
@@ -4045,16 +4072,15 @@ async function _buildCatalogImage() {
 
   // Header strip
   ctx.fillStyle = '#6B2737';
-  ctx.fillRect(0, 0, W, GAP * 2);
+  ctx.fillRect(0, 0, W, HEADER_H);
   ctx.fillStyle = '#fff';
   ctx.font = `600 28px "Playfair Display", serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText((catalogCollection || 'Collection') + ' · Meraki by Sam', W / 2, GAP);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText((catalogCollection || 'Collection') + ' · Meraki by Sam', W / 2, HEADER_H / 2);
 
-  for (let i = 0; i < selected.length; i++) {
-    const p = selected[i];
-    const cardTop = GAP * 2 + i * (CARD_H + GAP);
+  let cardTop = HEADER_H;
+  for (let i = 0; i < cardLayouts.length; i++) {
+    const { p, nameLines, bioLines, isSoldOut, INFO_H } = cardLayouts[i];
 
     // ── Image area ──────────────────────────────────────────────────────────
     ctx.fillStyle = '#f0ede8';
@@ -4065,7 +4091,6 @@ async function _buildCatalogImage() {
       try {
         const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
         const img = await _loadImgWithTimeout(proxied, 10000);
-        // CONTAIN — no cropping, full garment visible. Cream background shows in margins.
         const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
         const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
         const dx = (W - dw) / 2;
@@ -4074,8 +4099,7 @@ async function _buildCatalogImage() {
       } catch(_) {}
     }
 
-    // Sold stamp
-    const isSoldOut = !isProductAvailable(p);
+    // Sold / Reserved stamp
     if (isSoldOut || p.status === 'reserved') {
       const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
       const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
@@ -4092,31 +4116,26 @@ async function _buildCatalogImage() {
       ctx.restore();
     }
 
-    // Logo omitted per product card — model photos already carry the Meraki watermark.
-
     // ── Info panel ──────────────────────────────────────────────────────────
     const infoTop = cardTop + IMG_H;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, infoTop, W, INFO_H);
     ctx.fillStyle = '#f0ede8';
     ctx.fillRect(0, infoTop, W, 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, infoTop + 2, W, INFO_H - 2);
 
-    let ty = infoTop + 36;
-    // Name
+    let ty = infoTop + INFO_PAD_TOP;
     ctx.fillStyle = '#1a1a1a';
-    ctx.font = `600 48px "Playfair Display", serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    const nl = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 58, 2);
-    ty += nl * 58 + 10;
+    ctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    _ctxDrawLines(ctx, nameLines, PAD, ty, NAME_LH);
+    ty += nameLines.length * NAME_LH + 10;
 
-    // Garment bio — prefer the detailed upload analysis, fall back to catalog blurb
-    const blurb = p.description_en || p.catalog_blurb || '';
-    if (blurb) {
+    // Full garment bio — no truncation
+    if (bioLines.length) {
       ctx.fillStyle = '#555';
-      ctx.font = `italic 26px Inter, sans-serif`;
-      const bl = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 4);
-      ty += bl * 36 + 10;
+      ctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
+      _ctxDrawLines(ctx, bioLines, PAD, ty, BIO_LH);
+      ty += bioLines.length * BIO_LH + 10;
     }
 
     // Price / status
@@ -4135,11 +4154,13 @@ async function _buildCatalogImage() {
       ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
     }
 
-    // Card separator
-    if (i < selected.length - 1) {
+    // Gap / separator between cards
+    if (i < cardLayouts.length - 1) {
       ctx.fillStyle = '#e8e0d8';
       ctx.fillRect(0, infoTop + INFO_H, W, GAP);
     }
+
+    cardTop += IMG_H + INFO_H + GAP;
   }
 
   return canvas.toDataURL('image/jpeg', 0.90);
@@ -4200,8 +4221,34 @@ function _loadImgWithTimeout(src, ms) {
   });
 }
 
-// Helper: wrap text to maxLines, truncate last line with ellipsis if text overflows.
-// Returns the number of lines drawn (≤ maxLines).
+// Wrap text to lines with no limit — returns array of line strings, nothing drawn.
+// Use this for product bios where the layout must expand to fit all content.
+function _ctxMeasureLines(ctx, text, maxWidth) {
+  if (!text) return [];
+  const words = text.split(' ');
+  let line = '';
+  const lines = [];
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Draw all lines starting at (x, y) with lineHeight spacing — no truncation, no ellipsis.
+function _ctxDrawLines(ctx, lines, x, y, lineHeight) {
+  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+  return lines.length;
+}
+
+// Wrap text to maxLines with ellipsis on overflow — compact mode only.
+// Use for UI labels, card titles, and header strips where space is intentionally limited.
 function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   if (!text) return 0;
   const words = text.split(' ');
@@ -4219,14 +4266,12 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   }
   if (line && lines.length < maxLines) lines.push(line);
 
-  // If there are remaining words, the last line needs an ellipsis
   const allWords = text.split(' ');
   const drawnWords = lines.join(' ').split(' ').length;
   const hasOverflow = drawnWords < allWords.length;
 
   lines.forEach((l, i) => {
     if (hasOverflow && i === lines.length - 1) {
-      // Truncate last line to fit ellipsis
       let truncated = l;
       while (truncated.length > 0 && ctx.measureText(truncated + '…').width > maxWidth) {
         truncated = truncated.slice(0, truncated.lastIndexOf(' ') || truncated.length - 1);
@@ -4241,23 +4286,49 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
 
 async function _buildItemShareCard(p) {
   // Catalog-style layout: image on top, white info panel on bottom.
-  // 1080×1620 portrait — enough for full model + 4-line garment bio.
+  // Canvas height is dynamic — expands to fit the complete garment bio.
+  // No text truncation. No ellipsis on product bios.
   const W = 1080;
-  const H = 1620;
-  const IMG_H = 1150;  // top image area (~71% of height)
-  const INFO_Y = IMG_H;
-  const INFO_H = H - IMG_H; // 470px info panel
+  const IMG_H = 1150;
   const PAD = 52;
+  const NAME_LH = 62, NAME_SIZE = 52;
+  const BIO_LH = 38, BIO_SIZE = 26;
+  const INFO_PAD_TOP = 46, INFO_PAD_BOT = 56;
 
+  // ── Phase 1: measure text on a scratch canvas to compute layout ───────────
+  const mc = document.createElement('canvas');
+  mc.width = W;
+  const mctx = mc.getContext('2d');
+
+  mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
+  // Name: allow up to 2 lines (names are rarely long)
+  const allNameLines = _ctxMeasureLines(mctx, p.name || 'Untitled', W - PAD * 2);
+  const nameLines = allNameLines.slice(0, 2);
+
+  // Bio: full text, no limit — description_en is the canonical garment bio
+  const blurb = p.description_en || p.catalog_blurb || p.share_blurb || '';
+  mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
+  const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
+
+  // Compute info panel height to fit all content
+  const nameBlockH = nameLines.length * NAME_LH + 16;
+  const bioBlockH = bioLines.length > 0 ? bioLines.length * BIO_LH + 18 : 0;
+  // Price row: sold = 1 line; available = price + sizes = 2 rows
+  const priceBlockH = p.status === 'sold' ? 40 : 48 + 36;
+  const INFO_H = INFO_PAD_TOP + nameBlockH + bioBlockH + priceBlockH + INFO_PAD_BOT;
+  const H = IMG_H + INFO_H;
+
+  // ── Phase 2: create real canvas at final size ─────────────────────────────
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
+  const INFO_Y = IMG_H;
 
-  // ── Image area — cream background ────────────────────────────────────────
+  // ── Image area — cream background ─────────────────────────────────────────
   ctx.fillStyle = '#f5f0ea';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  // Load product photo — prefer already-loaded DOM element to avoid refetching large base64
+  // Load product photo — prefer already-loaded DOM element
   let imgEl = null;
   try {
     const domEl = document.getElementById('detailPhoto');
@@ -4274,63 +4345,52 @@ async function _buildItemShareCard(p) {
   }
   if (imgEl) {
     // CONTAIN — scale to fit completely within image area, no cropping.
-    // Cream background shows in any letterbox margins.
     const scale = Math.min(W / imgEl.naturalWidth, IMG_H / imgEl.naturalHeight);
     const dw = imgEl.naturalWidth * scale;
     const dh = imgEl.naturalHeight * scale;
-    // Vertically align to top with small padding so head has breathing room
     const dx = (W - dw) / 2;
     const dy = Math.max(16, (IMG_H - dh) / 2);
     ctx.drawImage(imgEl, dx, dy, dw, dh);
   }
 
-  // ── Sold / Reserved stamp — top-right corner of image (matches catalog style) ──
+  // ── Sold / Reserved stamp ─────────────────────────────────────────────────
   if (p.status === 'sold' || p.status === 'reserved') {
     const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
     const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
-    const fontSize = 28;
-    ctx.font = `bold ${fontSize}px "Playfair Display", serif`;
+    ctx.font = `bold 28px "Playfair Display", serif`;
     const textW = ctx.measureText(label).width;
     const sw = textW + 36, sh = 48;
     const sx = W - sw - 28, sy = 24;
     ctx.save();
     ctx.fillStyle = stampBg;
-    ctx.beginPath();
-    ctx.roundRect(sx, sy, sw, sh, 4);
-    ctx.fill();
+    ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, sx + sw / 2, sy + sh / 2);
     ctx.restore();
   }
 
-  // ── Thin separator line at top of info panel ─────────────────────────────
+  // ── Separator + white info panel ──────────────────────────────────────────
   ctx.fillStyle = '#f0ede8';
   ctx.fillRect(0, INFO_Y, W, 2);
-
-  // ── White info panel ──────────────────────────────────────────────────────
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, INFO_Y + 2, W, INFO_H - 2);
 
-  // ── Product name ──────────────────────────────────────────────────────────
-  let ty = INFO_Y + 46;
+  // ── Product name (max 2 lines) ────────────────────────────────────────────
+  let ty = INFO_Y + INFO_PAD_TOP;
   ctx.fillStyle = '#1a1a1a';
-  ctx.font = `600 52px "Playfair Display", serif`;
+  ctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const nameLines = _ctxWrapText(ctx, p.name || 'Untitled', PAD, ty, W - PAD * 2, 62, 2);
-  ty += nameLines * 62 + 16;
+  _ctxDrawLines(ctx, nameLines, PAD, ty, NAME_LH);
+  ty += nameLines.length * NAME_LH + 16;
 
-  // ── Garment bio for share card ────────────────────────────────────────────
-  // Priority: share_blurb (short, card-safe) → catalog_blurb → description_en
-  // All sources clamp to 4 lines with ellipsis — no invisible cutoff.
-  const blurb = p.share_blurb || p.catalog_blurb || p.description_en || '';
-  if (blurb) {
+  // ── Garment bio — full text, all lines, no truncation ────────────────────
+  if (bioLines.length) {
     ctx.fillStyle = '#555555';
-    ctx.font = `italic 26px Inter, sans-serif`;
-    const blurbLines = _ctxWrapText(ctx, blurb, PAD, ty, W - PAD * 2, 36, 4);
-    ty += blurbLines * 36 + 18;
+    ctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
+    _ctxDrawLines(ctx, bioLines, PAD, ty, BIO_LH);
+    ty += bioLines.length * BIO_LH + 18;
   }
 
   // ── Price / status ────────────────────────────────────────────────────────
@@ -4349,7 +4409,7 @@ async function _buildItemShareCard(p) {
     ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
   }
 
-  // Logo omitted — the generated model photo already carries the Meraki watermark.
+  // Logo omitted — model photo already carries the Meraki watermark.
 
   return canvas.toDataURL('image/jpeg', 0.92);
 }
