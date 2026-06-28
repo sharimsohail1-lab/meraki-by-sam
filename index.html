@@ -1177,7 +1177,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="customerSuggestOutput" style="display:none;margin-top:10px"></div>
     <div id="customerWhatsAppOutput" style="display:none">
       <div class="whatsapp-box" id="customerWhatsAppText"></div>
-      <button class="copy-btn" onclick="copyCustomerMsg()"><i class="ti ti-copy" style="font-size:15px"></i> Copy</button>
+      <button class="copy-btn" onclick="copyCustomerMsg(this)"><i class="ti ti-copy" style="font-size:15px"></i> Copy</button>
     </div>
     <button class="btn btn-red" style="margin-top:14px" onclick="deleteCustomer()"><i class="ti ti-trash"></i> Delete Customer</button>
   </div>
@@ -1272,7 +1272,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="sheet-handle"></div>
     <div class="sheet-title">WhatsApp Catalog</div>
     <div class="whatsapp-box" id="catalogText"></div>
-    <button class="copy-btn" onclick="copyCatalog()"><i class="ti ti-copy" style="font-size:15px"></i> Copy catalog</button>
+    <button class="copy-btn" onclick="copyCatalog(this)"><i class="ti ti-copy" style="font-size:15px"></i> Copy catalog</button>
     <a id="catalogWhatsAppLink" href="" target="_blank" class="btn btn-green" style="text-decoration:none;margin-top:10px"><i class="ti ti-brand-whatsapp"></i> Open WhatsApp</a>
   </div>
 </div>
@@ -2690,16 +2690,96 @@ function loadImg(src) {
   });
 }
 
-function triggerDownload(src, filename) {
-  // Open in a new tab — on mobile Safari PWA, <a download> navigates within the app
-  // and loses all state. A new tab preserves the app and lets the user save from there.
-  window.open(src, '_blank');
+// ─── DOWNLOAD HELPERS ─────────────────────────────────────────────────────────
+
+async function triggerDownload(src, filename) {
+  // Prefer anchor-click so the file saves with the right name.
+  // Falls back to window.open for Safari PWA where <a download> causes navigation.
+  try {
+    let blobUrl;
+    if (src.startsWith('blob:')) {
+      blobUrl = src; // already a blob URL
+    } else {
+      const res = await fetch(src);
+      const blob = await res.blob();
+      blobUrl = URL.createObjectURL(blob);
+    }
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'meraki-download';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (!src.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+  } catch(_) {
+    // Safari PWA fallback — open in new tab so user can long-press → Save
+    window.open(src, '_blank');
+  }
 }
 
-function downloadModelPhoto() {
-  const src = document.getElementById('modelPhotoImg').src;
-  if (!src) return;
-  triggerDownload(src, (currentAnalysis?.sku || 'model') + '-model.jpg');
+// Download a jsPDF pdf object
+async function _downloadPdf(pdf, filename) {
+  try {
+    const blob = pdf.output('blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'meraki-catalog.pdf';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch(_) {
+    pdf.save(filename); // jsPDF built-in fallback
+  }
+}
+
+// Set button to a temporary state then restore it
+function _btnState(btn, state, defaultHTML) {
+  if (!btn) return;
+  const states = {
+    loading: '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> ',
+    preparing: '<i class="ti ti-loader-2"></i> Preparing…',
+    success: '<i class="ti ti-check"></i> Done ✓',
+    downloaded: '<i class="ti ti-check"></i> Downloaded ✓',
+    copied: '<i class="ti ti-check"></i> Copied ✓',
+    error: '<i class="ti ti-alert-circle"></i> Failed',
+  };
+  if (state === 'busy') { btn.disabled = true; btn.innerHTML = states.loading; return; }
+  if (state === 'preparing') { btn.disabled = true; btn.innerHTML = states.preparing; return; }
+  if (state === 'success') { btn.disabled = true; btn.innerHTML = states.success; setTimeout(() => { btn.disabled = false; btn.innerHTML = defaultHTML; }, 1800); return; }
+  if (state === 'downloaded') { btn.disabled = true; btn.innerHTML = states.downloaded; setTimeout(() => { btn.disabled = false; btn.innerHTML = defaultHTML; }, 1800); return; }
+  if (state === 'copied') { btn.disabled = true; btn.innerHTML = states.copied; setTimeout(() => { btn.disabled = false; btn.innerHTML = defaultHTML; }, 1600); return; }
+  if (state === 'error') { btn.disabled = false; btn.innerHTML = states.error; setTimeout(() => { btn.innerHTML = defaultHTML; }, 2200); return; }
+  if (state === 'reset') { btn.disabled = false; btn.innerHTML = defaultHTML; }
+}
+
+// Copy text to clipboard with button feedback
+async function copyWithFeedback(text, btn, defaultHTML) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) _btnState(btn, 'copied', defaultHTML);
+    else showToast('Copied!');
+  } catch(e) {
+    showToast('Could not copy — please copy manually');
+  }
+}
+
+async function downloadModelPhoto() {
+  const src = document.getElementById('modelPhotoImg')?.src;
+  if (!src) { showToast('No image to download yet'); return; }
+  const btn = document.querySelector('#modelPhotoOutput .btn-secondary');
+  const def = '<i class="ti ti-download"></i> Download';
+  _btnState(btn, 'preparing', def);
+  try {
+    await triggerDownload(src, (currentAnalysis?.sku || 'model') + '-model.jpg');
+    _btnState(btn, 'downloaded', def);
+  } catch(e) {
+    _btnState(btn, 'error', def);
+    showToast('Download failed: ' + e.message);
+  }
 }
 
 // ─── FEEDBACK PANEL ───────────────────────────────────────────────────────────
@@ -3300,7 +3380,7 @@ Create a collection-level marketing package in this EXACT JSON format (no markdo
     const html = `<div class="pkg-saved-badge"><i class="ti ti-check"></i> Collection package ready — tap any section to copy</div>` +
       sections.map(s => `<div class="pkg-section">
         <div class="pkg-label">${s.label}
-          <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)})" title="Copy"><i class="ti ti-copy"></i></button>
+          <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)},this)" title="Copy"><i class="ti ti-copy"></i></button>
         </div>
         <div class="pkg-text ${s.cls}">${s.text}</div>
       </div>`).join('');
@@ -3802,7 +3882,7 @@ function buildPackageHTML(p) {
       return `<div class="pkg-section">
         <div class="pkg-label">${s.label}
           <span style="display:flex;gap:2px">
-            <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)})" title="Copy"><i class="ti ti-copy"></i></button>
+            <button class="pkg-copy" onclick="copyPkgField(${JSON.stringify(s.text)},this)" title="Copy"><i class="ti ti-copy"></i></button>
             <button class="pkg-edit-btn" onclick="togglePkgEdit('${edId}')" title="Edit"><i class="ti ti-pencil"></i></button>
           </span>
         </div>
@@ -3815,8 +3895,12 @@ function buildPackageHTML(p) {
     }).join('');
 }
 
-function copyPkgField(text) {
-  navigator.clipboard.writeText(text).then(() => showToast('Copied!'));
+function copyPkgField(text, btn) {
+  const def = '<i class="ti ti-copy"></i>';
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) _btnState(btn, 'copied', def);
+    else showToast('Copied!');
+  }).catch(() => showToast('Could not copy'));
 }
 
 function togglePkgEdit(edId) {
@@ -4273,7 +4357,8 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
 // Download catalog as PDF — cover page + one page per product
 async function downloadCatalogPDF() {
   const btn = document.getElementById('catDownloadBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
+  const def = '<i class="ti ti-file-type-pdf"></i> PDF';
+  _btnState(btn, 'preparing', def);
   try {
     const { pages, collName, W, H } = await _buildCatalogPages();
     if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
@@ -4284,51 +4369,30 @@ async function downloadCatalogPDF() {
       pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
     });
     const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
-    pdf.save(`Meraki-${safeName}-Catalog.pdf`);
+    await _downloadPdf(pdf, `Meraki-${safeName}-Catalog.pdf`);
+    _btnState(btn, 'downloaded', def);
   } catch(e) {
     console.error('[Catalog] PDF download failed', e);
+    _btnState(btn, 'error', def);
     showToast('Could not generate PDF: ' + e.message);
   }
-  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-type-pdf"></i> PDF'; }
 }
 
 async function shareCatalogWithAsset() {
   const btn = document.getElementById('catShareBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
+  const def = '<i class="ti ti-share"></i>';
+  _btnState(btn, 'preparing', def);
 
-  const msg = _catalogWhatsAppMessage();
+  // Clean message — no blob URLs, no internal URLs
+  const collName = catalogCollection || 'Collection';
+  const shareTitle = collName + ' — Meraki by Sam';
+  const shareText = _catalogWhatsAppMessage();
 
   try {
-    const { pages, collName, W, H } = await _buildCatalogPages();
-    const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
+    const { pages, W, H } = await _buildCatalogPages();
+    const safeName = collName.replace(/[^a-z0-9]/gi, '-');
     const filename = `Meraki-${safeName}-Catalog.pdf`;
 
-    // Try to share as PDF first
-    if (window.jspdf && typeof navigator.share === 'function') {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
-      pages.forEach((page, i) => {
-        if (i > 0) pdf.addPage([W, H]);
-        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
-      });
-      const pdfBlob = pdf.output('blob');
-      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
-      const shareData = { title: collName || 'Meraki by Sam', text: msg, files: [pdfFile] };
-
-      if (navigator.canShare && navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
-        return;
-      }
-      // PDF file share not supported — try text only and download PDF
-      pdf.save(filename);
-      await navigator.share({ title: shareData.title, text: msg });
-      showToast('PDF saved to Files — attach it in WhatsApp alongside this message.');
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
-      return;
-    }
-
-    // No Web Share API or jsPDF not loaded — download PDF and open WhatsApp
     if (window.jspdf) {
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
@@ -4336,20 +4400,46 @@ async function shareCatalogWithAsset() {
         if (i > 0) pdf.addPage([W, H]);
         pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
       });
-      pdf.save(filename);
-      setTimeout(() => window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank'), 800);
-      showToast('PDF downloaded — send it in WhatsApp with the copied message.');
+
+      if (typeof navigator.share === 'function') {
+        const pdfBlob = pdf.output('blob');
+        const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+        const shareData = { title: shareTitle, text: shareText, files: [pdfFile] };
+
+        if (navigator.canShare && navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          _btnState(btn, 'success', def);
+          return;
+        }
+        // Files not supported — download PDF + share text only
+        await _downloadPdf(pdf, filename);
+        await navigator.share({ title: shareTitle, text: shareText });
+        showToast('PDF downloaded — attach it in WhatsApp.');
+        _btnState(btn, 'success', def);
+        return;
+      }
+
+      // No Web Share — download PDF + open WhatsApp
+      await _downloadPdf(pdf, filename);
+      setTimeout(() => window.open('https://wa.me/?text=' + encodeURIComponent(shareText), '_blank'), 600);
+      showToast('PDF downloaded — send it in WhatsApp.');
+      _btnState(btn, 'downloaded', def);
     } else {
-      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
-      showToast('PDF library not loaded. Opened WhatsApp with catalog message.');
+      // jsPDF not loaded — share text only
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: shareTitle, text: shareText });
+      } else {
+        window.open('https://wa.me/?text=' + encodeURIComponent(shareText), '_blank');
+      }
+      showToast('PDF library not loaded. Shared catalog message only.');
+      _btnState(btn, 'reset', def);
     }
   } catch(e) {
-    if (e.name !== 'AbortError') {
-      console.error('[Catalog] Share failed', e);
-      showToast('Could not share: ' + e.message);
-    }
+    if (e.name === 'AbortError') { _btnState(btn, 'reset', def); return; }
+    console.error('[Catalog] Share failed', e);
+    _btnState(btn, 'error', def);
+    showToast('Could not share: ' + e.message);
   }
-  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-share"></i>'; }
 }
 
 function _loadImgWithTimeout(src, ms) {
@@ -4552,6 +4642,20 @@ async function _buildItemShareCard(p) {
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
+async function _downloadShareCard(filename, btn) {
+  const src = window._currentShareCardUrl;
+  if (!src) { showToast('No image ready yet'); return; }
+  const def = '<i class="ti ti-download"></i> Download Image';
+  _btnState(btn, 'preparing', def);
+  try {
+    await triggerDownload(src, filename);
+    _btnState(btn, 'downloaded', def);
+  } catch(e) {
+    _btnState(btn, 'error', def);
+    showToast('Download failed: ' + e.message);
+  }
+}
+
 async function _shareItemCard(dataUrl, caption, productName) {
   const filename = 'Meraki-' + (productName || 'piece').replace(/[^a-z0-9]/gi, '-') + '.jpg';
   if (typeof navigator.share === 'function') {
@@ -4619,7 +4723,7 @@ async function openMktShareWorkspace() {
       `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
         ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
-        <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${safeName}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
+        <button id="shareCardDownloadBtn" onclick="_downloadShareCard('Meraki-${safeName}.jpg',this)" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
       </div>
       ${!canWebShare ? '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Download the image and copy a caption below to share.</div>' : ''}
       <div style="text-align:center;margin-top:14px;margin-bottom:2px">
@@ -4947,10 +5051,19 @@ async function generateDetailModelPhoto() {
   currentAnalysis = tempAnalysis;
 }
 
-function downloadDetailModel() {
-  const src = document.getElementById('detailModelImg').src;
-  if (!src) return;
-  triggerDownload(src, (currentProduct?.sku || 'model') + '-model.jpg');
+async function downloadDetailModel() {
+  const src = document.getElementById('detailModelImg')?.src;
+  if (!src) { showToast('No image to download'); return; }
+  const btn = document.querySelector('#detailModelOutput .copy-btn');
+  const def = '<i class="ti ti-download" style="font-size:15px"></i>';
+  _btnState(btn, 'preparing', def);
+  try {
+    await triggerDownload(src, (currentProduct?.sku || 'model') + '-model.jpg');
+    _btnState(btn, 'downloaded', def);
+  } catch(e) {
+    _btnState(btn, 'error', def);
+    showToast('Download failed: ' + e.message);
+  }
 }
 
 async function saveDetailModelPhoto(btn) {
@@ -4990,8 +5103,10 @@ async function generateWhatsAppCatalog() {
   } catch(e) { textEl.textContent = 'Error: ' + e.message; }
 }
 
-function copyCatalog() {
-  navigator.clipboard.writeText(document.getElementById('catalogText').textContent).then(() => showToast('Copied!'));
+function copyCatalog(btn) {
+  const text = document.getElementById('catalogText')?.textContent || '';
+  const def = '<i class="ti ti-copy" style="font-size:15px"></i> Copy catalog';
+  copyWithFeedback(text, btn, def);
 }
 
 // ─── PEOPLE / CUSTOMERS ───────────────────────────────────────────────────────
@@ -5114,8 +5229,10 @@ async function generateCustomerWhatsApp() {
   } catch(e) { textEl.textContent = 'Error: ' + e.message; }
 }
 
-function copyCustomerMsg() {
-  navigator.clipboard.writeText(document.getElementById('customerWhatsAppText').textContent).then(() => showToast('Copied!'));
+function copyCustomerMsg(btn) {
+  const text = document.getElementById('customerWhatsAppText')?.textContent || '';
+  const def = '<i class="ti ti-copy" style="font-size:15px"></i> Copy';
+  copyWithFeedback(text, btn, def);
 }
 
 async function deleteCustomer() {
