@@ -4071,12 +4071,17 @@ Very short story text (1-2 lines max). Suitable for an Instagram story. If avail
       ? `<div style="font-size:11px;color:#C08000;background:#FFF8E1;border-radius:6px;padding:6px 10px;margin-bottom:10px">${warn.join(' · ')}</div>`
       : '';
 
-    const section = (label, text) => text ? `
-      <div style="margin-bottom:12px">
+    window._shareTexts = [];
+    const section = (label, text) => {
+      if (!text) return '';
+      const idx = window._shareTexts.length;
+      window._shareTexts.push(text);
+      return `<div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}</div>
-        <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text}</div>
-        <button onclick="navigator.clipboard.writeText(${JSON.stringify(text)}).then(()=>showToast('Copied'))" style="margin-top:4px;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0"><i class="ti ti-copy"></i> Copy</button>
-      </div>` : '';
+        <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text.replace(/</g,'&lt;')}</div>
+        <button onclick="navigator.clipboard.writeText(window._shareTexts[${idx}]).then(()=>showToast('Copied'))" style="margin-top:6px;background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:11px;color:var(--burgundy);cursor:pointer;padding:3px 12px"><i class="ti ti-copy"></i> Copy</button>
+      </div>`;
+    };
 
     output.innerHTML = warnHTML + section('WhatsApp', whatsapp) + section('Instagram Caption', instagram) + section('Story Text', story);
   } catch(e) {
