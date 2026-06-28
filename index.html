@@ -942,7 +942,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div id="detailFashnRetryRow" style="display:none;margin-bottom:6px">
           <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('detailModelImg','detailModelOutput','detailModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
         </div>
-        <button class="copy-btn" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i> Download photo</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-primary" style="flex:1" id="saveDetailModelBtn" onclick="saveDetailModelPhoto(this)"><i class="ti ti-device-floppy"></i> Save to product</button>
+          <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
+        </div>
       </div>
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
@@ -954,7 +957,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Notes</div>
       <textarea id="detailNotesInput" class="field-input" placeholder="Any notes..."></textarea>
       <button class="btn btn-primary" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
-      <button class="btn btn-red" onclick="deleteProduct()"><i class="ti ti-trash"></i> Remove from Inventory</button>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #f0d0d0">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:#c0392b;text-transform:uppercase;margin-bottom:8px">Danger Zone</div>
+        <button class="btn" style="width:100%;background:#fff;color:#c0392b;border:1.5px solid #c0392b;font-weight:600" onclick="openSheet('deleteProductSheet')"><i class="ti ti-trash"></i> Delete Product</button>
+      </div>
     </div>
   </div>
 </div>
@@ -988,6 +994,28 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Tap a product to select or deselect it.</div>
     <div id="collAddPiecesGrid" style="display:flex;flex-direction:column;gap:8px"></div>
     <button class="btn btn-primary" style="width:100%;margin-top:14px" onclick="saveCollAddPieces()"><i class="ti ti-check"></i> Add Selected</button>
+  </div>
+</div>
+
+<!-- SAVE WITHOUT MODEL PHOTO CONFIRMATION -->
+<div class="sheet-overlay" id="saveWithoutModelSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px">Model photo is still generating</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Wait for the model photo to finish, or save now without it. You can always generate a model photo later from Stock.</div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('saveWithoutModelSheet')"><i class="ti ti-clock"></i> Wait</button>
+    <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeSheet('saveWithoutModelSheet');_isGeneratingModelPhoto=false;_doSaveProduct()">Save without model photo</button>
+  </div>
+</div>
+
+<!-- DELETE PRODUCT CONFIRMATION -->
+<div class="sheet-overlay" id="deleteProductSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px">Delete Product?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will remove this item from Stock and any collection. <strong>This cannot be undone.</strong></div>
+    <button class="btn" id="confirmDeleteProductBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px" onclick="deleteProduct()"><i class="ti ti-trash"></i> Delete Product</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('deleteProductSheet')">Cancel</button>
   </div>
 </div>
 
@@ -2217,6 +2245,14 @@ Return only the JSON object. No explanation, no markdown fences.` }
 
 async function saveProduct() {
   if (!currentAnalysis) return;
+  if (_isGeneratingModelPhoto) {
+    openSheet('saveWithoutModelSheet');
+    return;
+  }
+  _doSaveProduct();
+}
+
+async function _doSaveProduct() {
   const btn = document.getElementById('saveProductBtn');
   btn.disabled = true;
   btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
@@ -2473,6 +2509,7 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
 }
 
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
+  if (btnId === 'genModelBtn') _isGeneratingModelPhoto = true;
   setLoading(btnId, true, '');
   try {
     const uploadCount = Object.keys(uploadedPhotos).length;
@@ -2536,6 +2573,7 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
   } catch(e) {
     showToast('Photo generation failed: ' + e.message);
   }
+  if (btnId === 'genModelBtn') _isGeneratingModelPhoto = false;
   setLoading(btnId, false, '<i class="ti ti-user"></i> <span id="t-genModel">' + T[lang].genModel + '</span>');
 }
 
@@ -3027,6 +3065,7 @@ async function saveCollAddPieces() {
 
 const DETAIL_PHOTO_LABELS = ['Neckline', 'Sleeves', 'Hemline / Border', 'Back View', 'Dupatta', 'Embroidery', 'Lining', 'Buttons / Hooks', 'Mirror Work', 'Full Look'];
 let _pendingDetailPhotoLabel = null;
+let _isGeneratingModelPhoto = false;
 
 function _renderDetailPhotoInsets() {
   const insetsEl = document.getElementById('detailPhotoInsets');
@@ -3607,14 +3646,21 @@ async function saveProductEdits() {
 
 async function deleteProduct() {
   if (!currentProduct) return;
-  if (!confirm('Remove ' + currentProduct.name + ' from inventory?')) return;
+  const btn = document.getElementById('confirmDeleteProductBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
   try {
     await db('delete', 'products', { id: currentProduct.id });
-    inventory = inventory.filter(p => p.id !== currentProduct.id);
+    const deletedId = currentProduct.id;
+    inventory = inventory.filter(p => p.id !== deletedId);
+    closeSheet('deleteProductSheet');
     closeSheet('productDetailSheet');
     renderInventory();
-    showToast('Removed');
-  } catch(e) { showToast('Error: ' + e.message); }
+    if (typeof renderCollections === 'function') renderCollections();
+    showToast('Product deleted');
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Delete Product'; }
+    showToast('Delete failed: ' + e.message);
+  }
 }
 
 // ─── MARKETING PACKAGE ───────────────────────────────────────────────────────
@@ -4004,6 +4050,28 @@ function downloadDetailModel() {
   const src = document.getElementById('detailModelImg').src;
   if (!src) return;
   triggerDownload(src, (currentProduct?.sku || 'model') + '-model.jpg');
+}
+
+async function saveDetailModelPhoto(btn) {
+  if (!currentProduct) return;
+  const src = document.getElementById('detailModelImg').src;
+  if (!src) return;
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: { model_photo: src } });
+    const idx = inventory.findIndex(p => p.id === currentProduct.id);
+    inventory[idx] = { ...inventory[idx], model_photo: src };
+    currentProduct = inventory[idx];
+    document.getElementById('detailPhoto').src = src;
+    document.getElementById('detailPhoto').style.display = 'block';
+    showToast('Model photo saved');
+    btn.innerHTML = '<i class="ti ti-check"></i> Saved';
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to product';
+    showToast('Save failed: ' + e.message);
+  }
 }
 
 // ─── WHATSAPP CATALOG ─────────────────────────────────────────────────────────
