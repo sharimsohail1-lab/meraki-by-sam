@@ -2734,7 +2734,9 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
+const _MERAKI_BUILD = '2026-06-28-mktshare';
 async function init() {
+  console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
   if (MERAKI_LOGO_SRC) {
     document.getElementById('headerLogo').src = MERAKI_LOGO_SRC;
@@ -4192,10 +4194,11 @@ async function _shareItemCard(dataUrl, caption, productName) {
 
 
 async function openMktShareWorkspace() {
+  console.log('[ProductDetail] Marketing & Share clicked — build:', _MERAKI_BUILD);
   const p = currentProduct;
   if (!p) return;
   const output = document.getElementById('mktShareOutput');
-  if (!output) return;
+  if (!output) { console.error('[ProductShare] mktShareOutput container not found'); return; }
 
   window._shareTexts = [];
   window._currentShareCardUrl = null;
@@ -4207,7 +4210,7 @@ async function openMktShareWorkspace() {
   output.innerHTML =
     `<div id="mktCardSection" style="margin-bottom:18px">
       <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Share Image</div>
-      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
+      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">DEBUG: Share card section rendered — building image…</div>
     </div>
     <div id="mktCopySection" style="margin-bottom:14px">
       ${hasPkg ? buildPackageHTML(p) : '<div style="font-size:13px;color:var(--muted);padding:4px 0">No marketing copy yet — tap Generate below.</div>'}
@@ -4239,8 +4242,9 @@ async function openMktShareWorkspace() {
       </div>
       ${!canWebShare ? '<div style="font-size:11px;color:var(--muted)">Download the image and copy a caption below to share.</div>' : ''}`;
   } catch(e) {
+    console.error('[ProductShare] share card render failed', e);
     const cardEl = document.getElementById('mktCardArea');
-    if (cardEl) cardEl.innerHTML = '<div style="font-size:12px;color:var(--muted)">Could not generate share image. Copy the captions below.</div>';
+    if (cardEl) cardEl.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">Could not generate share image: ${e.message}. You can still copy the captions below.</div>`;
   }
 }
 
