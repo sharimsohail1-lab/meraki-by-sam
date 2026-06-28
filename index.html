@@ -1058,6 +1058,25 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- DETAIL PHOTO LIGHTBOX -->
+<div id="detailPhotoLightbox" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.92);flex-direction:column;align-items:center;justify-content:flex-start;overflow-y:auto" onclick="_closeLightboxOutside(event)">
+  <div style="width:100%;max-width:480px;padding:16px 16px 40px;display:flex;flex-direction:column;align-items:center">
+    <div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div id="lbLabel" style="color:#fff;font-size:15px;font-weight:600;font-family:'Playfair Display',serif"></div>
+      <button onclick="closeDetailPhotoLightbox()" style="background:rgba(255,255,255,0.12);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="ti ti-x"></i></button>
+    </div>
+    <img id="lbImage" src="" alt="" style="width:100%;max-width:420px;border-radius:12px;object-fit:contain;max-height:60vh;background:#222">
+    <div id="lbCleanBadge" style="display:none;margin-top:8px;font-size:11px;color:#a8e6a3;font-weight:600"><i class="ti ti-sparkles"></i> Background cleaned</div>
+    <div style="width:100%;margin-top:16px;display:flex;flex-direction:column;gap:10px">
+      <button id="lbInsetBtn" onclick="_lbToggleInset()" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"></button>
+      <button id="lbCleanBtn" onclick="_lbCleanBackground()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-wand"></i> Clean background</button>
+      <button onclick="_lbReplacePhoto()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Replace photo</button>
+      <button onclick="_lbDeletePhoto()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(220,80,80,0.4);background:rgba(220,80,80,0.12);color:#f88;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-trash"></i> Delete photo</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="lbReplaceFileInput" accept="image/*" style="display:none" onchange="_lbHandleReplace(this)">
+
 <!-- COLLECTION ADD PIECES SHEET -->
 <div class="sheet-overlay" id="collAddPiecesSheet" onclick="closeSheetOutside(event,'collAddPiecesSheet')">
   <div class="sheet">
@@ -2508,11 +2527,10 @@ async function _doSaveProduct() {
   });
   const _insetSet = new Set(_insetCandidates.slice(0, 2).map(e => e._id));
 
-  let _insetOrder = 1;
-  const detailPhotosArr = allDetails.map(e => {
-    const isInset = _insetSet.has(e._id);
-    return { slot: e.slot, label: e.label, image: e.image, useAsInset: isInset, insetOrder: isInset ? _insetOrder++ : null, source: e.source };
-  });
+  // All onboarding detail photos save as useAsInset: false — Sam chooses in Product Detail
+  const detailPhotosArr = allDetails.map(e => ({
+    slot: e.slot, label: e.label, image: e.image, useAsInset: false, insetOrder: null, source: e.source
+  }));
   const detail_photos = detailPhotosArr.length ? JSON.stringify(detailPhotosArr) : null;
 
   // Collect size inventory from intake steppers (only save if any size > 0)
@@ -2833,13 +2851,113 @@ function viewReferenceImage() {
   w.document.close();
 }
 
+let _lbCurrentIdx = null;
+
 function _openDetailPhotoLightbox(idx) {
   const photos = window._detailInsetPhotos || [];
   const d = photos[idx];
   if (!d) return;
-  const w = window.open('', '_blank');
-  w.document.write(`<html><body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh"><img src="${d.image}" style="max-width:100%;max-height:90vh;object-fit:contain"><p style="color:#fff;font-family:sans-serif;margin:10px">${d.label}</p></body></html>`);
-  w.document.close();
+  _lbCurrentIdx = idx;
+  _lbRefresh();
+  const lb = document.getElementById('detailPhotoLightbox');
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function _lbRefresh() {
+  const photos = window._detailInsetPhotos || [];
+  const d = photos[_lbCurrentIdx];
+  if (!d) { closeDetailPhotoLightbox(); return; }
+  document.getElementById('lbLabel').textContent = d.label;
+  document.getElementById('lbImage').src = d.cleanedImage || d.image;
+  const badge = document.getElementById('lbCleanBadge');
+  badge.style.display = d.cleanedImage ? 'block' : 'none';
+  const insetBtn = document.getElementById('lbInsetBtn');
+  if (d.useAsInset) {
+    insetBtn.textContent = '✓ Showing in share/catalog';
+    insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--burgundy);color:#fff';
+  } else {
+    insetBtn.textContent = 'Use in share/catalog';
+    insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--sand-light,#f5f0ea);color:var(--text)';
+  }
+  const cleanBtn = document.getElementById('lbCleanBtn');
+  cleanBtn.disabled = false;
+  cleanBtn.innerHTML = d.cleanedImage ? '<i class="ti ti-wand"></i> Re-clean background' : '<i class="ti ti-wand"></i> Clean background';
+}
+
+function _closeLightboxOutside(e) {
+  if (e.target === document.getElementById('detailPhotoLightbox')) closeDetailPhotoLightbox();
+}
+
+function closeDetailPhotoLightbox() {
+  document.getElementById('detailPhotoLightbox').style.display = 'none';
+  document.body.style.overflow = '';
+  _lbCurrentIdx = null;
+}
+
+async function _lbToggleInset() {
+  if (_lbCurrentIdx === null) return;
+  const btn = document.getElementById('lbInsetBtn');
+  const origHTML = btn.innerHTML;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    await toggleDetailPhotoInset(_lbCurrentIdx);
+    _lbRefresh();
+  } catch(_) {
+    btn.disabled = false; btn.innerHTML = origHTML;
+  }
+}
+
+async function _lbCleanBackground() {
+  if (_lbCurrentIdx === null) return;
+  const btn = document.getElementById('lbCleanBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Cleaning…';
+  try {
+    await cleanDetailPhotoBackground(_lbCurrentIdx);
+    _lbRefresh();
+    _renderDetailPhotoInsets();
+  } catch(err) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-wand"></i> Clean background';
+    showToast('Could not clean background: ' + err.message);
+  }
+}
+
+function _lbReplacePhoto() {
+  if (_lbCurrentIdx === null) return;
+  window._lbReplaceIdx = _lbCurrentIdx;
+  const inp = document.getElementById('lbReplaceFileInput');
+  inp.value = ''; inp.click();
+}
+
+async function _lbHandleReplace(input) {
+  const file = input.files[0];
+  const idx = window._lbReplaceIdx;
+  if (!file || idx === null || idx === undefined) return;
+  const photos = window._detailInsetPhotos || [];
+  if (!photos[idx]) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const dataUrl = e.target.result;
+    photos[idx] = { ...photos[idx], image: dataUrl, cleanedImage: undefined, cleanedAt: undefined, cleanMethod: undefined };
+    try {
+      await _saveDetailPhotos();
+      _lbRefresh();
+      _renderDetailPhotoInsets();
+      showToast('Photo replaced');
+    } catch(err) {
+      showToast('Could not replace photo: ' + err.message);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _lbDeletePhoto() {
+  if (_lbCurrentIdx === null) return;
+  const idx = _lbCurrentIdx;
+  closeDetailPhotoLightbox();
+  await deleteDetailPhoto(idx);
 }
 
 async function applyWatermark(imageUrl) {
@@ -3047,7 +3165,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-analysis-normalize';
+const _MERAKI_BUILD = '2026-06-28-inset-ux-v2';
 async function init() {
   console.log('[Meraki Build]', _MERAKI_BUILD);
   // Inject logo
@@ -3726,29 +3844,43 @@ function _renderDetailPhotoInsets() {
   const insetsEl = document.getElementById('detailPhotoInsets');
   if (!insetsEl) return;
   const photos = window._detailInsetPhotos || [];
-  const thumbs = photos.map((d, i) => {
+
+  // Section header only when there are photos
+  let html = '';
+  if (photos.length) {
+    html += `<div style="width:100%;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em;margin-bottom:4px;text-transform:uppercase">Detail Photos</div>`;
+  }
+
+  const thumbsHtml = photos.map((d, i) => {
     const isInset = !!d.useAsInset;
-    const pillStyle = isInset
-      ? 'background:var(--burgundy);color:#fff;border:none'
-      : 'background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border)';
+    const hasCleaned = !!d.cleanedImage;
+    const thumbSrc = d.cleanedImage || d.image;
+    const borderColor = isInset ? 'var(--burgundy)' : 'var(--border)';
+    const borderWidth = isInset ? '2px' : '1px';
+    const insetPill = isInset
+      ? `<div style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);background:var(--burgundy);color:#fff;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap;pointer-events:none">In share</div>`
+      : '';
+    const cleanedDot = hasCleaned
+      ? `<div style="position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#a8e6a3;border:1px solid rgba(0,0,0,.15)" title="Background cleaned"></div>`
+      : '';
     return `
-    <div id="_detailThumb_${i}" style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
-      <div style="position:relative">
-        <img src="${d.image}" onclick="_openDetailPhotoLightbox(${i})" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${isInset ? '2px solid var(--burgundy)' : '1px solid var(--border)'};cursor:pointer;display:block">
-        <button onclick="deleteDetailPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--error,#c0392b);color:white;border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;touch-action:manipulation" title="Remove photo"><i class="ti ti-x"></i></button>
+    <div id="_detailThumb_${i}" style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px">
+      <div style="position:relative;cursor:pointer" onclick="_openDetailPhotoLightbox(${i})">
+        <img src="${thumbSrc}" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${borderWidth} solid ${borderColor};display:block">
+        ${insetPill}
+        ${cleanedDot}
       </div>
-      <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
-      <button id="insetToggleBtn_${i}" onclick="toggleDetailPhotoInset(${i})" style="width:72px;font-size:9px;font-weight:600;padding:3px 0;border-radius:4px;cursor:pointer;margin-top:2px;touch-action:manipulation;${pillStyle}">
-        ${isInset ? '✓ Inset' : 'Inset'}
-      </button>
+      <div style="font-size:9px;color:var(--muted);text-align:center;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
     </div>`;
   }).join('');
-  const addBtn = `<div onclick="openDetailPhotoPicker()" style="flex:0 0 auto;cursor:pointer;display:flex;flex-direction:column;align-items:center">
-    <div style="width:72px;height:72px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px"><i class="ti ti-plus"></i></div>
-    <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">Add detail</div>
+
+  const addBtn = `<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px">
+    <div onclick="openDetailPhotoPicker()" style="cursor:pointer;width:72px;height:72px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px"><i class="ti ti-plus"></i></div>
+    <div style="font-size:9px;color:var(--muted);text-align:center;width:72px">Add detail</div>
   </div>`;
-  insetsEl.innerHTML = thumbs + addBtn;
-  insetsEl.style.display = 'flex';
+
+  insetsEl.innerHTML = html + `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">` + thumbsHtml + addBtn + `</div>`;
+  insetsEl.style.display = 'block';
 }
 
 function openDetailPhotoPicker() {
@@ -3791,15 +3923,12 @@ async function handleDetailPhotoFile(input) {
   reader.onload = async e => {
     const dataUrl = e.target.result;
     window._detailInsetPhotos = window._detailInsetPhotos || [];
-    const currentInsets = window._detailInsetPhotos.filter(d => d.useAsInset === true);
-    const useAsInset = currentInsets.length < 2;
-    const insetOrder = useAsInset ? currentInsets.length + 1 : null;
     window._detailInsetPhotos.push({
       slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'),
       label,
       image: dataUrl,
-      useAsInset,
-      insetOrder,
+      useAsInset: false,
+      insetOrder: null,
       source: 'product_detail',
     });
     try {
@@ -3831,28 +3960,81 @@ async function deleteDetailPhoto(idx) {
   }
 }
 
+// Returns without rendering — callers (_lbToggleInset, direct use) handle re-render
 async function toggleDetailPhotoInset(idx) {
   const photos = window._detailInsetPhotos || [];
   if (!photos[idx]) return;
-  const btn = document.getElementById('insetToggleBtn_' + idx);
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   const prev = !!photos[idx].useAsInset;
+  // Enforce max 2 active insets
+  const activeCount = photos.filter(d => d.useAsInset).length;
+  if (!prev && activeCount >= 2) {
+    showToast('Max 2 insets. Turn one off first.');
+    return;
+  }
   photos[idx] = { ...photos[idx], useAsInset: !prev };
-  // Recalculate insetOrder for all active insets in array order
   let order = 1;
   photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order++; } else { d.insetOrder = null; } });
   try {
     await _saveDetailPhotos();
-    _renderDetailPhotoInsets();
-    showToast(!prev ? 'Will appear in share cards and catalog' : 'Removed from share cards and catalog');
+    showToast(!prev ? 'Will appear in share/catalog' : 'Removed from share/catalog');
   } catch(err) {
-    // Revert flip and recalculate
     photos[idx] = { ...photos[idx], useAsInset: prev };
     let order2 = 1;
     photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order2++; } else { d.insetOrder = null; } });
-    _renderDetailPhotoInsets();
-    showToast('Could not save: ' + err.message);
+    throw err;
   }
+  _renderDetailPhotoInsets();
+}
+
+// Real ML background removal via @imgly/background-removal (CDN, lazy-loaded).
+// Runs entirely in the browser — no API key, no external call, ~40MB WASM on first use.
+// Called only when Sam explicitly taps "Clean background".
+let _imglyBgRemoval = null;
+async function cleanDetailPhotoBackground(idx) {
+  const photos = window._detailInsetPhotos || [];
+  const d = photos[idx];
+  if (!d) throw new Error('photo not found');
+
+  // Lazy-load the library first time only
+  if (!_imglyBgRemoval) {
+    showToast('Loading background removal (first time only, ~40 MB)…');
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/web/index.mjs');
+      _imglyBgRemoval = mod;
+    } catch(loadErr) {
+      throw new Error('Could not load background removal library: ' + loadErr.message);
+    }
+  }
+
+  const { removeBackground } = _imglyBgRemoval;
+
+  // Convert dataUrl → Blob for the library
+  const res = await fetch(d.image);
+  const blob = await res.blob();
+
+  let resultBlob;
+  try {
+    resultBlob = await removeBackground(blob, {
+      model: 'medium',          // medium = best quality/speed tradeoff
+      output: { format: 'image/png' }
+    });
+  } catch(rmErr) {
+    console.warn('[INSET BACKGROUND CLEANUP] failed', { label: d.label, slot: d.slot, method: 'imgly', reason: rmErr?.message || rmErr });
+    throw new Error('Background removal failed: ' + (rmErr?.message || 'unknown error'));
+  }
+
+  // Convert result Blob → data URL
+  const cleanedDataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(resultBlob);
+  });
+
+  photos[idx] = { ...photos[idx], cleanedImage: cleanedDataUrl, cleanedAt: new Date().toISOString(), cleanMethod: 'imgly' };
+  await _saveDetailPhotos();
+
+  console.log('[INSET BACKGROUND CLEANUP] success', { label: d.label, method: 'imgly', hasCleanedImage: true });
 }
 
 async function _saveDetailPhotos() {
@@ -4922,23 +5104,10 @@ function _parseDetailPhotosForInsets(p) {
   } catch(_) { return []; }
   if (!arr.length) return [];
 
-  let insets = arr.filter(d => d.useAsInset === true);
-
-  // Fallback: if nothing is explicitly toggled, auto-pick the best 1 by label
-  if (!insets.length) {
-    const KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'buttons', 'mirror'];
-    const best = arr.slice().sort((a, b) => {
-      const la = (a.label || a.slot || '').toLowerCase();
-      const lb = (b.label || b.slot || '').toLowerCase();
-      const sa = KEYS.findIndex(k => la.includes(k));
-      const sb = KEYS.findIndex(k => lb.includes(k));
-      return (sa === -1 ? 999 : sa) - (sb === -1 ? 999 : sb);
-    });
-    const lc = (best[0]?.label || best[0]?.slot || '').toLowerCase();
-    if (best[0] && KEYS.some(k => lc.includes(k))) insets = [best[0]];
-  }
-
-  insets.sort((a, b) => (a.insetOrder ?? 999) - (b.insetOrder ?? 999));
+  // Only render insets Sam explicitly enabled — no auto-pick fallback
+  const insets = arr
+    .filter(d => d.useAsInset === true)
+    .sort((a, b) => (a.insetOrder ?? 999) - (b.insetOrder ?? 999));
   return insets.slice(0, 2);
 }
 
@@ -4977,7 +5146,14 @@ async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
     const y = IMG_H - SIZE - MARGIN - i * (SIZE + GAP);
 
     let img = null;
-    try { img = await _loadImgWithTimeout(insetPhotos[i].image, 8000); } catch(_) { continue; }
+    // Use cleaned image if available, fall back to original
+    const insetSrc = insetPhotos[i].cleanedImage || insetPhotos[i].image;
+    try { img = await _loadImgWithTimeout(insetSrc, 8000); } catch(_) {
+      // cleanedImage failed — try original as last resort
+      if (insetPhotos[i].cleanedImage) {
+        try { img = await _loadImgWithTimeout(insetPhotos[i].image, 8000); } catch(__) { continue; }
+      } else { continue; }
+    }
     if (!img || img.naturalWidth === 0) continue;
 
     let source = img;
