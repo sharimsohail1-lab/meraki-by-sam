@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       || metaArray[idx];
     if (!incoming) return srv;
     return {
-      ...srv,                                        // preserve image, cleanedImage, all server fields
+      ...srv,                                        // preserve image, cleanedImage, croppedImage, crop, croppedAt, all server fields
       useAsInset: incoming.useAsInset !== undefined ? incoming.useAsInset : srv.useAsInset,
       insetOrder: incoming.insetOrder !== undefined ? incoming.insetOrder : srv.insetOrder,
       label: incoming.label ?? srv.label,

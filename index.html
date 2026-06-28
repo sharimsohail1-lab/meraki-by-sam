@@ -1068,18 +1068,46 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div id="lbLabel" style="color:#fff;font-size:15px;font-weight:600;font-family:'Playfair Display',serif"></div>
       <button onclick="closeDetailPhotoLightbox()" style="background:rgba(255,255,255,0.12);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="ti ti-x"></i></button>
     </div>
-    <img id="lbImage" src="" alt="" style="width:100%;max-width:420px;border-radius:12px;object-fit:contain;max-height:60vh;background:#222">
-    <div id="lbCleanBadge" style="display:none;margin-top:8px;font-size:11px;color:#a8e6a3;font-weight:600"><i class="ti ti-sparkles"></i> Background cleaned</div>
+    <img id="lbImage" src="" alt="" style="width:100%;max-width:420px;border-radius:12px;object-fit:contain;max-height:55vh;background:#222">
+    <div id="lbCroppedBadge" style="display:none;margin-top:8px;font-size:11px;color:#c9a84c;font-weight:600"><i class="ti ti-crop"></i> Inset crop saved</div>
+    <div id="lbCleanBadge" style="display:none;margin-top:4px;font-size:11px;color:#a8e6a3;font-weight:600"><i class="ti ti-sparkles"></i> Background cleaned</div>
     <div id="lbMissingImageNote" style="display:none;margin-top:12px;padding:12px 14px;background:rgba(200,80,60,0.18);border-radius:10px;color:#ffb3a7;font-size:13px;text-align:center;width:100%"><i class="ti ti-alert-triangle"></i> This photo is missing its image. Please use <b>Replace photo</b> below to re-upload it.</div>
     <div style="width:100%;margin-top:16px;display:flex;flex-direction:column;gap:10px">
       <button id="lbInsetBtn" onclick="_lbToggleInset()" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"></button>
-      <button id="lbCleanBtn" onclick="_lbCleanBackground()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-wand"></i> Clean background</button>
+      <button id="lbCropBtn" onclick="_lbOpenCrop()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-crop"></i> Adjust inset</button>
+      <button id="lbResetCropBtn" onclick="_lbResetCrop()" style="display:none;width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.6);font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Reset crop</button>
       <button onclick="_lbReplacePhoto()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Replace photo</button>
       <button onclick="_lbDeletePhoto()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(220,80,80,0.4);background:rgba(220,80,80,0.12);color:#f88;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-trash"></i> Delete photo</button>
     </div>
   </div>
 </div>
 <input type="file" id="lbReplaceFileInput" accept="image/*" style="display:none" onchange="_lbHandleReplace(this)">
+
+<!-- DETAIL PHOTO CROP OVERLAY — sits above lightbox -->
+<div id="detailCropOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:#111;flex-direction:column">
+  <div style="height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.08)">
+    <button onclick="_cancelCrop()" style="color:rgba(255,255,255,0.7);background:none;border:none;font-size:15px;cursor:pointer;padding:8px 0;touch-action:manipulation">Cancel</button>
+    <div id="cropLabel" style="color:#fff;font-size:15px;font-weight:600;font-family:'Playfair Display',serif"></div>
+    <button id="cropSaveBtn" onclick="_saveCrop()" style="color:#c9a84c;background:none;border:none;font-size:15px;font-weight:700;cursor:pointer;padding:8px 0;touch-action:manipulation">Save</button>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:16px">
+    <div style="position:relative">
+      <canvas id="cropPreviewCanvas" style="border-radius:12px;display:block;touch-action:none;cursor:grab"></canvas>
+      <div style="position:absolute;inset:0;pointer-events:none;border-radius:12px;border:2px solid rgba(201,168,76,0.6);box-shadow:0 0 0 9999px rgba(0,0,0,0.55)"></div>
+    </div>
+  </div>
+  <div style="padding:12px 20px 36px;flex-shrink:0">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <i class="ti ti-zoom-out" style="color:rgba(255,255,255,0.5);font-size:18px;flex-shrink:0"></i>
+      <input type="range" id="cropZoomSlider" min="100" max="400" value="100" step="5" style="flex:1;accent-color:#c9a84c;height:4px" oninput="_onCropZoomSlider(this.value)">
+      <i class="ti ti-zoom-in" style="color:rgba(255,255,255,0.5);font-size:18px;flex-shrink:0"></i>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="_resetCropToDefault()" style="flex:1;padding:12px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);border-radius:10px;font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Reset</button>
+    </div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.35);text-align:center;margin-top:10px">Drag to reposition · Pinch or slider to zoom</div>
+  </div>
+</div>
 
 <!-- COLLECTION ADD PIECES SHEET -->
 <div class="sheet-overlay" id="collAddPiecesSheet" onclick="closeSheetOutside(event,'collAddPiecesSheet')">
@@ -2878,16 +2906,16 @@ function _lbRefresh() {
   if (d) { const ri = photos.indexOf(d); if (ri >= 0) _lbCurrentIdx = ri; }
   if (!d) { closeDetailPhotoLightbox(); return; }
   document.getElementById('lbLabel').textContent = d.label;
-  const hasImage = !!(d.cleanedImage || d.image);
-  document.getElementById('lbImage').src = d.cleanedImage || d.image || '';
+  const hasImage = !!(d.image || d.cleanedImage || d.croppedImage);
+  // Show preview: prefer croppedImage so Sam sees what will appear in share/catalog
+  document.getElementById('lbImage').src = d.croppedImage || d.cleanedImage || d.image || '';
   document.getElementById('lbImage').style.display = hasImage ? 'block' : 'none';
   const lbMissing = document.getElementById('lbMissingImageNote');
   if (lbMissing) lbMissing.style.display = hasImage ? 'none' : 'block';
-  const badge = document.getElementById('lbCleanBadge');
-  badge.style.display = d.cleanedImage ? 'block' : 'none';
+  document.getElementById('lbCroppedBadge').style.display = d.croppedImage ? 'block' : 'none';
+  document.getElementById('lbCleanBadge').style.display = (!d.croppedImage && d.cleanedImage) ? 'block' : 'none';
   const insetBtn = document.getElementById('lbInsetBtn');
-  // Always reset disabled — prevents stuck state from prior save
-  insetBtn.disabled = false;
+  insetBtn.disabled = !hasImage;
   if (d.useAsInset) {
     insetBtn.textContent = '✓ Showing in share/catalog';
     insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--burgundy);color:#fff';
@@ -2895,14 +2923,15 @@ function _lbRefresh() {
     insetBtn.textContent = 'Use in share/catalog';
     insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--sand-light,#f5f0ea);color:var(--text)';
   }
-  const cleanBtn = document.getElementById('lbCleanBtn');
-  if (!hasImage) {
-    cleanBtn.disabled = true;
-    cleanBtn.innerHTML = '<i class="ti ti-wand"></i> Clean background';
-  } else {
-    cleanBtn.disabled = false;
-    cleanBtn.innerHTML = d.cleanedImage ? '<i class="ti ti-wand"></i> Re-clean background' : '<i class="ti ti-wand"></i> Clean background';
+  // Crop button — disabled if no original image (cannot crop without source)
+  const cropBtn = document.getElementById('lbCropBtn');
+  if (cropBtn) {
+    cropBtn.disabled = !d.image;
+    cropBtn.style.opacity = d.image ? '1' : '0.4';
   }
+  // Reset crop — only shown when a crop exists
+  const resetCropBtn = document.getElementById('lbResetCropBtn');
+  if (resetCropBtn) resetCropBtn.style.display = d.croppedImage ? 'block' : 'none';
 }
 
 function _closeLightboxOutside(e) {
@@ -2955,6 +2984,202 @@ async function _lbCleanBackground() {
     console.warn('[INSET BACKGROUND CLEANUP] UI error', { reason: err.message });
   }
 }
+
+// ── Crop / reframe ─────────────────────────────────────────────────────────
+const CROP_FRAME_PX = 280;
+let _cropState = null; // { idx, photoId, img, imgNW, imgNH, baseScale, userScale, dx, dy, dragging, lastX, lastY, touches }
+
+function _lbOpenCrop() {
+  const photos = window._detailInsetPhotos || [];
+  const d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
+  if (!d || !d.image) return;
+  const idx = photos.indexOf(d);
+  _openCropUI(idx);
+}
+
+function _lbResetCrop() {
+  const photos = window._detailInsetPhotos || [];
+  let d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
+  if (!d) return;
+  delete d.croppedImage;
+  delete d.crop;
+  delete d.croppedAt;
+  _lbRefresh();
+  // Save without images not needed — croppedImage is image data, must do full save
+  _saveDetailPhotos().catch(err => showToast('Save failed: ' + err.message));
+}
+
+function _openCropUI(idx) {
+  const photos = window._detailInsetPhotos || [];
+  const d = photos[idx];
+  if (!d || !d.image) return;
+  const overlay = document.getElementById('detailCropOverlay');
+  overlay.style.display = 'flex';
+  document.getElementById('cropLabel').textContent = d.label || 'Adjust inset';
+  const img = new Image();
+  img.onload = () => {
+    const imgNW = img.naturalWidth;
+    const imgNH = img.naturalHeight;
+    const baseScale = CROP_FRAME_PX / Math.min(imgNW, imgNH);
+    // Restore saved crop or default
+    let userScale = 1, dx = 0, dy = 0;
+    if (d.crop) { userScale = d.crop.userScale || 1; dx = d.crop.dx || 0; dy = d.crop.dy || 0; }
+    _cropState = { idx, photoId: d.id, img, imgNW, imgNH, baseScale, userScale, dx, dy, dragging: false, lastX: 0, lastY: 0, touches: [] };
+    const slider = document.getElementById('cropZoomSlider');
+    slider.value = Math.round(userScale * 100);
+    const canvas = document.getElementById('cropPreviewCanvas');
+    canvas.width = CROP_FRAME_PX;
+    canvas.height = CROP_FRAME_PX;
+    _drawCropPreview();
+    _initCropEvents(canvas);
+  };
+  img.src = d.image;
+}
+
+function _cancelCrop() {
+  document.getElementById('detailCropOverlay').style.display = 'none';
+  _cropState = null;
+}
+
+async function _saveCrop() {
+  if (!_cropState) return;
+  const btn = document.getElementById('cropSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const { img, imgNW, imgNH, baseScale, userScale, dx, dy, idx, photoId } = _cropState;
+    const displayScale = baseScale * userScale;
+    const srcW = CROP_FRAME_PX / displayScale;
+    const srcH = CROP_FRAME_PX / displayScale;
+    const srcX = (imgNW / 2) - (srcW / 2) - dx / displayScale;
+    const srcY = (imgNH / 2) - (srcH / 2) - dy / displayScale;
+    const out = document.createElement('canvas');
+    out.width = 600; out.height = 600;
+    const ctx = out.getContext('2d');
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, 600, 600);
+    const croppedImage = out.toDataURL('image/jpeg', 0.88);
+    const photos = window._detailInsetPhotos || [];
+    const d = (photoId && photos.find(p => p.id === photoId)) || photos[idx];
+    if (d) {
+      d.croppedImage = croppedImage;
+      d.croppedAt = new Date().toISOString();
+      d.crop = { userScale, dx, dy };
+    }
+    document.getElementById('detailCropOverlay').style.display = 'none';
+    _cropState = null;
+    _lbRefresh();
+    await _saveDetailPhotos();
+  } catch (err) {
+    showToast('Crop save failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+function _resetCropToDefault() {
+  if (!_cropState) return;
+  _cropState.userScale = 1;
+  _cropState.dx = 0;
+  _cropState.dy = 0;
+  document.getElementById('cropZoomSlider').value = 100;
+  _drawCropPreview();
+}
+
+function _onCropZoomSlider(val) {
+  if (!_cropState) return;
+  _cropState.userScale = parseInt(val, 10) / 100;
+  const clamped = _clampCropOffset(_cropState.dx, _cropState.dy, _cropState.userScale);
+  _cropState.dx = clamped.dx;
+  _cropState.dy = clamped.dy;
+  _drawCropPreview();
+}
+
+function _drawCropPreview() {
+  if (!_cropState) return;
+  const { img, imgNW, imgNH, baseScale, userScale, dx, dy } = _cropState;
+  const canvas = document.getElementById('cropPreviewCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, CROP_FRAME_PX, CROP_FRAME_PX);
+  const displayScale = baseScale * userScale;
+  const drawW = imgNW * displayScale;
+  const drawH = imgNH * displayScale;
+  const cx = CROP_FRAME_PX / 2 - drawW / 2 + dx;
+  const cy = CROP_FRAME_PX / 2 - drawH / 2 + dy;
+  ctx.drawImage(img, cx, cy, drawW, drawH);
+}
+
+function _clampCropOffset(dx, dy, userScale) {
+  if (!_cropState) return { dx, dy };
+  const { imgNW, imgNH, baseScale } = _cropState;
+  const displayScale = baseScale * userScale;
+  const drawW = imgNW * displayScale;
+  const drawH = imgNH * displayScale;
+  const maxDx = Math.max(0, (drawW - CROP_FRAME_PX) / 2);
+  const maxDy = Math.max(0, (drawH - CROP_FRAME_PX) / 2);
+  return { dx: Math.max(-maxDx, Math.min(maxDx, dx)), dy: Math.max(-maxDy, Math.min(maxDy, dy)) };
+}
+
+function _initCropEvents(canvas) {
+  // Remove old listeners by replacing canvas clone (simple approach)
+  const clone = canvas.cloneNode(true);
+  canvas.parentNode.replaceChild(clone, clone); // no-op but sets up fresh
+  // Use the actual canvas element in DOM
+  const c = document.getElementById('cropPreviewCanvas');
+
+  // Pointer drag
+  c.addEventListener('pointerdown', e => {
+    if (!_cropState) return;
+    if (e.touches || _cropState.touches.length > 1) return;
+    _cropState.dragging = true;
+    _cropState.lastX = e.clientX;
+    _cropState.lastY = e.clientY;
+    c.setPointerCapture(e.pointerId);
+  });
+  c.addEventListener('pointermove', e => {
+    if (!_cropState || !_cropState.dragging || _cropState.touches.length > 1) return;
+    const ddx = e.clientX - _cropState.lastX;
+    const ddy = e.clientY - _cropState.lastY;
+    _cropState.lastX = e.clientX;
+    _cropState.lastY = e.clientY;
+    const clamped = _clampCropOffset(_cropState.dx + ddx, _cropState.dy + ddy, _cropState.userScale);
+    _cropState.dx = clamped.dx;
+    _cropState.dy = clamped.dy;
+    _drawCropPreview();
+  });
+  c.addEventListener('pointerup', () => { if (_cropState) _cropState.dragging = false; });
+  c.addEventListener('pointercancel', () => { if (_cropState) _cropState.dragging = false; });
+
+  // Pinch zoom
+  c.addEventListener('touchstart', e => {
+    if (!_cropState) return;
+    _cropState.touches = Array.from(e.touches);
+    if (_cropState.touches.length >= 2) _cropState.dragging = false;
+  }, { passive: true });
+  c.addEventListener('touchmove', e => {
+    if (!_cropState || _cropState.touches.length < 2 || e.touches.length < 2) return;
+    e.preventDefault();
+    const prev = _cropState.touches;
+    const cur = Array.from(e.touches);
+    const prevDist = Math.hypot(prev[0].clientX - prev[1].clientX, prev[0].clientY - prev[1].clientY);
+    const curDist = Math.hypot(cur[0].clientX - cur[1].clientX, cur[0].clientY - cur[1].clientY);
+    if (prevDist > 0) {
+      const ratio = curDist / prevDist;
+      const newScale = Math.max(1, Math.min(4, _cropState.userScale * ratio));
+      _cropState.userScale = newScale;
+      document.getElementById('cropZoomSlider').value = Math.round(newScale * 100);
+      const clamped = _clampCropOffset(_cropState.dx, _cropState.dy, newScale);
+      _cropState.dx = clamped.dx;
+      _cropState.dy = clamped.dy;
+      _drawCropPreview();
+    }
+    _cropState.touches = cur;
+  }, { passive: false });
+  c.addEventListener('touchend', e => {
+    if (_cropState) _cropState.touches = Array.from(e.touches);
+  }, { passive: true });
+}
+// ── End crop / reframe ──────────────────────────────────────────────────────
 
 function _lbReplacePhoto() {
   if (_lbCurrentIdx === null) return;
@@ -3885,24 +4110,33 @@ function _renderDetailPhotoInsets() {
 
   const thumbsHtml = photos.map((d, i) => {
     const isInset = !!d.useAsInset;
+    const hasCropped = !!d.croppedImage;
     const hasCleaned = !!d.cleanedImage;
-    const thumbSrc = d.cleanedImage || d.image;
+    // Show cropped preview if available — that's what will appear in share/catalog
+    const thumbSrc = d.croppedImage || d.cleanedImage || d.image || '';
+    const hasAnyImage = !!(d.image || d.cleanedImage || d.croppedImage);
     const borderColor = isInset ? 'var(--burgundy)' : 'var(--border)';
     const borderWidth = isInset ? '2px' : '1px';
     const insetPill = isInset
       ? `<div style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);background:var(--burgundy);color:#fff;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap;pointer-events:none">In share</div>`
       : '';
-    const cleanedDot = hasCleaned
-      ? `<div style="position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#a8e6a3;border:1px solid rgba(0,0,0,.15)" title="Background cleaned"></div>`
+    const statusDot = hasCropped
+      ? `<div style="position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#c9a84c;border:1px solid rgba(0,0,0,.15)" title="Crop adjusted"></div>`
+      : hasCleaned
+        ? `<div style="position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#a8e6a3;border:1px solid rgba(0,0,0,.15)" title="Background cleaned"></div>`
+        : '';
+    const missingNote = !hasAnyImage
+      ? `<div style="font-size:8px;color:var(--error,#c0392b);text-align:center;width:72px;margin-top:-1px">Missing</div>`
       : '';
     return `
     <div id="_detailThumb_${i}" style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px">
       <div style="position:relative;cursor:pointer" onclick="_openDetailPhotoLightbox(${i})">
-        <img src="${thumbSrc}" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${borderWidth} solid ${borderColor};display:block">
+        ${thumbSrc ? `<img src="${thumbSrc}" alt="${d.label}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:${borderWidth} solid ${borderColor};display:block">` : `<div style="width:72px;height:72px;border-radius:8px;border:${borderWidth} solid var(--error,#c0392b);background:#fef0ee;display:flex;align-items:center;justify-content:center;color:var(--error,#c0392b);font-size:20px"><i class="ti ti-alert-triangle"></i></div>`}
         ${insetPill}
-        ${cleanedDot}
+        ${statusDot}
       </div>
       <div style="font-size:9px;color:var(--muted);text-align:center;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label}</div>
+      ${missingNote}
     </div>`;
   }).join('');
 
@@ -4117,7 +4351,7 @@ async function cleanDetailPhotoBackground(idx) {
 async function _saveDetailPhotosMeta() {
   if (!currentProduct) throw new Error('No product selected');
   const photos = window._detailInsetPhotos || [];
-  const metaArray = photos.map(({ image, cleanedImage, ...meta }) => meta);
+  const metaArray = photos.map(({ image, cleanedImage, croppedImage, ...meta }) => meta);
 
   console.log('[DETAIL META CLIENT] before local update', {
     count: photos.length,
@@ -5236,7 +5470,8 @@ function _parseDetailPhotosForInsets(p) {
     if (!raw) return [];
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (!Array.isArray(parsed)) return [];
-    arr = parsed.filter(d => d && d.image);
+    // Accept photos that have any usable image source
+    arr = parsed.filter(d => d && (d.image || d.croppedImage || d.cleanedImage));
   } catch(_) { return []; }
   if (!arr.length) return [];
 
@@ -5281,23 +5516,30 @@ async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
     const x = MARGIN;
     const y = IMG_H - SIZE - MARGIN - i * (SIZE + GAP);
 
+    const d = insetPhotos[i];
     let img = null;
-    // Use cleaned image if available, fall back to original
-    const insetSrc = insetPhotos[i].cleanedImage || insetPhotos[i].image;
+    // Priority: croppedImage (Sam's manual frame) → cleanedImage → original
+    const insetSrc = d.croppedImage || d.cleanedImage || d.image;
+    const fallbackSrc = !d.croppedImage && d.cleanedImage ? d.image : null;
     try { img = await _loadImgWithTimeout(insetSrc, 8000); } catch(_) {
-      // cleanedImage failed — try original as last resort
-      if (insetPhotos[i].cleanedImage) {
-        try { img = await _loadImgWithTimeout(insetPhotos[i].image, 8000); } catch(__) { continue; }
+      if (fallbackSrc) {
+        try { img = await _loadImgWithTimeout(fallbackSrc, 8000); } catch(__) { continue; }
       } else { continue; }
     }
     if (!img || img.naturalWidth === 0) continue;
 
     let source = img;
-    try {
-      source = await prepareInsetImage(img);
-      console.log('[INSET CLEANUP] framed', { label: insetPhotos[i].label, slot: insetPhotos[i].slot, hasCrop: !!insetPhotos[i].crop, usedCleaned: !!insetPhotos[i].cleanedImage });
-    } catch(err) {
-      console.warn('[INSET CLEANUP] failed, using original', { label: insetPhotos[i].label, slot: insetPhotos[i].slot, reason: err?.message || String(err) });
+    // Only apply auto-framing (prepareInsetImage) if Sam hasn't set a manual crop.
+    // When croppedImage exists it is already framed to the correct square.
+    if (!d.croppedImage) {
+      try {
+        source = await prepareInsetImage(img);
+        console.log('[INSET] auto-framed', { label: d.label, usedCleaned: !!d.cleanedImage });
+      } catch(err) {
+        console.warn('[INSET] auto-frame failed, using original', { label: d.label, reason: err?.message || String(err) });
+      }
+    } else {
+      console.log('[INSET] using manual crop', { label: d.label });
     }
 
     // Shadow beneath the frame
