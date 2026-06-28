@@ -2852,12 +2852,14 @@ function viewReferenceImage() {
 }
 
 let _lbCurrentIdx = null;
+let _lbCurrentPhotoId = null;
 
 function _openDetailPhotoLightbox(idx) {
   const photos = window._detailInsetPhotos || [];
   const d = photos[idx];
   if (!d) return;
   _lbCurrentIdx = idx;
+  _lbCurrentPhotoId = d.id || null;
   _lbRefresh();
   const lb = document.getElementById('detailPhotoLightbox');
   lb.style.display = 'flex';
@@ -2866,7 +2868,9 @@ function _openDetailPhotoLightbox(idx) {
 
 function _lbRefresh() {
   const photos = window._detailInsetPhotos || [];
-  const d = photos[_lbCurrentIdx];
+  // ID-based lookup so stale index after re-render still finds the right photo
+  let d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[_lbCurrentIdx];
+  if (d) { const ri = photos.indexOf(d); if (ri >= 0) _lbCurrentIdx = ri; }
   if (!d) { closeDetailPhotoLightbox(); return; }
   document.getElementById('lbLabel').textContent = d.label;
   document.getElementById('lbImage').src = d.cleanedImage || d.image;
@@ -2895,6 +2899,7 @@ function closeDetailPhotoLightbox() {
   document.getElementById('detailPhotoLightbox').style.display = 'none';
   document.body.style.overflow = '';
   _lbCurrentIdx = null;
+  _lbCurrentPhotoId = null;
 }
 
 async function _lbToggleInset() {
@@ -3973,7 +3978,7 @@ async function deleteDetailPhoto(idx) {
   }
 }
 
-// Saves the toggle, re-renders thumbnails, throws on failure (caller handles button reset).
+// Saves the toggle via metadata-only endpoint (no base64 in payload).
 async function toggleDetailPhotoInset(idx) {
   const photos = window._detailInsetPhotos || [];
   if (!photos[idx]) return;
@@ -3994,7 +3999,7 @@ async function toggleDetailPhotoInset(idx) {
   let order = 1;
   photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order++; } else { d.insetOrder = null; } });
   try {
-    await _saveDetailPhotos();
+    await _saveDetailPhotosMeta();
     _renderDetailPhotoInsets();
   } catch(err) {
     // Revert optimistic change
@@ -4013,14 +4018,19 @@ async function toggleDetailPhotoInset(idx) {
 // Called only when Sam explicitly taps "Clean background".
 async function cleanDetailPhotoBackground(idx) {
   const photos = window._detailInsetPhotos || [];
-  const d = photos[idx];
+  // ID-based lookup so stale index after re-render still resolves
+  let d = (_lbCurrentPhotoId && photos.find(p => p.id === _lbCurrentPhotoId)) || photos[idx];
+  const resolvedIdx = d ? photos.indexOf(d) : idx;
   if (!d) throw new Error('photo not found');
+
+  if (!d.image || typeof d.image !== 'string' || !d.image.startsWith('data:')) {
+    throw new Error('This photo has no image data. Please close and reopen the detail, then try again.');
+  }
 
   console.log('[INSET BACKGROUND CLEANUP] sending to /api/remove-background', { label: d.label, slot: d.slot });
 
-  // Re-encode the photo to JPEG via canvas before sending (normalize format, cap size).
-  // This avoids sending large base64 payloads and ensures a supported input format.
-  let imageToSend = d.image;
+  // Re-encode to JPEG via canvas: normalizes format, caps size, avoids HEIC on remove.bg.
+  let imageToSend;
   try {
     imageToSend = await new Promise((resolve, reject) => {
       const img = new Image();
@@ -4032,10 +4042,12 @@ async function cleanDetailPhotoBackground(idx) {
         const cx = c.getContext('2d'); cx.drawImage(img, 0, 0, w, h);
         resolve(c.toDataURL('image/jpeg', 0.88));
       };
-      img.onerror = reject;
+      img.onerror = () => reject(new Error('Could not load photo for processing. Try replacing the photo.'));
       img.src = d.image;
     });
-  } catch(_) { /* send original if re-encode fails */ }
+  } catch(encErr) {
+    throw encErr;
+  }
 
   let resp;
   try {
@@ -4054,7 +4066,6 @@ async function cleanDetailPhotoBackground(idx) {
   if (!resp.ok) {
     const reason = json.error || `Server error ${resp.status}`;
     console.warn('[INSET BACKGROUND CLEANUP] server error', { label: d.label, slot: d.slot, status: resp.status, reason });
-    // Surface configuration error clearly
     if (resp.status === 503) throw new Error('Background removal is not set up yet. Ask your developer to add REMOVE_BG_API_KEY to the server.');
     throw new Error('Background cleanup failed: ' + reason);
   }
@@ -4064,10 +4075,35 @@ async function cleanDetailPhotoBackground(idx) {
     throw new Error('Background cleanup returned no image.');
   }
 
-  photos[idx] = { ...photos[idx], cleanedImage: json.cleanedImage, cleanedAt: new Date().toISOString(), cleanMethod: 'remove.bg' };
+  photos[resolvedIdx] = { ...photos[resolvedIdx], cleanedImage: json.cleanedImage, cleanedAt: new Date().toISOString(), cleanMethod: 'remove.bg' };
   await _saveDetailPhotos();
 
   console.log('[INSET BACKGROUND CLEANUP] success', { label: d.label, slot: d.slot, method: 'remove.bg', hasCleanedImage: true });
+}
+
+// Metadata-only save: sends non-image fields to /api/detail-photo-meta.
+// Server merges with existing DB record so base64 photos never round-trip on toggles.
+async function _saveDetailPhotosMeta() {
+  if (!currentProduct) throw new Error('No product selected');
+  const photos = window._detailInsetPhotos || [];
+  const metaArray = photos.map(({ image, cleanedImage, ...meta }) => meta);
+  let r;
+  try {
+    r = await fetch('/api/detail-photo-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: currentProduct.id, metaArray }),
+    });
+  } catch(netErr) {
+    throw new Error('Network error saving photos: ' + netErr.message);
+  }
+  const json = await r.json();
+  if (json.error) throw new Error(json.error);
+  // Reflect metadata changes in local cache (keep image/cleanedImage intact in memory)
+  const serialized = photos.length ? JSON.stringify(photos) : null;
+  const invIdx = inventory.findIndex(p => p.id === currentProduct.id);
+  if (invIdx >= 0) inventory[invIdx] = { ...inventory[invIdx], detail_photos: serialized };
+  currentProduct = { ...currentProduct, detail_photos: serialized };
 }
 
 async function _saveDetailPhotos() {
