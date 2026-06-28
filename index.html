@@ -4012,6 +4012,13 @@ function shareCatalogWhatsApp() {
   window.open(url, '_blank');
 }
 
+function _loadImgWithTimeout(src, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    loadImg(src).then(img => { clearTimeout(timer); resolve(img); }, e => { clearTimeout(timer); reject(e); });
+  });
+}
+
 async function _buildItemShareCard(p) {
   const SIZE = 1080;
   const canvas = document.createElement('canvas');
@@ -4027,7 +4034,7 @@ async function _buildItemShareCard(p) {
   if (imgSrc) {
     try {
       const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-      const img = await loadImg(proxied);
+      const img = await _loadImgWithTimeout(proxied, 8000);
       // Cover-fit: fill canvas, crop center
       const scale = Math.max(SIZE / img.width, SIZE / img.height);
       const dw = img.width * scale, dh = img.height * scale;
@@ -4047,7 +4054,7 @@ async function _buildItemShareCard(p) {
   if (detailPhotos.length > 0) {
     try {
       const insetSrc = detailPhotos[0].startsWith('data:') ? detailPhotos[0] : '/api/ideogram?url=' + encodeURIComponent(detailPhotos[0]);
-      const inset = await loadImg(insetSrc);
+      const inset = await _loadImgWithTimeout(insetSrc, 5000);
       const IS = SIZE * 0.22;
       const margin = SIZE * 0.04;
       const ix = SIZE - IS - margin, iy = margin;
@@ -4130,7 +4137,7 @@ async function _buildItemShareCard(p) {
   // Meraki logo (bottom-right)
   if (MERAKI_LOGO_SRC) {
     try {
-      const logo = await loadImg(MERAKI_LOGO_SRC);
+      const logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000);
       const logoW = SIZE * 0.22;
       const logoH = (logo.height / logo.width) * logoW;
       const logoMargin = SIZE * 0.05;
@@ -4165,22 +4172,12 @@ async function _shareItemCard(dataUrl, caption, productName) {
   triggerDownload(dataUrl, filename);
 }
 
-async function generateItemSharePackage() {
-  if (!currentProduct) return;
-  const p = currentProduct;
-  const btn = document.getElementById('shareThisPieceBtn');
-  const output = document.getElementById('itemShareOutput');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
-  output.style.display = 'block';
-  output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Generating share card & copy…</div>';
-
+async function _generateItemShareCopy(p) {
   const priceText = p.price ? `$${p.price}` : 'Reach out for price';
   const sizes = getAvailableSizes(p);
   const sizeText = sizes.length ? sizes.join(', ') : null;
   const isSold = !isProductAvailable(p);
   const statusNote = p.status === 'sold' ? 'SOLD OUT' : p.status === 'reserved' ? 'RESERVED' : 'available';
-
   const prompt = `You are writing individual item share copy for a Pakistani clothing boutique called "Meraki by Sam."
 
 Piece details:
@@ -4202,72 +4199,95 @@ A warm, friendly WhatsApp message (2-4 sentences). Customer-to-customer tone. In
 A polished Instagram caption (3-5 sentences + hashtags on a new line). Evocative, boutique tone. Mention occasion/style. Include availability language if in stock.
 ===STORY===
 Very short story text (1-2 lines max). Suitable for an Instagram story. If available: "DM to order" or "Limited sizes." If sold: "SOLD ✨ DM for similar."`;
+  const raw = await callClaude([{ role: 'user', content: prompt }], '', 400);
+  const parseSection = (marker, next) => {
+    const start = raw.indexOf(marker);
+    if (start === -1) return null;
+    const end = next ? raw.indexOf(next) : raw.length;
+    return raw.slice(start + marker.length, end === -1 ? raw.length : end).trim();
+  };
+  const warn = [];
+  if (!p.price) warn.push('No price — showing "Reach out for price"');
+  if (!p.model_photo && !p.photo) warn.push('No photo available for card');
+  if (!sizeText) warn.push('No sizes added');
+  return {
+    whatsapp: parseSection('===WHATSAPP===', '===INSTAGRAM==='),
+    instagram: parseSection('===INSTAGRAM===', '===STORY==='),
+    story: parseSection('===STORY===', null),
+    warn
+  };
+}
 
-  try {
-    const raw = await callClaude([{ role: 'user', content: prompt }], '', 400);
-    const parseSection = (marker, next) => {
-      const start = raw.indexOf(marker);
-      if (start === -1) return null;
-      const end = next ? raw.indexOf(next) : raw.length;
-      return raw.slice(start + marker.length, end === -1 ? raw.length : end).trim();
-    };
-    const whatsapp = parseSection('===WHATSAPP===', '===INSTAGRAM===');
-    const instagram = parseSection('===INSTAGRAM===', '===STORY===');
-    const story = parseSection('===STORY===', null);
+async function generateItemSharePackage() {
+  if (!currentProduct) return;
+  const p = currentProduct;
+  const btn = document.getElementById('shareThisPieceBtn');
+  const output = document.getElementById('itemShareOutput');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+  window._shareTexts = [];
+  window._currentShareCardUrl = null;
 
-    const warn = [];
-    if (!p.price) warn.push('No price — showing "Reach out for price"');
-    if (!p.model_photo && !p.photo) warn.push('No photo available for card');
-    if (!sizeText) warn.push('No sizes added');
+  // Show full structure immediately — card section + copy placeholder
+  output.style.display = 'block';
+  output.innerHTML =
+    `<div id="itemShareCardSection" style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Share Image</div>
+      <div id="itemShareCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
+    </div>
+    <div id="itemShareTextArea"><div style="font-size:12px;color:var(--muted);padding:4px 0">Generating copy…</div></div>`;
 
-    const warnHTML = warn.length
-      ? `<div style="font-size:11px;color:#C08000;background:#FFF8E1;border-radius:6px;padding:6px 10px;margin-bottom:10px">${warn.join(' · ')}</div>`
-      : '';
+  // Run card + copy in parallel — neither blocks the other
+  const [cardResult, copyResult] = await Promise.allSettled([
+    _buildItemShareCard(p),
+    _generateItemShareCopy(p)
+  ]);
 
-    window._shareTexts = [];
-    const section = (label, text, note) => {
-      if (!text) return '';
-      const idx = window._shareTexts.length;
-      window._shareTexts.push(text);
-      return `<div style="margin-bottom:14px">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}${note ? `<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;color:var(--muted)">${note}</span>` : ''}</div>
-        <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text.replace(/</g,'&lt;')}</div>
-        <button onclick="navigator.clipboard.writeText(window._shareTexts[${idx}]).then(()=>showToast('Copied'))" style="margin-top:6px;background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:11px;color:var(--burgundy);cursor:pointer;padding:3px 12px"><i class="ti ti-copy"></i> Copy</button>
-      </div>`;
-    };
-
-    // Show text sections immediately, then build card asynchronously
-    output.innerHTML = warnHTML +
-      `<div id="itemShareCardSection" style="margin-bottom:18px;text-align:center">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;text-align:left">Share Image</div>
-        <div id="itemShareCardLoading" style="font-size:12px;color:var(--muted);padding:12px 0">Building share card…</div>
-      </div>` +
-      section('WhatsApp', whatsapp) +
-      section('Instagram Caption', instagram, '· paste caption manually') +
-      section('Story Text', story);
-
-    // Build card in background (don't let card failure wipe the text copy sections)
-    try {
-      const cardUrl = await _buildItemShareCard(p);
-      window._currentShareCardUrl = cardUrl;
-      const whatsappCaption = whatsapp || '';
-      const cardIdx = window._shareTexts.length;
-      window._shareTexts.push(whatsappCaption);
+  // --- Card section ---
+  const cardArea = document.getElementById('itemShareCardArea');
+  if (cardArea) {
+    if (cardResult.status === 'fulfilled' && cardResult.value) {
+      window._currentShareCardUrl = cardResult.value;
       const canWebShare = typeof navigator.share === 'function';
-      const cardEl = document.getElementById('itemShareCardLoading');
-      if (cardEl) cardEl.outerHTML =
-        `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
-        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-          ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[${cardIdx}],'${(p.name||'').replace(/'/g,"\\'")}').catch(()=>{})" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
-          <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${(p.name||'piece').replace(/[^a-z0-9]/gi,'-')}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
-        </div>`;
-    } catch(e) {
-      const cardEl = document.getElementById('itemShareCardLoading');
-      if (cardEl) cardEl.textContent = 'Could not build share card.';
+      const safeName = (p.name || 'piece').replace(/[^a-z0-9]/gi, '-');
+      const safeNameOnclick = (p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      cardArea.innerHTML =
+        `<img src="${cardResult.value}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
+          ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
+          <button onclick="triggerDownload(window._currentShareCardUrl,'Meraki-${safeName}.jpg')" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
+        </div>
+        ${!canWebShare ? '<div style="font-size:11px;color:var(--muted)">Sharing not supported in this browser — download the image and copy a caption below.</div>' : ''}`;
+    } else {
+      cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Could not generate share image. Copy the captions below.</div>';
     }
-  } catch(e) {
-    output.innerHTML = `<div style="color:var(--error);font-size:13px">Failed: ${e.message}</div>`;
   }
+
+  // --- Text copy sections ---
+  const textArea = document.getElementById('itemShareTextArea');
+  if (textArea) {
+    if (copyResult.status === 'rejected') {
+      textArea.innerHTML = `<div style="color:var(--error);font-size:13px">Failed to generate copy: ${copyResult.reason?.message}</div>`;
+    } else {
+      const { whatsapp, instagram, story, warn } = copyResult.value;
+      const warnHTML = warn.length
+        ? `<div style="font-size:11px;color:#C08000;background:#FFF8E1;border-radius:6px;padding:6px 10px;margin-bottom:10px">${warn.join(' · ')}</div>`
+        : '';
+      window._shareTexts = [];
+      const section = (label, text, note) => {
+        if (!text) return '';
+        const idx = window._shareTexts.length;
+        window._shareTexts.push(text);
+        return `<div style="margin-bottom:14px">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${label}${note ? `<span style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;color:var(--muted)">${note}</span>` : ''}</div>
+          <div style="font-size:13px;color:var(--ink);background:var(--sand-light);border-radius:8px;padding:10px;white-space:pre-wrap;line-height:1.5">${text.replace(/</g,'&lt;')}</div>
+          <button onclick="navigator.clipboard.writeText(window._shareTexts[${idx}]).then(()=>showToast('Copied'))" style="margin-top:6px;background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:11px;color:var(--burgundy);cursor:pointer;padding:3px 12px"><i class="ti ti-copy"></i> Copy</button>
+        </div>`;
+      };
+      textArea.innerHTML = warnHTML + section('WhatsApp', whatsapp) + section('Instagram Caption', instagram, '· paste caption manually') + section('Story Text', story);
+    }
+  }
+
   btn.disabled = false;
   btn.innerHTML = '<i class="ti ti-share"></i> Share This Piece';
 }
