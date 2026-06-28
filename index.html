@@ -421,6 +421,20 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .exh-upcoming { background: var(--gold-pale); color: var(--gold); border: 1px solid var(--gold-light); }
 .exh-active { background: #E8F5E9; color: #2E7D32; }
 .exh-completed { background: #FFEBEE; color: #B71C1C; }
+/* Exhibition Tracker */
+.exh-tab-btn { flex:1; padding:11px 4px; background:none; border:none; border-bottom:2px solid transparent; font-size:13px; font-weight:500; color:var(--muted); cursor:pointer; transition:all .15s; touch-action:manipulation; }
+.exh-tab-btn.active { color:var(--burgundy); border-bottom-color:var(--burgundy); font-weight:700; }
+.exh-item-card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:12px; }
+.exh-size-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--sand-light,#f5f0ea); }
+.exh-size-row:last-child { border-bottom:none; }
+.exh-size-stepper { display:flex; align-items:center; gap:0; }
+.exh-step-btn { width:36px; height:36px; border:1px solid var(--border); background:#fff; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
+.exh-step-btn:first-child { border-radius:8px 0 0 8px; }
+.exh-step-btn:last-child { border-radius:0 8px 8px 0; }
+.exh-step-count { width:44px; text-align:center; font-size:16px; font-weight:600; border:1px solid var(--border); border-left:none; border-right:none; height:36px; line-height:36px; }
+.exh-status-avail { color:#27ae60; }
+.exh-status-low { color:#e67e22; }
+.exh-status-sold { color:var(--error,#c0392b); }
 .exh-item-row { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
 .exh-item-thumb { width: 50px; height: 65px; border-radius: 6px; object-fit: cover; background: var(--gold-pale); flex-shrink: 0; }
 .exh-item-info { flex: 1; min-width: 0; }
@@ -1317,6 +1331,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div><div class="exh-sum-num" id="exhSumRes">0</div><div class="exh-sum-label">Reserved</div></div>
       <div><div class="exh-sum-num" id="exhSumRev">$0</div><div class="exh-sum-label">Revenue</div></div>
     </div>
+    <button onclick="openExhTracker(currentExhibition?.id)" style="width:100%;padding:13px;background:var(--burgundy);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;touch-action:manipulation;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px"><i class="ti ti-package"></i> Track Inventory</button>
     <div id="exhStatusActions" style="margin-bottom:14px"></div>
     <div class="field-label" id="t-exhItems">Items</div>
     <div id="exhItemsList"></div>
@@ -1325,6 +1340,151 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="inventory-grid" id="exhSelectGrid"></div>
       <button class="btn btn-primary" style="margin-top:10px" onclick="saveExhibitionItems()">Save Selection</button>
     </div>
+  </div>
+</div>
+
+<!-- EXHIBITION INVENTORY TRACKER OVERLAY -->
+<div id="exhTrackerOverlay" style="display:none;position:fixed;inset:0;z-index:800;background:var(--parchment,#faf7f2);flex-direction:column">
+  <!-- header -->
+  <div style="background:var(--burgundy);color:#fff;padding:env(safe-area-inset-top,0) 0 0;flex-shrink:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px">
+      <button onclick="closeExhTracker()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px;touch-action:manipulation"><i class="ti ti-arrow-left"></i></button>
+      <div id="exhTrackerTitle" style="font-family:'Playfair Display',serif;font-size:17px;font-weight:600;text-align:center"></div>
+      <div style="width:36px"></div>
+    </div>
+  </div>
+  <!-- tab bar -->
+  <div style="display:flex;background:#fff;border-bottom:1px solid var(--border);flex-shrink:0">
+    <button id="exhTab_inventory" class="exh-tab-btn active" onclick="switchExhTab('inventory')">Inventory</button>
+    <button id="exhTab_sales" class="exh-tab-btn" onclick="switchExhTab('sales')">Sales</button>
+    <button id="exhTab_summary" class="exh-tab-btn" onclick="switchExhTab('summary')">Summary</button>
+  </div>
+  <!-- content -->
+  <div id="exhTrackerContent" style="flex:1;overflow-y:auto;padding:16px 16px 100px"></div>
+  <!-- FAB -->
+  <button onclick="openAddExhItemSheet()" style="position:fixed;bottom:28px;right:20px;z-index:810;background:var(--burgundy);color:#fff;border:none;border-radius:50px;padding:14px 20px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.25);display:flex;align-items:center;gap:8px;touch-action:manipulation"><i class="ti ti-plus" style="font-size:17px"></i> Add Item</button>
+</div>
+
+<!-- ADD / EDIT EXHIBITION ITEM SHEET -->
+<div class="sheet-overlay" id="addExhItemSheet" onclick="closeSheetOutside(event,'addExhItemSheet')">
+  <div class="sheet" style="max-height:92vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="sheet-title" style="margin-bottom:0" id="addExhItemTitle">Add Item</div>
+      <button onclick="closeSheet('addExhItemSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <!-- Photo -->
+    <div style="margin-bottom:14px">
+      <div class="field-label">Photo (optional)</div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div id="exhItemPhotoPreview" onclick="document.getElementById('exhItemPhotoInput').click()" style="width:72px;height:72px;border-radius:10px;border:2px dashed var(--border);background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;overflow:hidden">
+          <i class="ti ti-camera" style="font-size:24px;color:var(--muted)"></i>
+        </div>
+        <div style="flex:1">
+          <button onclick="document.getElementById('exhItemPhotoInput').click()" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px">Upload Photo</button>
+          <button id="exhSuggestNameBtn" onclick="suggestExhItemName()" class="btn btn-secondary btn-sm" style="width:100%"><i class="ti ti-sparkles"></i> Suggest name</button>
+        </div>
+      </div>
+      <input type="file" id="exhItemPhotoInput" accept="image/*" style="display:none" onchange="handleExhItemPhoto(this)">
+    </div>
+
+    <!-- Suggested names -->
+    <div id="exhSuggestedNames" style="display:none;margin-bottom:12px">
+      <div class="field-label">Tap to use</div>
+      <div id="exhSuggestedNamesList" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
+    <!-- Name -->
+    <div class="field-label">Item Name *</div>
+    <input type="text" id="exhItemNameInput" class="field-input" placeholder="e.g. Ivory Lawn Suit" style="margin-bottom:12px">
+
+    <!-- Price / Cost -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div>
+        <div class="field-label">Price USD</div>
+        <input type="number" id="exhItemPriceInput" class="field-input" placeholder="e.g. 100" min="0" step="1">
+      </div>
+      <div>
+        <div class="field-label">Cost PKR</div>
+        <input type="number" id="exhItemCostInput" class="field-input" placeholder="e.g. 18000" min="0" step="100">
+      </div>
+    </div>
+
+    <!-- Size Inventory -->
+    <div class="field-label">Size Quantities</div>
+    <div id="exhSizeGrid" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:0 12px;margin-bottom:14px"></div>
+
+    <!-- Notes -->
+    <div class="field-label">Notes (optional)</div>
+    <textarea id="exhItemNotesInput" class="field-input" rows="2" placeholder="Colors, fabric, etc." style="resize:none;margin-bottom:16px"></textarea>
+
+    <input type="hidden" id="exhItemEditId" value="">
+    <button onclick="saveExhItem()" class="btn btn-primary" id="saveExhItemBtn" style="width:100%"><i class="ti ti-device-floppy"></i> Save Item</button>
+  </div>
+</div>
+
+<!-- LOG EXHIBITION SALE SHEET -->
+<div class="sheet-overlay" id="logExhSaleSheet" onclick="closeSheetOutside(event,'logExhSaleSheet')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="sheet-title" style="margin-bottom:0" id="logExhSaleTitle">Log Sale</div>
+      <button onclick="closeSheet('logExhSaleSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <!-- Size buttons -->
+    <div class="field-label">Size</div>
+    <div id="exhSaleSizeButtons" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+
+    <!-- Quantity -->
+    <div class="field-label">Quantity</div>
+    <div style="display:flex;align-items:center;gap:0;margin-bottom:14px">
+      <button class="exh-step-btn" onclick="_exhSaleQtyChange(-1)">−</button>
+      <div id="exhSaleQtyDisplay" class="exh-step-count">1</div>
+      <button class="exh-step-btn" onclick="_exhSaleQtyChange(1)">+</button>
+    </div>
+
+    <!-- Sold price -->
+    <div class="field-label">Sold Price USD</div>
+    <input type="number" id="exhSalePriceInput" class="field-input" placeholder="e.g. 95" min="0" step="1" style="margin-bottom:14px">
+
+    <!-- Payment method -->
+    <div class="field-label">Payment (optional)</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px" id="exhPaymentBtns">
+      <button class="exh-pay-btn" onclick="selectExhPayment('Cash')" data-method="Cash" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Cash</button>
+      <button class="exh-pay-btn" onclick="selectExhPayment('Zelle')" data-method="Zelle" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Zelle</button>
+      <button class="exh-pay-btn" onclick="selectExhPayment('Card')" data-method="Card" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Card</button>
+      <button class="exh-pay-btn" onclick="selectExhPayment('Other')" data-method="Other" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Other</button>
+    </div>
+
+    <!-- Notes -->
+    <textarea id="exhSaleNotesInput" class="field-input" rows="2" placeholder="Notes (optional)" style="resize:none;margin-bottom:16px"></textarea>
+
+    <button onclick="saveExhSale()" class="btn btn-primary" style="width:100%"><i class="ti ti-receipt"></i> Save Sale</button>
+  </div>
+</div>
+
+<!-- ADJUST EXHIBITION INVENTORY SHEET -->
+<div class="sheet-overlay" id="adjustExhItemSheet" onclick="closeSheetOutside(event,'adjustExhItemSheet')">
+  <div class="sheet" style="max-height:85vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="sheet-title" style="margin-bottom:0" id="adjustExhItemTitle">Adjust Inventory</div>
+      <button onclick="closeSheet('adjustExhItemSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Set the current remaining quantity for each size.</div>
+    <div id="adjustExhSizeGrid" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:0 12px;margin-bottom:14px"></div>
+    <div class="field-label">Reason (optional)</div>
+    <select id="adjustExhReason" class="field-input" style="margin-bottom:16px">
+      <option value="">Select reason…</option>
+      <option value="Initial count mistake">Initial count mistake</option>
+      <option value="Found extra stock">Found extra stock</option>
+      <option value="Item damaged">Item damaged</option>
+      <option value="Sale entered incorrectly">Sale entered incorrectly</option>
+      <option value="Other">Other</option>
+    </select>
+    <button onclick="saveExhAdjustment()" class="btn btn-primary" style="width:100%"><i class="ti ti-check"></i> Save Adjustment</button>
   </div>
 </div>
 
@@ -1525,6 +1685,14 @@ let intakeSeason = '';
 let currentProduct = null;   // product open in detail sheet
 let currentAnalysis = null;  // { sku, name, description, ideogramPrompt }
 let currentExhibition = null;
+let exhItems = [];           // exh_items rows for currentExhibition
+let exhSales = [];           // exh_sales rows for currentExhibition (non-voided)
+let _exhItem = null;         // item currently being acted on (sale / adjust / edit)
+let _exhTrackerTab = 'inventory';
+let _exhAddSizes = {};       // size counts in Add/Edit Item form
+let _exhAddPhoto = null;     // compressed data URL for item photo
+let _exhSaleSize = '';       // selected size in Log Sale sheet
+let _exhSaleQty = 1;
 let currentCustomer = null;
 let selectedZones = new Set();
 let selectedProblems = new Set();
@@ -6977,6 +7145,497 @@ async function setExhStatus(status) {
   } catch(e) { showToast('Error: ' + e.message); }
 }
 
+// ── Exhibition Inventory Tracker ─────────────────────────────────────────────
+const EXH_SIZES = ['XS','S','M','L','XL','XXL'];
+let _exhSelectedPayment = '';
+
+async function openExhTracker(id) {
+  const exh = exhibitions.find(e => e.id === id) || currentExhibition;
+  if (!exh) return;
+  currentExhibition = exh;
+  closeSheet('exhibitionDetailSheet');
+  document.getElementById('exhTrackerTitle').textContent = exh.name;
+  document.getElementById('exhTrackerOverlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  _exhTrackerTab = 'inventory';
+  _renderExhTabs();
+  await _loadExhData();
+}
+
+function closeExhTracker() {
+  document.getElementById('exhTrackerOverlay').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function _loadExhData() {
+  const content = document.getElementById('exhTrackerContent');
+  content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading…</div></div>';
+  try {
+    const [items, allSales] = await Promise.all([
+      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id } }),
+      db('select', 'exh_sales', { filter: { exhibition_id: currentExhibition.id } }),
+    ]);
+    exhItems = items || [];
+    exhSales = (allSales || []).filter(s => !s.voided);
+    _renderExhContent();
+  } catch(e) {
+    content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
+  }
+}
+
+function _renderExhTabs() {
+  ['inventory','sales','summary'].forEach(t => {
+    const btn = document.getElementById('exhTab_' + t);
+    if (!btn) return;
+    btn.classList.toggle('active', _exhTrackerTab === t);
+  });
+}
+
+function switchExhTab(tab) {
+  _exhTrackerTab = tab;
+  _renderExhTabs();
+  _renderExhContent();
+}
+
+function _renderExhContent() {
+  const content = document.getElementById('exhTrackerContent');
+  if (_exhTrackerTab === 'inventory') content.innerHTML = _exhInventoryHTML();
+  else if (_exhTrackerTab === 'sales') content.innerHTML = _exhSalesHTML();
+  else content.innerHTML = _exhSummaryHTML();
+}
+
+function _exhItemRemaining(item) {
+  const inv = item.size_inventory || {};
+  return Object.values(inv).reduce((a, b) => a + (Number(b) || 0), 0);
+}
+
+function _exhItemSold(item) {
+  return exhSales.filter(s => s.item_id === item.id).reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+}
+
+function _exhInventoryHTML() {
+  if (!exhItems.length) {
+    return `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      <i class="ti ti-package" style="font-size:44px;display:block;margin-bottom:12px;color:var(--gold,#c9a84c)"></i>
+      <div style="font-size:16px;font-weight:600;margin-bottom:6px">No items yet</div>
+      <div style="font-size:13px">Tap + Add Item to track your first piece</div>
+    </div>`;
+  }
+  return exhItems.map(item => {
+    const remaining = _exhItemRemaining(item);
+    const sold = _exhItemSold(item);
+    const inv = item.size_inventory || {};
+    const sizeStr = EXH_SIZES.filter(s => (Number(inv[s]) || 0) > 0)
+      .map(s => `${s}:${inv[s]}`).join(' · ');
+    const statusCls = remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
+    const statusLabel = remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
+    return `<div class="exh-item-card">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${item.photo
+          ? `<img src="${item.photo}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border)">`
+          : `<div style="width:64px;height:64px;border-radius:8px;background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-shirt" style="font-size:26px;color:var(--muted)"></i></div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:15px;margin-bottom:3px">${item.name}</div>
+          <div style="font-size:12px;color:var(--muted)">${item.price_usd ? '$' + item.price_usd : ''}${item.cost_pkr ? ' · PKR ' + Number(item.cost_pkr).toLocaleString() : ''}</div>
+          ${sizeStr ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${sizeStr}</div>` : ''}
+          <div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span class="${statusCls}" style="font-size:12px;font-weight:700">${statusLabel}</span>
+            <span style="font-size:12px;color:var(--muted)">${remaining} left · ${sold} sold</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        ${remaining > 0
+          ? `<button onclick="openLogExhSale('${item.id}')" style="flex:2;padding:11px;background:var(--burgundy);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation">Log Sale</button>`
+          : `<button disabled style="flex:2;padding:11px;background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:14px">Sold Out</button>`}
+        <button onclick="openAdjustExhItem('${item.id}')" style="flex:1;padding:11px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation">Adjust</button>
+        <button onclick="openEditExhItem('${item.id}')" style="padding:11px 13px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-pencil"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _exhSalesHTML() {
+  if (!exhSales.length) {
+    return `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      <i class="ti ti-receipt" style="font-size:44px;display:block;margin-bottom:12px;color:var(--gold,#c9a84c)"></i>
+      <div style="font-size:14px">No sales logged yet</div>
+    </div>`;
+  }
+  return [...exhSales].reverse().map(s => {
+    const item = exhItems.find(i => i.id === s.item_id);
+    const dt = new Date(s.created_at);
+    const timeStr = dt.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div>
+        <div style="font-weight:600;font-size:14px;margin-bottom:2px">${item?.name || 'Unknown'}</div>
+        <div style="font-size:12px;color:var(--muted)">${s.size} × ${s.quantity || 1} · <strong>$${s.sold_price_usd || 0}</strong>${s.payment_method ? ' · ' + s.payment_method : ''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${timeStr}</div>
+      </div>
+      <button onclick="voidExhSale('${s.id}')" style="padding:6px 10px;background:#fff;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--muted);cursor:pointer;touch-action:manipulation;flex-shrink:0">Void</button>
+    </div>`;
+  }).join('');
+}
+
+function _exhSummaryHTML() {
+  const totalItems = exhItems.length;
+  const totalRemaining = exhItems.reduce((a, i) => a + _exhItemRemaining(i), 0);
+  const totalSold = exhSales.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+  const grossUSD = exhSales.reduce((a, s) => a + (Number(s.sold_price_usd) || 0) * (Number(s.quantity) || 1), 0);
+  const totalCostPkr = exhItems.reduce((a, i) => {
+    const soldQty = exhSales.filter(s => s.item_id === i.id).reduce((x, s) => x + (Number(s.quantity) || 1), 0);
+    return a + (Number(i.cost_pkr) || 0) * soldQty;
+  }, 0);
+
+  const stat = (label, val, color) =>
+    `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center">
+      <div style="font-size:26px;font-weight:700;color:${color||'var(--ink)'}">${val}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">${label}</div>
+    </div>`;
+
+  const profitSection = (grossUSD > 0 && totalCostPkr > 0) ? `
+    <div style="margin-top:16px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px">
+      <div class="field-label" style="margin-bottom:10px">Profit Estimate (optional)</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:var(--muted);white-space:nowrap">PKR per $1 =</span>
+        <input type="number" id="exhRateInput" class="field-input" placeholder="e.g. 278" min="1" style="margin-bottom:0" oninput="_renderExhProfitCalc()">
+      </div>
+      <div id="exhProfitResult" style="font-size:13px;color:var(--muted)">Enter exchange rate to estimate profit</div>
+    </div>` : '';
+
+  // Store for profit calc
+  window._exhSummaryGross = grossUSD;
+  window._exhSummaryCostPkr = totalCostPkr;
+
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-bottom:80px">
+    ${stat('Items', totalItems, 'var(--burgundy)')}
+    ${stat('Sold', totalSold, '#27ae60')}
+    ${stat('Remaining', totalRemaining, totalRemaining === 0 ? 'var(--error,#c0392b)' : 'var(--ink)')}
+    ${stat('Gross Sales', '$' + grossUSD.toFixed(2), '#27ae60')}
+    ${totalCostPkr ? stat('Total Cost', 'PKR ' + Math.round(totalCostPkr).toLocaleString(), 'var(--ink)') : ''}
+    <div style="grid-column:1/-1">${profitSection}</div>
+  </div>`;
+}
+
+function _renderExhProfitCalc() {
+  const rate = parseFloat(document.getElementById('exhRateInput')?.value || '0');
+  const result = document.getElementById('exhProfitResult');
+  if (!result || !rate) return;
+  const gross = window._exhSummaryGross || 0;
+  const costPkr = window._exhSummaryCostPkr || 0;
+  const costUSD = costPkr / rate;
+  const profit = gross - costUSD;
+  result.textContent = `Gross $${gross.toFixed(2)} − Cost $${costUSD.toFixed(2)} ≈ Profit $${profit.toFixed(2)}`;
+  result.style.color = profit >= 0 ? '#27ae60' : 'var(--error,#c0392b)';
+  result.style.fontWeight = '600';
+}
+
+// ── Add / Edit Item ──────────────────────────────────────────────────────────
+function _exhSizeStepperHTML(sizesObj, idPrefix) {
+  return EXH_SIZES.map(s =>
+    `<div class="exh-size-row">
+      <span style="font-size:14px;font-weight:500;min-width:36px">${s}</span>
+      <div class="exh-size-stepper">
+        <button class="exh-step-btn" onclick="${idPrefix}SizeChange('${s}',-1)">−</button>
+        <div class="exh-step-count" id="${idPrefix}Size_${s}">${Number(sizesObj[s]) || 0}</div>
+        <button class="exh-step-btn" onclick="${idPrefix}SizeChange('${s}',1)">+</button>
+      </div>
+    </div>`
+  ).join('');
+}
+
+function openAddExhItemSheet() {
+  _exhAddSizes = Object.fromEntries(EXH_SIZES.map(s => [s, 0]));
+  _exhAddPhoto = null;
+  _exhItem = null;
+  document.getElementById('addExhItemTitle').textContent = 'Add Item';
+  document.getElementById('exhItemNameInput').value = '';
+  document.getElementById('exhItemPriceInput').value = '';
+  document.getElementById('exhItemCostInput').value = '';
+  document.getElementById('exhItemNotesInput').value = '';
+  document.getElementById('exhItemEditId').value = '';
+  document.getElementById('saveExhItemBtn').innerHTML = '<i class="ti ti-device-floppy"></i> Save Item';
+  document.getElementById('exhSuggestedNames').style.display = 'none';
+  const preview = document.getElementById('exhItemPhotoPreview');
+  preview.innerHTML = '<i class="ti ti-camera" style="font-size:24px;color:var(--muted)"></i>';
+  document.getElementById('exhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdd');
+  openSheet('addExhItemSheet');
+}
+
+function openEditExhItem(itemId) {
+  const item = exhItems.find(i => i.id === itemId);
+  if (!item) return;
+  _exhItem = item;
+  _exhAddSizes = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...item.size_inventory };
+  _exhAddPhoto = item.photo || null;
+  document.getElementById('addExhItemTitle').textContent = 'Edit Item';
+  document.getElementById('exhItemNameInput').value = item.name || '';
+  document.getElementById('exhItemPriceInput').value = item.price_usd || '';
+  document.getElementById('exhItemCostInput').value = item.cost_pkr || '';
+  document.getElementById('exhItemNotesInput').value = item.notes || '';
+  document.getElementById('exhItemEditId').value = item.id;
+  document.getElementById('saveExhItemBtn').innerHTML = '<i class="ti ti-device-floppy"></i> Update Item';
+  document.getElementById('exhSuggestedNames').style.display = 'none';
+  const preview = document.getElementById('exhItemPhotoPreview');
+  if (item.photo) {
+    preview.innerHTML = `<img src="${item.photo}" style="width:100%;height:100%;object-fit:cover">`;
+  } else {
+    preview.innerHTML = '<i class="ti ti-camera" style="font-size:24px;color:var(--muted)"></i>';
+  }
+  document.getElementById('exhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdd');
+  openSheet('addExhItemSheet');
+}
+
+function exhAddSizeChange(size, delta) {
+  _exhAddSizes[size] = Math.max(0, (Number(_exhAddSizes[size]) || 0) + delta);
+  const el = document.getElementById('exhAddSize_' + size);
+  if (el) el.textContent = _exhAddSizes[size];
+}
+
+async function handleExhItemPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const btn = document.getElementById('exhSuggestNameBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
+  try {
+    const reader = new FileReader();
+    const dataUrl = await new Promise((res, rej) => { reader.onload = e => res(e.target.result); reader.onerror = rej; reader.readAsDataURL(file); });
+    _exhAddPhoto = await normalizeDetailPhotoForStorage(dataUrl);
+    const preview = document.getElementById('exhItemPhotoPreview');
+    if (preview) preview.innerHTML = `<img src="${_exhAddPhoto}" style="width:100%;height:100%;object-fit:cover">`;
+  } catch(e) { showToast('Photo error: ' + e.message); }
+  finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> Suggest name'; }
+  }
+}
+
+async function suggestExhItemName() {
+  if (!_exhAddPhoto) { showToast('Upload a photo first'); return; }
+  const btn = document.getElementById('exhSuggestNameBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+  try {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: _exhAddPhoto.replace(/^data:image\/[^;]+;base64,/, '') } },
+        { type: 'text', text: 'This is a Pakistani clothing item photo. Give me exactly 3 short descriptive names for this item (2-4 words each). Return only the 3 names, one per line, no numbering or punctuation.' }
+      ]
+    }];
+    const result = await callClaude(messages, '', 150);
+    const names = result.split('\n').map(n => n.trim()).filter(Boolean).slice(0, 3);
+    if (names.length) {
+      const listEl = document.getElementById('exhSuggestedNamesList');
+      listEl.innerHTML = names.map(n =>
+        `<button onclick="document.getElementById('exhItemNameInput').value='${n.replace(/'/g,"\\'")}';document.getElementById('exhSuggestedNames').style.display='none'" style="width:100%;padding:11px 14px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation">${n}</button>`
+      ).join('');
+      document.getElementById('exhSuggestedNames').style.display = 'block';
+    }
+  } catch(e) {
+    console.warn('[EXH SUGGEST] failed', e.message);
+    showToast('Could not suggest name — type it manually');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> Suggest name'; }
+  }
+}
+
+async function saveExhItem() {
+  if (!currentExhibition) return;
+  const name = document.getElementById('exhItemNameInput').value.trim();
+  if (!name) { showToast('Item name is required'); return; }
+  const btn = document.getElementById('saveExhItemBtn');
+  btn.disabled = true;
+  const defaultLabel = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…';
+  try {
+    const data = {
+      exhibition_id: currentExhibition.id,
+      name,
+      photo: _exhAddPhoto || null,
+      price_usd: parseFloat(document.getElementById('exhItemPriceInput').value) || null,
+      cost_pkr: parseFloat(document.getElementById('exhItemCostInput').value) || null,
+      size_inventory: { ..._exhAddSizes },
+      notes: document.getElementById('exhItemNotesInput').value.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const editId = document.getElementById('exhItemEditId').value;
+    if (editId) {
+      await db('update', 'exh_items', { id: editId, data });
+      const idx = exhItems.findIndex(i => i.id === editId);
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...data };
+    } else {
+      const rows = await db('insert', 'exh_items', { data });
+      if (rows && rows[0]) exhItems.push(rows[0]);
+    }
+    closeSheet('addExhItemSheet');
+    _exhTrackerTab = 'inventory';
+    _renderExhTabs();
+    _renderExhContent();
+    showToast(editId ? 'Item updated ✓' : 'Item added ✓');
+  } catch(e) {
+    console.warn('[EXH SAVE ITEM]', e.message);
+    showToast('Could not save item: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = defaultLabel;
+  }
+}
+
+// ── Log Sale ─────────────────────────────────────────────────────────────────
+function openLogExhSale(itemId) {
+  const item = exhItems.find(i => i.id === itemId);
+  if (!item) return;
+  _exhItem = item;
+  _exhSaleSize = '';
+  _exhSaleQty = 1;
+  _exhSelectedPayment = '';
+  document.getElementById('logExhSaleTitle').textContent = 'Log Sale — ' + item.name;
+  document.getElementById('exhSaleQtyDisplay').textContent = '1';
+  document.getElementById('exhSalePriceInput').value = item.price_usd || '';
+  document.getElementById('exhSaleNotesInput').value = '';
+  // Reset payment buttons
+  document.querySelectorAll('.exh-pay-btn').forEach(b => {
+    b.style.background = '#fff'; b.style.borderColor = 'var(--border)'; b.style.fontWeight = '400';
+  });
+  // Build size buttons from remaining inventory
+  const inv = item.size_inventory || {};
+  const sizesBtns = document.getElementById('exhSaleSizeButtons');
+  const available = EXH_SIZES.filter(s => (Number(inv[s]) || 0) > 0);
+  if (available.length === 0) {
+    sizesBtns.innerHTML = '<div style="font-size:13px;color:var(--muted)">No stock remaining</div>';
+  } else {
+    sizesBtns.innerHTML = available.map(s =>
+      `<button onclick="selectExhSaleSize('${s}')" id="exhSaleSize_${s}" style="padding:10px 16px;border:2px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-weight:500;cursor:pointer;touch-action:manipulation">${s} <span style="font-size:11px;color:var(--muted)">(${inv[s]})</span></button>`
+    ).join('');
+    if (available.length === 1) selectExhSaleSize(available[0]);
+  }
+  openSheet('logExhSaleSheet');
+}
+
+function selectExhSaleSize(size) {
+  _exhSaleSize = size;
+  document.querySelectorAll('[id^="exhSaleSize_"]').forEach(b => {
+    const isSelected = b.id === 'exhSaleSize_' + size;
+    b.style.borderColor = isSelected ? 'var(--burgundy)' : 'var(--border)';
+    b.style.background = isSelected ? 'var(--burgundy)' : '#fff';
+    b.style.color = isSelected ? '#fff' : 'var(--ink)';
+    b.style.fontWeight = isSelected ? '700' : '500';
+  });
+  // Clamp qty to remaining for this size
+  const maxQty = Number((_exhItem?.size_inventory || {})[size]) || 1;
+  _exhSaleQty = Math.min(_exhSaleQty, maxQty);
+  document.getElementById('exhSaleQtyDisplay').textContent = _exhSaleQty;
+}
+
+function _exhSaleQtyChange(delta) {
+  const maxQty = _exhSaleSize ? (Number((_exhItem?.size_inventory || {})[_exhSaleSize]) || 99) : 99;
+  _exhSaleQty = Math.max(1, Math.min(maxQty, _exhSaleQty + delta));
+  document.getElementById('exhSaleQtyDisplay').textContent = _exhSaleQty;
+}
+
+function selectExhPayment(method) {
+  _exhSelectedPayment = method;
+  document.querySelectorAll('.exh-pay-btn').forEach(b => {
+    const isSelected = b.getAttribute('data-method') === method;
+    b.style.background = isSelected ? 'var(--burgundy)' : '#fff';
+    b.style.color = isSelected ? '#fff' : 'var(--ink)';
+    b.style.borderColor = isSelected ? 'var(--burgundy)' : 'var(--border)';
+    b.style.fontWeight = isSelected ? '700' : '400';
+  });
+}
+
+async function saveExhSale() {
+  if (!_exhItem || !currentExhibition) return;
+  if (!_exhSaleSize) { showToast('Select a size'); return; }
+  const remaining = Number((_exhItem.size_inventory || {})[_exhSaleSize]) || 0;
+  if (_exhSaleQty > remaining) { showToast(`Only ${remaining} left in size ${_exhSaleSize}`); return; }
+  const price = parseFloat(document.getElementById('exhSalePriceInput').value);
+  if (!price || price <= 0) { showToast('Enter sold price'); return; }
+  try {
+    const saleData = {
+      exhibition_id: currentExhibition.id,
+      item_id: _exhItem.id,
+      size: _exhSaleSize,
+      quantity: _exhSaleQty,
+      sold_price_usd: price,
+      payment_method: _exhSelectedPayment || null,
+      notes: document.getElementById('exhSaleNotesInput').value.trim() || null,
+      voided: false,
+    };
+    const rows = await db('insert', 'exh_sales', { data: saleData });
+    if (rows && rows[0]) exhSales.push(rows[0]);
+    // Decrement size_inventory
+    const newInv = { ...(_exhItem.size_inventory || {}) };
+    newInv[_exhSaleSize] = Math.max(0, (Number(newInv[_exhSaleSize]) || 0) - _exhSaleQty);
+    await db('update', 'exh_items', { id: _exhItem.id, data: { size_inventory: newInv, updated_at: new Date().toISOString() } });
+    const idx = exhItems.findIndex(i => i.id === _exhItem.id);
+    if (idx >= 0) exhItems[idx] = { ...exhItems[idx], size_inventory: newInv };
+    closeSheet('logExhSaleSheet');
+    _renderExhContent();
+    showToast('Sale logged ✓');
+  } catch(e) {
+    console.warn('[EXH SAVE SALE]', e.message);
+    showToast('Could not log sale: ' + e.message);
+  }
+}
+
+async function voidExhSale(saleId) {
+  const sale = exhSales.find(s => s.id === saleId);
+  if (!sale) return;
+  if (!confirm(`Void this sale? The quantity will be returned to inventory.`)) return;
+  try {
+    await db('update', 'exh_sales', { id: saleId, data: { voided: true } });
+    // Add quantity back to item inventory
+    const item = exhItems.find(i => i.id === sale.item_id);
+    if (item) {
+      const newInv = { ...(item.size_inventory || {}) };
+      newInv[sale.size] = (Number(newInv[sale.size]) || 0) + (Number(sale.quantity) || 1);
+      await db('update', 'exh_items', { id: item.id, data: { size_inventory: newInv, updated_at: new Date().toISOString() } });
+      const idx = exhItems.findIndex(i => i.id === item.id);
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], size_inventory: newInv };
+    }
+    exhSales = exhSales.filter(s => s.id !== saleId);
+    _renderExhContent();
+    showToast('Sale voided ✓');
+  } catch(e) {
+    showToast('Could not void: ' + e.message);
+  }
+}
+
+// ── Adjust Inventory ─────────────────────────────────────────────────────────
+function openAdjustExhItem(itemId) {
+  const item = exhItems.find(i => i.id === itemId);
+  if (!item) return;
+  _exhItem = item;
+  _exhAddSizes = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...(item.size_inventory || {}) };
+  document.getElementById('adjustExhItemTitle').textContent = 'Adjust — ' + item.name;
+  document.getElementById('adjustExhReason').value = '';
+  document.getElementById('adjustExhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdj');
+  openSheet('adjustExhItemSheet');
+}
+
+function exhAdjSizeChange(size, delta) {
+  _exhAddSizes[size] = Math.max(0, (Number(_exhAddSizes[size]) || 0) + delta);
+  const el = document.getElementById('exhAdjSize_' + size);
+  if (el) el.textContent = _exhAddSizes[size];
+}
+
+async function saveExhAdjustment() {
+  if (!_exhItem) return;
+  try {
+    const newInv = { ..._exhAddSizes };
+    const reason = document.getElementById('adjustExhReason').value;
+    const notes = reason ? `Adjusted: ${reason}` : 'Inventory adjusted';
+    await db('update', 'exh_items', { id: _exhItem.id, data: { size_inventory: newInv, notes, updated_at: new Date().toISOString() } });
+    const idx = exhItems.findIndex(i => i.id === _exhItem.id);
+    if (idx >= 0) exhItems[idx] = { ...exhItems[idx], size_inventory: newInv, notes };
+    closeSheet('adjustExhItemSheet');
+    _renderExhContent();
+    showToast('Inventory adjusted ✓');
+  } catch(e) {
+    showToast('Could not adjust: ' + e.message);
+  }
+}
+// ── End Exhibition Inventory Tracker ─────────────────────────────────────────
 
 // ─── PROVIDER PILLS ──────────────────────────────────────────────────────────
 // Renders small pill buttons (one per registered provider) in both generate areas.
