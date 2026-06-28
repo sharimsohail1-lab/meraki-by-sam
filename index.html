@@ -888,11 +888,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- PRODUCT DETAIL SHEET -->
-<div class="sheet-overlay" id="productDetailSheet" onclick="closeSheetOutside(event,'productDetailSheet')">
+<div class="sheet-overlay" id="productDetailSheet" onclick="if(event.target===this)closeProductDetail()">
   <div class="sheet">
     <div class="sheet-handle"></div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
-      <button onclick="closeSheet('productDetailSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+      <button onclick="closeProductDetail()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
     <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
@@ -2955,7 +2955,7 @@ function _renderCollDetailItems(items) {
     const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
     const readiness = _collReadinessBadges(p);
     return `<div style="display:flex;align-items:flex-start;gap:0;background:white;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin-bottom:0">
-      <div style="cursor:pointer;flex:1;display:flex;gap:10px;align-items:flex-start;padding:10px" onclick="closeSheet('collectionDetailSheet');setTimeout(()=>openProductDetail(window._collItemActions[${i}]),180)">
+      <div style="cursor:pointer;flex:1;display:flex;gap:10px;align-items:flex-start;padding:10px" onclick="openProductDetail(window._collItemActions[${i}],{returnSheet:'collectionDetailSheet'})">
         ${photoHTML}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px">${p.name}</div>
@@ -3469,28 +3469,33 @@ function renderInventory() {
     grid.innerHTML = `<div class="empty" style="grid-column:span 2"><i class="ti ti-hanger"></i><p>${stockFilter === 'all' ? 'No items yet. Tap Add to get started.' : 'No items in this category.'}</p></div>`;
     return;
   }
-  grid.innerHTML = items.map(p => `
-    <div class="product-card">
-      <div class="product-thumb" onclick="openProductDetail('${p.id}')">
+  const _stockActions = [];
+  grid.innerHTML = items.map((p, _si) => {
+    _stockActions[_si] = p.id;
+    const sizeSummary = (() => {
+      const s = getAvailableSizeSummary(p);
+      if (s) return `<div class="size-summary">${s}</div>`;
+      if (isProductAvailable(p)) return '<div class="size-summary" style="color:#C08000">No sizes added</div>';
+      return '';
+    })();
+    return `<div class="product-card" onclick="openProductDetail(window._stockActions[${_si}])">
+      <div class="product-thumb">
         ${(p.model_photo||p.photo) ? `<img src="${p.model_photo||p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
-      <div class="product-info" onclick="openProductDetail('${p.id}')">
+      <div class="product-info">
         <div class="product-name">${p.name}</div>
         <div class="product-price ${p.price ? '' : 'no-price'}">${p.price ? '$' + p.price : 'No price'}</div>
         <span class="status-pill status-${p.status}">${p.status}</span>
-        ${(() => {
-          const s = getAvailableSizeSummary(p);
-          if (s) return `<div class="size-summary">${s}</div>`;
-          if (isProductAvailable(p)) return '<div class="size-summary" style="color:#C08000">No sizes added</div>';
-          return '';
-        })()}
+        ${sizeSummary}
         ${productNudge(p)}
       </div>
-      <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket('${p.id}')" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
+      <button class="card-pkg-btn ${p.caption_en ? 'has-pkg' : ''}" onclick="event.stopPropagation();openAndMarket(window._stockActions[${_si}])" title="${p.caption_en ? 'View marketing package' : 'Create marketing package'}">
         <i class="ti ti-package"></i>${p.caption_en ? ' Package ✓' : ' Market'}
       </button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  window._stockActions = _stockActions;
 }
 
 function openAndMarket(id) {
@@ -3501,18 +3506,40 @@ function openAndMarket(id) {
   }
 }
 
-function openProductDetail(id) {
-  currentProduct = inventory.find(p => p.id === id);
-  if (!currentProduct) return;
-  const p = currentProduct;
+let _productDetailReturnSheet = null;
+
+function closeProductDetail() {
+  closeSheet('productDetailSheet');
+  if (_productDetailReturnSheet) {
+    openSheet(_productDetailReturnSheet);
+    _productDetailReturnSheet = null;
+  }
+}
+
+function openProductDetail(id, opts) {
+  const p = inventory.find(x => x.id === id);
+  if (!p) { showToast('Product not found'); return; }
+  currentProduct = p;
+  _productDetailReturnSheet = opts?.returnSheet || null;
+  try { _openProductDetailUI(p); } catch(e) {
+    currentProduct = null;
+    showToast('Could not open product: ' + e.message);
+    console.error('[ProductDetail]', e);
+  }
+}
+
+function _openProductDetailUI(p) {
   const detailDisplayPhoto = p.model_photo || p.photo;
   document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
   document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
 
   // Detail photo insets — always render with add button
-  window._detailInsetPhotos = p.detail_photos
-    ? (typeof p.detail_photos === 'string' ? JSON.parse(p.detail_photos) : p.detail_photos)
-    : [];
+  const _dpRaw = p.detail_photos;
+  let _dpParsed = [];
+  try {
+    if (_dpRaw) _dpParsed = typeof _dpRaw === 'string' ? JSON.parse(_dpRaw) : _dpRaw;
+  } catch(_) {}
+  window._detailInsetPhotos = Array.isArray(_dpParsed) ? _dpParsed : [];
   _renderDetailPhotoInsets();
 
   document.getElementById('detailSKU').textContent = p.sku;
@@ -3654,8 +3681,10 @@ async function deleteProduct() {
     inventory = inventory.filter(p => p.id !== deletedId);
     closeSheet('deleteProductSheet');
     closeSheet('productDetailSheet');
+    closeSheet('collectionDetailSheet');
+    _productDetailReturnSheet = null;
     renderInventory();
-    if (typeof renderCollections === 'function') renderCollections();
+    renderCollections();
     showToast('Product deleted');
   } catch(e) {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-trash"></i> Delete Product'; }
