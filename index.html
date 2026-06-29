@@ -8344,9 +8344,34 @@ async function saveExhItem() {
 }
 
 // ── Log Sale ─────────────────────────────────────────────────────────────────
-function openLogExhSale(itemId) {
-  const item = exhItems.find(i => i.id === itemId);
-  if (!item) return;
+async function openLogExhSale(itemId) {
+  const localItem = exhItems.find(i => i.id === itemId);
+  if (!localItem) return;
+
+  // Show subtle "Checking…" state on the tapped button
+  const logBtn = document.querySelector(`[onclick="openLogExhSale('${itemId}')"]`);
+  const originalBtnHTML = logBtn ? logBtn.innerHTML : null;
+  if (logBtn) { logBtn.disabled = true; logBtn.innerHTML = 'Checking…'; }
+
+  let item = localItem;
+  try {
+    const rows = await db('select', 'exh_items', { filter: { id: itemId } });
+    const fresh = Array.isArray(rows) ? rows[0] : null;
+    if (fresh) {
+      // Merge fresh inventory into local state so card also reflects it
+      const idx = exhItems.findIndex(i => i.id === itemId);
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...fresh };
+      item = fresh;
+    }
+  } catch(e) {
+    console.warn('[EXHIBITION SALE] latest inventory check failed', e);
+    if (logBtn) { logBtn.disabled = false; logBtn.innerHTML = originalBtnHTML; }
+    showToast('Could not check latest inventory. Tap ↻ refresh and try again.');
+    return;
+  } finally {
+    if (logBtn) { logBtn.disabled = false; logBtn.innerHTML = originalBtnHTML; }
+  }
+
   _exhItem = item;
   _exhSaleSize = '';
   _exhSaleQty = 1;
@@ -8359,7 +8384,7 @@ function openLogExhSale(itemId) {
   document.querySelectorAll('.exh-pay-btn').forEach(b => {
     b.style.background = '#fff'; b.style.borderColor = 'var(--border)'; b.style.fontWeight = '400';
   });
-  // Build size buttons from remaining inventory — use item's actual size keys
+  // Build size buttons from latest server inventory
   const inv = item.size_inventory || {};
   const sizesBtns = document.getElementById('exhSaleSizeButtons');
   const available = Object.keys(inv).filter(s => (Number(inv[s]) || 0) > 0);
