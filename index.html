@@ -3838,21 +3838,15 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-pin-gate';
+const _MERAKI_BUILD = '2026-06-29-pin-permanent';
 
 // ─── ADMIN PIN GATE ───────────────────────────────────────────────────────────
-const _PIN_KEY = 'meraki_admin_until';
-const _PIN_TTL = 60 * 24 * 60 * 60 * 1000; // 60 days in ms
-
 function _isAdminUnlocked() {
-  try {
-    const until = parseInt(localStorage.getItem(_PIN_KEY) || '0', 10);
-    return until > Date.now();
-  } catch(e) { return false; }
+  try { return localStorage.getItem('meraki_admin_unlocked') === 'true'; } catch(e) { return false; }
 }
 
 function _storeAdminUnlock() {
-  try { localStorage.setItem(_PIN_KEY, String(Date.now() + _PIN_TTL)); } catch(e) {}
+  try { localStorage.setItem('meraki_admin_unlocked', 'true'); } catch(e) {}
 }
 
 // Stored PIN used as header for admin API calls (e.g. GET /api/leads)
