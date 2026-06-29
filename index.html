@@ -1451,7 +1451,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <input type="number" id="exhSalePriceInput" class="field-input" placeholder="e.g. 95" min="0" step="1" style="margin-bottom:14px">
 
     <!-- Payment method -->
-    <div class="field-label">Payment (optional)</div>
+    <div class="field-label">Payment <span style="font-weight:400;color:var(--muted)">(skip = Unaccounted)</span></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px" id="exhPaymentBtns">
       <button class="exh-pay-btn" onclick="selectExhPayment('Cash')" data-method="Cash" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Cash</button>
       <button class="exh-pay-btn" onclick="selectExhPayment('Zelle')" data-method="Zelle" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Zelle</button>
@@ -3664,7 +3664,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-boot-v2';
+const _MERAKI_BUILD = '2026-06-29-exh-math';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7262,7 +7262,7 @@ async function setExhStatus(status) {
 }
 
 // ── Exhibition Inventory Tracker ─────────────────────────────────────────────
-const EXH_SIZES = ['XS','S','M','L','XL','XXL'];
+const EXH_SIZES = ['38','40','42','44','46','48'];
 let _exhSelectedPayment = '';
 
 async function openExhTracker(id) {
@@ -7467,7 +7467,7 @@ function _exhSalesHTML() {
     return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
       <div>
         <div style="font-weight:600;font-size:14px;margin-bottom:2px">${item?.name || 'Unknown'}</div>
-        <div style="font-size:12px;color:var(--muted)">${s.size} × ${s.quantity || 1} · <strong>$${s.sold_price_usd || 0}</strong>${s.payment_method ? ' · ' + s.payment_method : ''}</div>
+        <div style="font-size:12px;color:var(--muted)">Size ${s.size} × ${s.quantity || 1} · <strong>$${s.sold_price_usd || 0}</strong> · ${s.payment_method || 'Unaccounted'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${timeStr}</div>
       </div>
       <button onclick="voidExhSale('${s.id}')" style="padding:6px 10px;background:#fff;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--muted);cursor:pointer;touch-action:manipulation;flex-shrink:0">Void</button>
@@ -7476,11 +7476,16 @@ function _exhSalesHTML() {
 }
 
 function _exhSummaryHTML() {
-  const totalItems = exhItems.length;
-  const totalRemaining = exhItems.reduce((a, i) => a + _exhItemRemaining(i), 0);
+  // Active (non-archived, non-deleted) items only for remaining counts
+  const activeItems = exhItems.filter(i => i.status !== 'archived' && i.status !== 'deleted');
+  const totalItems = activeItems.length;
+  const totalRemaining = activeItems.reduce((a, i) => a + _exhItemRemaining(i), 0);
+
+  // Sales come ONLY from exhibition_sales — never from inventory difference
   const totalSold = exhSales.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
   const grossUSD = exhSales.reduce((a, s) => a + (Number(s.sold_price_usd) || 0) * (Number(s.quantity) || 1), 0);
-  const totalCostPkr = exhItems.reduce((a, i) => {
+
+  const totalCostPkr = activeItems.reduce((a, i) => {
     const soldQty = exhSales.filter(s => s.item_id === i.id).reduce((x, s) => x + (Number(s.quantity) || 1), 0);
     return a + (Number(i.cost_pkr) || 0) * soldQty;
   }, 0);
@@ -7491,8 +7496,27 @@ function _exhSummaryHTML() {
       <div style="font-size:12px;color:var(--muted);margin-top:4px">${label}</div>
     </div>`;
 
+  // Payment breakdown
+  const PAYMENT_LABELS = ['Cash','Zelle','Card','Other','Unaccounted'];
+  const paymentRows = PAYMENT_LABELS.map(method => {
+    const sales = exhSales.filter(s => (s.payment_method || 'Unaccounted') === method);
+    if (!sales.length) return null;
+    const amt = sales.reduce((a, s) => a + (Number(s.sold_price_usd) || 0) * (Number(s.quantity) || 1), 0);
+    const qty = sales.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:14px;font-weight:500">${method}</span>
+      <span style="font-size:14px;color:var(--ink)"><strong>$${amt.toFixed(2)}</strong> <span style="color:var(--muted);font-size:12px">· ${qty} pc</span></span>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  const paymentSection = exhSales.length ? `
+    <div style="grid-column:1/-1;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--burgundy);margin-bottom:4px">Sales by Payment</div>
+      ${paymentRows}
+    </div>` : '';
+
   const profitSection = (grossUSD > 0 && totalCostPkr > 0) ? `
-    <div style="margin-top:16px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px">
+    <div style="grid-column:1/-1;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px">
       <div class="field-label" style="margin-bottom:10px">Profit Estimate (optional)</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <span style="font-size:13px;color:var(--muted);white-space:nowrap">PKR per $1 =</span>
@@ -7501,17 +7525,17 @@ function _exhSummaryHTML() {
       <div id="exhProfitResult" style="font-size:13px;color:var(--muted)">Enter exchange rate to estimate profit</div>
     </div>` : '';
 
-  // Store for profit calc
   window._exhSummaryGross = grossUSD;
   window._exhSummaryCostPkr = totalCostPkr;
 
   return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-bottom:80px">
     ${stat('Items', totalItems, 'var(--burgundy)')}
-    ${stat('Sold', totalSold, '#27ae60')}
+    ${stat('Pieces Sold', totalSold, '#27ae60')}
     ${stat('Remaining', totalRemaining, totalRemaining === 0 ? 'var(--error,#c0392b)' : 'var(--ink)')}
     ${stat('Gross Sales', '$' + grossUSD.toFixed(2), '#27ae60')}
-    ${totalCostPkr ? stat('Total Cost', 'PKR ' + Math.round(totalCostPkr).toLocaleString(), 'var(--ink)') : ''}
-    <div style="grid-column:1/-1">${profitSection}</div>
+    ${totalCostPkr ? stat('Total Cost PKR', Math.round(totalCostPkr).toLocaleString(), 'var(--ink)') : ''}
+    ${paymentSection}
+    ${profitSection}
   </div>`;
 }
 
@@ -7529,8 +7553,9 @@ function _renderExhProfitCalc() {
 }
 
 // ── Add / Edit Item ──────────────────────────────────────────────────────────
-function _exhSizeStepperHTML(sizesObj, idPrefix) {
-  return EXH_SIZES.map(s =>
+function _exhSizeStepperHTML(sizesObj, idPrefix, sizeKeys) {
+  const keys = sizeKeys || EXH_SIZES;
+  return keys.map(s =>
     `<div class="exh-size-row">
       <span style="font-size:14px;font-weight:500;min-width:36px">${s}</span>
       <div class="exh-size-stepper">
@@ -7694,10 +7719,10 @@ function openLogExhSale(itemId) {
   document.querySelectorAll('.exh-pay-btn').forEach(b => {
     b.style.background = '#fff'; b.style.borderColor = 'var(--border)'; b.style.fontWeight = '400';
   });
-  // Build size buttons from remaining inventory
+  // Build size buttons from remaining inventory — use item's actual size keys
   const inv = item.size_inventory || {};
   const sizesBtns = document.getElementById('exhSaleSizeButtons');
-  const available = EXH_SIZES.filter(s => (Number(inv[s]) || 0) > 0);
+  const available = Object.keys(inv).filter(s => (Number(inv[s]) || 0) > 0);
   if (available.length === 0) {
     sizesBtns.innerHTML = '<div style="font-size:13px;color:var(--muted)">No stock remaining</div>';
   } else {
@@ -7755,7 +7780,7 @@ async function saveExhSale() {
       size: _exhSaleSize,
       quantity: _exhSaleQty,
       sold_price_usd: price,
-      payment_method: _exhSelectedPayment || null,
+      payment_method: _exhSelectedPayment || 'Unaccounted',
       notes: document.getElementById('exhSaleNotesInput').value.trim() || null,
       voided: false,
     };
@@ -7804,10 +7829,13 @@ function openAdjustExhItem(itemId) {
   const item = exhItems.find(i => i.id === itemId);
   if (!item) return;
   _exhItem = item;
-  _exhAddSizes = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...(item.size_inventory || {}) };
+  // Use item's actual size keys — never force EXH_SIZES onto existing items
+  const existingKeys = Object.keys(item.size_inventory || {});
+  const sizeKeys = existingKeys.length ? existingKeys : EXH_SIZES;
+  _exhAddSizes = { ...Object.fromEntries(sizeKeys.map(s => [s, 0])), ...(item.size_inventory || {}) };
   document.getElementById('adjustExhItemTitle').textContent = 'Adjust — ' + item.name;
   document.getElementById('adjustExhReason').value = '';
-  document.getElementById('adjustExhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdj');
+  document.getElementById('adjustExhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdj', sizeKeys);
   openSheet('adjustExhItemSheet');
 }
 
