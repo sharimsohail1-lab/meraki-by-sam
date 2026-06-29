@@ -3664,7 +3664,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-28-boot-resilient';
+const _MERAKI_BUILD = '2026-06-29-boot-v2';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -3672,38 +3672,38 @@ async function init() {
   }
   applyTranslations();
 
-  // Core data — if this fails, Home shows an error and stops.
-  let coreOk = false;
+  // Load all three independently — no single failure blocks Home from rendering.
   try {
-    console.log('[BOOT] loading core data (products, customers)');
-    const [prods, custs] = await Promise.all([
-      db('select', 'products'),
-      db('select', 'customers'),
-    ]);
+    console.log('[BOOT] loading products');
+    const prods = await db('select', 'products');
     inventory = prods || [];
-    customers = custs || [];
-    console.log('[BOOT] core loaded', { products: inventory.length, customers: customers.length });
-    coreOk = true;
+    console.log('[BOOT] products loaded', inventory.length);
   } catch(e) {
-    console.warn('[BOOT] core load failed', e?.message || e);
-    showToast('Could not load inventory — check connection and retry');
+    console.warn('[BOOT] products failed', e?.message || e);
+    inventory = [];
+    showToast('Could not load inventory — check connection');
   }
 
-  // Exhibitions are optional — failure must not block Home.
+  try {
+    const custs = await db('select', 'customers');
+    customers = custs || [];
+    console.log('[BOOT] customers loaded', customers.length);
+  } catch(e) {
+    console.warn('[BOOT] customers failed', e?.message || e);
+    customers = [];
+  }
+
   try {
     console.log('[BOOT] loading exhibitions');
     const exhs = await db('select', 'exhibitions');
     exhibitions = exhs || [];
-    console.log('[BOOT] exhibitions loaded', { count: exhibitions.length });
+    console.log('[BOOT] exhibitions loaded', exhibitions.length);
   } catch(e) {
-    console.warn('[BOOT] exhibitions load failed', e?.message || e);
+    console.warn('[BOOT] exhibitions failed', e?.message || e);
     exhibitions = [];
-    // Show tab will reflect the failure when Sam opens it; Home is unaffected.
   }
 
-  if (coreOk) {
-    renderHome();
-  }
+  renderHome();
   renderProviderPills();
   loadAppSettings();
 }
