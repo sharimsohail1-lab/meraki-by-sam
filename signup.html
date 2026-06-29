@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#6B1B2B">
+<title>Join Meraki by Sam</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#faf8f5;color:#1a1a1a;min-height:100vh;padding:0 0 40px}
+  .header{background:#6B1B2B;color:#fff;text-align:center;padding:28px 20px 22px}
+  .header h1{font-size:22px;font-weight:700;letter-spacing:0.01em;margin-bottom:4px}
+  .header p{font-size:14px;opacity:0.85}
+  .form-body{max-width:480px;margin:0 auto;padding:24px 18px 0}
+  .field-label{font-size:13px;font-weight:600;color:#555;margin-bottom:6px;margin-top:16px}
+  .field-label.first{margin-top:0}
+  .field-input{width:100%;padding:13px 14px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;background:#fff;-webkit-appearance:none;outline:none}
+  .field-input:focus{border-color:#6B1B2B}
+  select.field-input{color:#1a1a1a}
+  .pill-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .pill{padding:8px 14px;border:1.5px solid #ddd;border-radius:20px;font-size:14px;background:#fff;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  .pill.selected{background:#6B1B2B;color:#fff;border-color:#6B1B2B}
+  .submit-btn{width:100%;padding:15px;background:#6B1B2B;color:#fff;border:none;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:24px;touch-action:manipulation}
+  .submit-btn:active{opacity:0.85}
+  .submit-btn:disabled{opacity:0.5;cursor:not-allowed}
+  .consent{font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5;padding:0 4px}
+  .required-note{font-size:11px;color:#888;margin-bottom:16px}
+  .thank-you{display:none;text-align:center;padding:60px 24px}
+  .thank-you .emoji{font-size:56px;margin-bottom:16px}
+  .thank-you h2{font-size:22px;font-weight:700;margin-bottom:10px;color:#6B1B2B}
+  .thank-you p{font-size:15px;color:#555;line-height:1.6}
+  .error-msg{color:#c0392b;font-size:13px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Meraki by Sam ✨</h1>
+  <p>Join our catalog list — be first to see new arrivals</p>
+</div>
+
+<div id="formSection" class="form-body">
+  <p class="required-note" style="margin-top:16px">* Required fields</p>
+
+  <div class="field-label first">Name *</div>
+  <input type="text" id="f-name" class="field-input" placeholder="Your name" autocomplete="given-name" inputmode="text">
+
+  <div class="field-label">Phone number *</div>
+  <input type="tel" id="f-phone" class="field-input" placeholder="(732) 555-1234" autocomplete="tel" inputmode="tel">
+
+  <div class="field-label">State *</div>
+  <select id="f-state" class="field-input">
+    <option value="">Select state</option>
+    <option>AL</option><option>AK</option><option>AZ</option><option>AR</option><option>CA</option>
+    <option>CO</option><option>CT</option><option>DE</option><option>FL</option><option>GA</option>
+    <option>HI</option><option>ID</option><option>IL</option><option>IN</option><option>IA</option>
+    <option>KS</option><option>KY</option><option>LA</option><option>ME</option><option>MD</option>
+    <option>MA</option><option>MI</option><option>MN</option><option>MS</option><option>MO</option>
+    <option>MT</option><option>NE</option><option>NV</option><option>NH</option><option>NJ</option>
+    <option>NM</option><option>NY</option><option>NC</option><option>ND</option><option>OH</option>
+    <option>OK</option><option>OR</option><option>PA</option><option>RI</option><option>SC</option>
+    <option>SD</option><option>TN</option><option>TX</option><option>UT</option><option>VT</option>
+    <option>VA</option><option>WA</option><option>WV</option><option>WI</option><option>WY</option>
+  </select>
+
+  <div class="field-label">Preferred sizes <span style="font-weight:400;color:#aaa">(optional — select all that apply)</span></div>
+  <div class="pill-row" id="sizePills">
+    <div class="pill" data-val="38">38</div>
+    <div class="pill" data-val="40">40</div>
+    <div class="pill" data-val="42">42</div>
+    <div class="pill" data-val="44">44</div>
+    <div class="pill" data-val="46">46</div>
+    <div class="pill" data-val="48">48</div>
+    <div class="pill" data-val="50">50</div>
+    <div class="pill" data-val="52">52</div>
+    <div class="pill" data-val="Free Size">Free Size</div>
+  </div>
+
+  <div class="field-label">Interested in <span style="font-weight:400;color:#aaa">(optional)</span></div>
+  <div class="pill-row" id="interestPills">
+    <div class="pill" data-val="Casual">Casual</div>
+    <div class="pill" data-val="Semi-formal">Semi-formal</div>
+    <div class="pill" data-val="Formal">Formal</div>
+    <div class="pill" data-val="Wedding">Wedding</div>
+    <div class="pill" data-val="Party">Party</div>
+    <div class="pill" data-val="Unstitched">Unstitched</div>
+  </div>
+
+  <div class="field-label">Preferred contact <span style="font-weight:400;color:#aaa">(optional)</span></div>
+  <div class="pill-row" id="contactPills">
+    <div class="pill" data-val="WhatsApp">WhatsApp</div>
+    <div class="pill" data-val="Text">Text</div>
+    <div class="pill" data-val="Either">Either</div>
+  </div>
+
+  <div class="field-label">Notes <span style="font-weight:400;color:#aaa">(optional)</span></div>
+  <input type="text" id="f-notes" class="field-input" placeholder="e.g. looking for Eid, likes modest cuts">
+
+  <div id="submitError" class="error-msg"></div>
+  <button class="submit-btn" id="submitBtn" onclick="submitLead()">Join the list →</button>
+  <p class="consent">By submitting, you agree to receive Meraki catalog updates by text or WhatsApp.</p>
+</div>
+
+<div id="thankYou" class="thank-you">
+  <div class="emoji">✨</div>
+  <h2>You're on the list!</h2>
+  <p>Sam will send new arrivals and catalog updates soon.<br>See you at the booth!</p>
+</div>
+
+<script>
+// Multi-select pills
+document.querySelectorAll('#sizePills .pill, #interestPills .pill').forEach(p => {
+  p.addEventListener('click', () => p.classList.toggle('selected'));
+});
+// Single-select contact
+document.querySelectorAll('#contactPills .pill').forEach(p => {
+  p.addEventListener('click', () => {
+    document.querySelectorAll('#contactPills .pill').forEach(x => x.classList.remove('selected'));
+    p.classList.add('selected');
+  });
+});
+
+function getSelected(containerId) {
+  return Array.from(document.querySelectorAll('#' + containerId + ' .pill.selected')).map(p => p.dataset.val);
+}
+function getSingle(containerId) {
+  const sel = document.querySelector('#' + containerId + ' .pill.selected');
+  return sel ? sel.dataset.val : null;
+}
+
+async function submitLead() {
+  const btn = document.getElementById('submitBtn');
+  const errEl = document.getElementById('submitError');
+  errEl.style.display = 'none';
+
+  const name = document.getElementById('f-name').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const state = document.getElementById('f-state').value;
+
+  if (!name) { errEl.textContent = 'Please enter your name.'; errEl.style.display = 'block'; return; }
+  if (!phone) { errEl.textContent = 'Please enter your phone number.'; errEl.style.display = 'block'; return; }
+  if (!state) { errEl.textContent = 'Please select your state.'; errEl.style.display = 'block'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const body = {
+    name,
+    phone,
+    state,
+    preferred_sizes: getSelected('sizePills'),
+    interests: getSelected('interestPills'),
+    preferred_contact: getSingle('contactPills'),
+    notes: document.getElementById('f-notes').value.trim() || null,
+    source: 'qr',
+    source_event: "APPNA'26",
+  };
+
+  try {
+    const resp = await fetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Submission failed');
+    document.getElementById('formSection').style.display = 'none';
+    document.getElementById('thankYou').style.display = 'block';
+    window.scrollTo(0, 0);
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Join the list →';
+  }
+}
+</script>
+</body>
+</html>

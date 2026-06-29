@@ -13,6 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js" defer></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 :root {
@@ -710,19 +711,39 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
     <!-- PEOPLE / Customers -->
     <div id="screen-people" class="screen">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <p class="section-title" id="t-peopleTitle">Customers</p>
-        <button class="btn btn-primary btn-sm" onclick="openSheet('addCustomerSheet')"><i class="ti ti-plus"></i> Add</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <p class="section-title" style="margin-bottom:0">Customers</p>
+        <button class="btn btn-primary btn-sm" id="peopleAddBtn" onclick="_peopleAddAction()"><i class="ti ti-plus"></i> Add</button>
       </div>
-      <button class="whatsapp-import-btn" onclick="openSheet('whatsappImportSheet')">
-        <i class="ti ti-brand-whatsapp" style="font-size:20px;color:#25D366"></i>
-        <div>
-          <div style="font-size:13px;font-weight:500;color:var(--ink)">Import from WhatsApp Chat</div>
-          <div style="font-size:11px;color:var(--muted)">Export any chat → upload here → customer saved automatically</div>
+      <!-- Tabs -->
+      <div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff" id="peopleTabs">
+        <button onclick="_setPeopleTab('leads')" id="tab-leads" style="flex:1;padding:9px;border:none;background:var(--burgundy);color:#fff;font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation">Leads</button>
+        <button onclick="_setPeopleTab('contacts')" id="tab-contacts" style="flex:1;padding:9px;border:none;border-left:1px solid var(--border);background:transparent;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation">Contacts</button>
+      </div>
+      <!-- Leads panel -->
+      <div id="panel-leads">
+        <!-- QR card -->
+        <div onclick="openLeadQR()" style="display:flex;align-items:center;gap:14px;background:var(--gold-pale,#fffbf0);border:1px solid var(--gold,#c9a84c);border-radius:12px;padding:14px 16px;margin-bottom:14px;cursor:pointer;touch-action:manipulation">
+          <div style="width:40px;height:40px;background:var(--burgundy);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <i class="ti ti-qrcode" style="font-size:22px;color:#fff"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px">APPNA'26 Signup QR</div>
+            <div style="font-size:12px;color:var(--muted)">Show customers — scan to join catalog list</div>
+          </div>
+          <i class="ti ti-chevron-right" style="color:var(--muted)"></i>
         </div>
-        <i class="ti ti-chevron-right" style="color:var(--muted);margin-left:auto"></i>
-      </button>
-      <div id="customerList"></div>
+        <!-- Filter pills -->
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button onclick="_setLeadsFilter('all',this)" class="tab-pill active" style="font-size:12px;padding:6px 14px">All</button>
+          <button onclick="_setLeadsFilter('appna26',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">APPNA'26</button>
+        </div>
+        <div id="leadsList"></div>
+      </div>
+      <!-- Contacts panel -->
+      <div id="panel-contacts" style="display:none">
+        <div id="customerList"></div>
+      </div>
     </div>
 
     <!-- SHOW / Exhibition -->
@@ -1301,6 +1322,80 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- ADD LEAD SHEET -->
+<div class="sheet-overlay exh-top" id="addLeadSheet" onclick="closeSheetOutside(event,'addLeadSheet')">
+  <div class="sheet" style="max-height:92vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="sheet-title" style="margin-bottom:0">Add Lead</div>
+      <button onclick="closeSheet('addLeadSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="field-label">Name *</div>
+    <input type="text" id="leadNameInput" class="field-input" placeholder="Customer name" style="margin-bottom:12px">
+    <div class="field-label">Phone *</div>
+    <input type="tel" id="leadPhoneInput" class="field-input" placeholder="(732) 555-1234" style="margin-bottom:12px" inputmode="tel">
+    <div class="field-label">State *</div>
+    <select id="leadStateInput" class="field-input" style="margin-bottom:12px">
+      <option value="">Select state</option>
+      <option>AL</option><option>AK</option><option>AZ</option><option>AR</option><option>CA</option>
+      <option>CO</option><option>CT</option><option>DE</option><option>FL</option><option>GA</option>
+      <option>HI</option><option>ID</option><option>IL</option><option>IN</option><option>IA</option>
+      <option>KS</option><option>KY</option><option>LA</option><option>ME</option><option>MD</option>
+      <option>MA</option><option>MI</option><option>MN</option><option>MS</option><option>MO</option>
+      <option>MT</option><option>NE</option><option>NV</option><option>NH</option><option>NJ</option>
+      <option>NM</option><option>NY</option><option>NC</option><option>ND</option><option>OH</option>
+      <option>OK</option><option>OR</option><option>PA</option><option>RI</option><option>SC</option>
+      <option>SD</option><option>TN</option><option>TX</option><option>UT</option><option>VT</option>
+      <option>VA</option><option>WA</option><option>WV</option><option>WI</option><option>WY</option>
+    </select>
+    <div class="field-label">Preferred sizes <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <div class="size-pills" id="leadSizePills" style="margin-bottom:12px;flex-wrap:wrap">
+      <div class="size-pill" onclick="toggleLeadSize(this,'38')">38</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'40')">40</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'42')">42</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'44')">44</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'46')">46</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'48')">48</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'50')">50</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'52')">52</div>
+      <div class="size-pill" onclick="toggleLeadSize(this,'Free Size')">Free Size</div>
+    </div>
+    <div class="field-label">Interested in <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <div class="chip-row" id="leadInterestChips" style="margin-bottom:12px">
+      <div class="chip" onclick="toggleLeadInterest(this,'Casual')">Casual</div>
+      <div class="chip" onclick="toggleLeadInterest(this,'Semi-formal')">Semi-formal</div>
+      <div class="chip" onclick="toggleLeadInterest(this,'Formal')">Formal</div>
+      <div class="chip" onclick="toggleLeadInterest(this,'Wedding')">Wedding</div>
+      <div class="chip" onclick="toggleLeadInterest(this,'Party')">Party</div>
+      <div class="chip" onclick="toggleLeadInterest(this,'Unstitched')">Unstitched</div>
+    </div>
+    <div class="field-label">Preferred contact <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <div class="size-pills" id="leadContactPills" style="margin-bottom:12px">
+      <div class="size-pill" onclick="selectLeadContact(this,'WhatsApp')">WhatsApp</div>
+      <div class="size-pill" onclick="selectLeadContact(this,'Text')">Text</div>
+      <div class="size-pill" onclick="selectLeadContact(this,'Either')">Either</div>
+    </div>
+    <div class="field-label">Notes <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <input type="text" id="leadNotesInput" class="field-input" placeholder="e.g. looking for Eid, wants size 44" style="margin-bottom:16px">
+    <button class="btn btn-primary" onclick="saveLead()"><i class="ti ti-device-floppy"></i> Save Lead</button>
+  </div>
+</div>
+
+<!-- LEAD QR MODAL -->
+<div class="sheet-overlay exh-top" id="leadQRSheet" onclick="closeSheetOutside(event,'leadQRSheet')">
+  <div class="sheet" style="text-align:center">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="sheet-title" style="margin-bottom:0">APPNA'26 Signup QR</div>
+      <button onclick="closeSheet('leadQRSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="leadQRCode" style="display:flex;justify-content:center;margin-bottom:16px"></div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:6px">Scan to join Meraki catalog updates</div>
+    <div style="font-size:12px;font-weight:600;color:var(--burgundy);margin-bottom:20px">Source: APPNA'26</div>
+    <button class="btn btn-secondary" onclick="copyLeadSignupLink()"><i class="ti ti-copy"></i> Copy signup link</button>
+  </div>
+</div>
+
 <!-- ADD EXHIBITION SHEET -->
 <div class="sheet-overlay" id="addExhibitionSheet" onclick="closeSheetOutside(event,'addExhibitionSheet')">
   <div class="sheet">
@@ -1577,6 +1672,8 @@ let lang = localStorage.getItem('lang') || 'en';
 let inventory = [];
 let customers = [];
 let exhibitions = [];
+let leads = [];
+let _leadsFilter = 'all'; // 'all' | 'appna26'
 
 // ─── SIZE INVENTORY HELPERS ───────────────────────────────────────────────────
 // Single source of truth for all availability logic.
@@ -2195,7 +2292,7 @@ function showScreen(name) {
   if (name === 'home') renderHome();
   if (name === 'stock') { if (stockView === 'collections') renderCollections(); else renderInventory(); }
   if (name === 'add') { updateCollectionPickerDisplay(); }
-  if (name === 'people') renderCustomers();
+  if (name === 'people') { if (_currentPeopleTab === 'leads') renderLeads(); else renderCustomers(); }
   if (name === 'show') renderExhibitions();
 }
 
@@ -3719,7 +3816,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-boot-loading';
+const _MERAKI_BUILD = '2026-06-29-customer-leads';
 
 window._appBootState = { loading: true, loaded: false, error: null };
 
@@ -3771,6 +3868,16 @@ async function _bootLoadData() {
   } catch(e) {
     console.warn('[BOOT] exhibitions failed', e?.message || e);
     exhibitions = [];
+  }
+
+  try {
+    const resp = await fetch('/api/leads');
+    const json = await resp.json();
+    leads = json.data || [];
+    console.log('[BOOT] leads loaded', leads.length);
+  } catch(e) {
+    console.warn('[BOOT] leads failed', e?.message || e);
+    leads = [];
   }
 
   window._appBootState = { loading: false, loaded: true, error: null };
@@ -6846,6 +6953,172 @@ function renderCustomers() {
       </div>
     </div>`).join('');
 }
+
+// ─── LEADS ───────────────────────────────────────────────────────────────────
+
+let _currentPeopleTab = 'leads';
+let _leadSizes = new Set();
+let _leadInterests = new Set();
+let _leadContact = null;
+
+function _setPeopleTab(tab) {
+  _currentPeopleTab = tab;
+  document.getElementById('panel-leads').style.display = tab === 'leads' ? '' : 'none';
+  document.getElementById('panel-contacts').style.display = tab === 'contacts' ? '' : 'none';
+  const leadsBtn = document.getElementById('tab-leads');
+  const contactsBtn = document.getElementById('tab-contacts');
+  leadsBtn.style.background = tab === 'leads' ? 'var(--burgundy)' : 'transparent';
+  leadsBtn.style.color = tab === 'leads' ? '#fff' : 'var(--ink)';
+  contactsBtn.style.background = tab === 'contacts' ? 'var(--burgundy)' : 'transparent';
+  contactsBtn.style.color = tab === 'contacts' ? '#fff' : 'var(--ink)';
+  if (tab === 'contacts') renderCustomers();
+  if (tab === 'leads') renderLeads();
+  document.getElementById('peopleAddBtn').title = tab === 'leads' ? 'Add Lead' : 'Add Contact';
+}
+
+function _peopleAddAction() {
+  if (_currentPeopleTab === 'leads') openAddLeadSheet();
+  else openSheet('addCustomerSheet');
+}
+
+function _setLeadsFilter(f, btn) {
+  _leadsFilter = f;
+  document.querySelectorAll('#panel-leads .tab-pill').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderLeads();
+}
+
+function renderLeads() {
+  const list = document.getElementById('leadsList');
+  let visible = [...leads];
+  if (_leadsFilter === 'appna26') visible = visible.filter(l => l.source_event === "APPNA'26");
+  if (!visible.length) {
+    list.innerHTML = `<div class="empty" style="padding:40px 0"><i class="ti ti-user-plus"></i><p>${_leadsFilter === 'appna26' ? "No APPNA'26 leads yet." : 'No leads yet. Share the QR to get started.'}</p></div>`;
+    return;
+  }
+  window._leadIds = [];
+  list.innerHTML = visible.map(lead => {
+    const idx = window._leadIds.length;
+    window._leadIds.push(lead.id);
+    const sizes = Array.isArray(lead.preferred_sizes) ? lead.preferred_sizes : [];
+    const interests = Array.isArray(lead.interests) ? lead.interests : [];
+    const phone = lead.phone || '';
+    const waPhone = phone.replace(/\D/g, '');
+    return `<div class="exh-item-card" style="padding:14px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px">
+        <div style="font-weight:600;font-size:15px">${lead.name}</div>
+        <button onclick="deleteLeadPrompt(window._leadIds[${idx}])" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--muted);font-size:16px;touch-action:manipulation"><i class="ti ti-trash"></i></button>
+      </div>
+      ${phone ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtPhone(phone)}${lead.state ? ' · ' + lead.state : ''}</div>` : (lead.state ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${lead.state}</div>` : '')}
+      ${sizes.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Sizes: ${sizes.join(', ')}</div>` : ''}
+      ${lead.preferred_contact ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Contact: ${lead.preferred_contact}</div>` : ''}
+      ${interests.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Interests: ${interests.join(', ')}</div>` : ''}
+      ${lead.notes ? `<div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-style:italic">"${lead.notes}"</div>` : ''}
+      <div style="font-size:11px;font-weight:600;color:var(--burgundy);margin-bottom:10px">Registered at: ${lead.source_event || 'Unknown'}</div>
+      ${phone ? `<div style="display:flex;gap:8px">
+        <button onclick="navigator.clipboard.writeText('${phone}');showToast('Phone copied')" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;cursor:pointer;touch-action:manipulation"><i class="ti ti-copy"></i> Copy</button>
+        <a href="https://wa.me/${waPhone}" target="_blank" style="flex:1;padding:8px;border:1px solid #25D366;border-radius:8px;background:#fff;font-size:12px;cursor:pointer;text-decoration:none;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px;touch-action:manipulation"><i class="ti ti-brand-whatsapp" style="color:#25D366"></i> WhatsApp</a>
+        <a href="sms:${phone}" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;cursor:pointer;text-decoration:none;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px;touch-action:manipulation"><i class="ti ti-message"></i> Text</a>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function _fmtPhone(p) {
+  const d = (p || '').replace(/\D/g, '');
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  if (d.length === 11 && d[0] === '1') return `+1 (${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  return p;
+}
+
+function openAddLeadSheet() {
+  _leadSizes.clear(); _leadInterests.clear(); _leadContact = null;
+  document.getElementById('leadNameInput').value = '';
+  document.getElementById('leadPhoneInput').value = '';
+  document.getElementById('leadStateInput').value = '';
+  document.getElementById('leadNotesInput').value = '';
+  document.querySelectorAll('#leadSizePills .size-pill, #leadContactPills .size-pill').forEach(p => p.classList.remove('selected'));
+  document.querySelectorAll('#leadInterestChips .chip').forEach(p => p.classList.remove('selected'));
+  openSheet('addLeadSheet');
+}
+
+function toggleLeadSize(el, val) {
+  if (_leadSizes.has(val)) { _leadSizes.delete(val); el.classList.remove('selected'); }
+  else { _leadSizes.add(val); el.classList.add('selected'); }
+}
+
+function toggleLeadInterest(el, val) {
+  if (_leadInterests.has(val)) { _leadInterests.delete(val); el.classList.remove('selected'); }
+  else { _leadInterests.add(val); el.classList.add('selected'); }
+}
+
+function selectLeadContact(el, val) {
+  _leadContact = val;
+  document.querySelectorAll('#leadContactPills .size-pill').forEach(p => p.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+async function saveLead() {
+  const name = document.getElementById('leadNameInput').value.trim();
+  const phone = document.getElementById('leadPhoneInput').value.trim();
+  const state = document.getElementById('leadStateInput').value;
+  if (!name) { showToast('Name is required'); return; }
+  if (!phone) { showToast('Phone is required'); return; }
+  if (!state) { showToast('State is required'); return; }
+  const body = {
+    name, phone, state,
+    preferred_sizes: Array.from(_leadSizes),
+    interests: Array.from(_leadInterests),
+    preferred_contact: _leadContact,
+    notes: document.getElementById('leadNotesInput').value.trim() || null,
+    source: 'manual',
+    source_event: "APPNA'26",
+  };
+  try {
+    const resp = await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Failed to save');
+    const existing = leads.findIndex(l => l.id === json.data.id);
+    if (existing >= 0) leads[existing] = json.data; else leads.unshift(json.data);
+    closeSheet('addLeadSheet');
+    renderLeads();
+    showToast(json.updated ? 'Lead updated' : 'Lead saved');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+async function deleteLeadPrompt(id) {
+  const lead = leads.find(l => l.id === id);
+  if (!lead) return;
+  if (!confirm('Delete lead for ' + lead.name + '?')) return;
+  try {
+    await db('delete', 'customer_leads', { id });
+    leads = leads.filter(l => l.id !== id);
+    renderLeads();
+    showToast('Lead deleted');
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+function openLeadQR() {
+  openSheet('leadQRSheet');
+  const container = document.getElementById('leadQRCode');
+  container.innerHTML = '';
+  const signupUrl = window.location.origin + '/signup.html';
+  if (typeof QRCode !== 'undefined') {
+    QRCode.toCanvas(signupUrl, { width: 240, margin: 2, color: { dark: '#6B1B2B', light: '#ffffff' } }, (err, canvas) => {
+      if (err) { container.innerHTML = `<div style="font-size:13px;color:var(--muted)">QR unavailable</div>`; return; }
+      container.appendChild(canvas);
+    });
+  } else {
+    container.innerHTML = `<div style="font-size:13px;color:var(--muted);word-break:break-all">${signupUrl}</div>`;
+  }
+}
+
+function copyLeadSignupLink() {
+  const url = window.location.origin + '/signup.html';
+  navigator.clipboard.writeText(url).then(() => showToast('Link copied'));
+}
+
+// ─── END LEADS ───────────────────────────────────────────────────────────────
 
 function selectSize(el, size) {
   selectedSize = size;
