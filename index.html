@@ -1459,7 +1459,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px" id="exhPaymentBtns">
       <button class="exh-pay-btn" onclick="selectExhPayment('Cash')" data-method="Cash" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Cash</button>
       <button class="exh-pay-btn" onclick="selectExhPayment('Zelle')" data-method="Zelle" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Zelle</button>
-      <button class="exh-pay-btn" onclick="selectExhPayment('Card')" data-method="Card" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Card</button>
+      <button class="exh-pay-btn" onclick="selectExhPayment('Venmo')" data-method="Venmo" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Venmo</button>
+      <button class="exh-pay-btn" onclick="selectExhPayment('Square')" data-method="Square" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Square</button>
       <button class="exh-pay-btn" onclick="selectExhPayment('Other')" data-method="Other" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;cursor:pointer;touch-action:manipulation">Other</button>
     </div>
 
@@ -3692,7 +3693,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-backfill';
+const _MERAKI_BUILD = '2026-06-29-exh-payments';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7588,7 +7589,7 @@ function _exhSummaryHTML() {
     </div>`;
 
   // Payment breakdown
-  const PAYMENT_LABELS = ['Cash','Zelle','Card','Other','Unaccounted'];
+  const PAYMENT_LABELS = ['Cash','Zelle','Venmo','Square','Card','Other','Unaccounted'];
   const paymentRows = PAYMENT_LABELS.map(method => {
     const sales = exhSales.filter(s => (s.payment_method || 'Unaccounted') === method);
     if (!sales.length) return null;
