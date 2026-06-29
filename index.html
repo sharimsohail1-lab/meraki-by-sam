@@ -7108,7 +7108,7 @@ function renderLeads() {
         <div style="font-weight:600;font-size:15px">${lead.name}</div>
         <button onclick="deleteLeadPrompt(window._leadIds[${idx}])" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--muted);font-size:16px;touch-action:manipulation"><i class="ti ti-trash"></i></button>
       </div>
-      ${phone ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtPhone(phone)}${lead.state ? ' · ' + lead.state : ''}</div>` : (lead.state ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${lead.state}</div>` : '')}
+      ${phone ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtPhone(phone)}${lead.state ? ' · ' + _fmtState(lead.state) : ''}</div>` : (lead.state ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtState(lead.state)}</div>` : '')}
       ${sizes.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Sizes: ${sizes.join(', ')}</div>` : ''}
       ${lead.preferred_contact ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Contact: ${lead.preferred_contact}</div>` : ''}
       ${interests.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Interests: ${interests.join(', ')}</div>` : ''}
@@ -7123,6 +7123,22 @@ function renderLeads() {
   }).join('');
 }
 
+const US_STATES = [
+  ["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],
+  ["CO","Colorado"],["CT","Connecticut"],["DC","District of Columbia"],["DE","Delaware"],
+  ["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],
+  ["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],
+  ["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],
+  ["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],
+  ["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],
+  ["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],
+  ["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],
+  ["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],
+  ["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"]
+];
+const _STATE_MAP = Object.fromEntries(US_STATES);
+function _fmtState(s) { return _STATE_MAP[s] || s || ''; }
+
 function _fmtPhone(p) {
   const d = (p || '').replace(/\D/g, '');
   if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
@@ -7134,8 +7150,12 @@ function openAddLeadSheet() {
   _leadSizes.clear(); _leadInterests.clear(); _leadContact = null;
   document.getElementById('leadNameInput').value = '';
   document.getElementById('leadPhoneInput').value = '';
-  document.getElementById('leadStateInput').value = '';
   document.getElementById('leadNotesInput').value = '';
+  // Populate state dropdown with full names (value = abbreviation)
+  const sel = document.getElementById('leadStateInput');
+  sel.innerHTML = '<option value="">Select state</option>' +
+    US_STATES.map(([abbr, name]) => `<option value="${abbr}">${name}</option>`).join('');
+  sel.value = '';
   document.querySelectorAll('#leadSizePills .size-pill, #leadContactPills .size-pill').forEach(p => p.classList.remove('selected'));
   document.querySelectorAll('#leadInterestChips .chip').forEach(p => p.classList.remove('selected'));
   openSheet('addLeadSheet');
