@@ -10,13 +10,20 @@ function getSupabase() {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-meraki-pin');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const supabase = getSupabase();
 
-  // GET — admin list
+  // GET — admin list (requires PIN header)
   if (req.method === 'GET') {
+    const adminPin = process.env.MERAKI_ADMIN_PIN;
+    if (adminPin) {
+      const supplied = req.headers['x-meraki-pin'];
+      if (!supplied || supplied !== adminPin) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
     const { data, error } = await supabase
       .from('customer_leads')
       .select('*')

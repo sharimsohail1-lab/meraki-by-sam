@@ -88,6 +88,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .loading span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes pulse { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-7px)} }
 @keyframes spin { to { transform: rotate(360deg); } }
+#adminPinGate { display:none } /* hidden by default; JS shows it when needed */
 #leadQRCode canvas, #leadQRCode img { width:216px !important; height:216px !important; display:block; }
 
 /* Toast */
@@ -468,6 +469,25 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </style>
 </head>
 <body>
+
+<!-- ADMIN PIN GATE — shown before any private data loads -->
+<div id="adminPinGate" style="display:none;position:fixed;inset:0;background:#faf8f5;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px">
+  <div style="font-size:28px;font-weight:700;color:#6B1B2B;margin-bottom:6px;font-family:'Playfair Display',serif">Meraki by Sam</div>
+  <div style="font-size:14px;color:#888;margin-bottom:36px">Admin access</div>
+  <div style="width:100%;max-width:320px">
+    <div style="font-size:13px;font-weight:600;color:#555;margin-bottom:8px;text-align:center">Enter PIN</div>
+    <input id="adminPinInput" type="password" inputmode="numeric" maxlength="12"
+      style="width:100%;padding:15px;border:2px solid #ddd;border-radius:12px;font-size:22px;text-align:center;letter-spacing:0.2em;background:#fff;outline:none;-webkit-appearance:none"
+      onkeydown="if(event.key==='Enter')submitAdminPin()"
+      onfocus="this.style.borderColor='#6B1B2B'" onblur="this.style.borderColor='#ddd'">
+    <div id="adminPinError" style="color:#c0392b;font-size:13px;text-align:center;margin-top:8px;min-height:20px"></div>
+    <button onclick="submitAdminPin()" id="adminPinBtn"
+      style="width:100%;padding:15px;background:#6B1B2B;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px;touch-action:manipulation">
+      Unlock
+    </button>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- HEADER -->
@@ -3818,7 +3838,61 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-customer-leads';
+const _MERAKI_BUILD = '2026-06-29-pin-gate';
+
+// ─── ADMIN PIN GATE ───────────────────────────────────────────────────────────
+const _PIN_KEY = 'meraki_admin_until';
+const _PIN_TTL = 60 * 24 * 60 * 60 * 1000; // 60 days in ms
+
+function _isAdminUnlocked() {
+  try {
+    const until = parseInt(localStorage.getItem(_PIN_KEY) || '0', 10);
+    return until > Date.now();
+  } catch(e) { return false; }
+}
+
+function _storeAdminUnlock() {
+  try { localStorage.setItem(_PIN_KEY, String(Date.now() + _PIN_TTL)); } catch(e) {}
+}
+
+// Stored PIN used as header for admin API calls (e.g. GET /api/leads)
+function _getStoredPin() {
+  try { return localStorage.getItem('meraki_admin_pin') || ''; } catch(e) { return ''; }
+}
+
+async function submitAdminPin() {
+  const pin = document.getElementById('adminPinInput').value.trim();
+  const errEl = document.getElementById('adminPinError');
+  const btn = document.getElementById('adminPinBtn');
+  if (!pin) { errEl.textContent = 'Please enter your PIN'; return; }
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  try {
+    const resp = await fetch('/api/admin-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    });
+    const json = await resp.json();
+    if (!resp.ok || !json.ok) {
+      errEl.textContent = json.error || 'Incorrect PIN';
+      btn.disabled = false; btn.textContent = 'Unlock';
+      document.getElementById('adminPinInput').value = '';
+      document.getElementById('adminPinInput').focus();
+      return;
+    }
+    // Success
+    _storeAdminUnlock();
+    try { localStorage.setItem('meraki_admin_pin', pin); } catch(e) {}
+    document.getElementById('adminPinGate').style.display = 'none';
+    await _bootLoadData();
+  } catch(e) {
+    errEl.textContent = 'Could not reach server. Check connection.';
+    btn.disabled = false; btn.textContent = 'Unlock';
+  }
+}
+// ─── END ADMIN PIN GATE ───────────────────────────────────────────────────────
 
 window._appBootState = { loading: true, loaded: false, error: null };
 
@@ -3873,7 +3947,7 @@ async function _bootLoadData() {
   }
 
   try {
-    const resp = await fetch('/api/leads');
+    const resp = await fetch('/api/leads', { headers: { 'x-meraki-pin': _getStoredPin() } });
     const json = await resp.json();
     leads = json.data || [];
     console.log('[BOOT] leads loaded', leads.length);
@@ -3894,7 +3968,36 @@ async function init() {
     document.getElementById('headerLogo').src = MERAKI_LOGO_SRC;
   }
   applyTranslations();
-  await _bootLoadData();
+
+  // Check if PIN gate is needed
+  if (_isAdminUnlocked()) {
+    // Already unlocked on this device — boot normally
+    await _bootLoadData();
+    return;
+  }
+
+  // Check if MERAKI_ADMIN_PIN is configured on the server
+  try {
+    const resp = await fetch('/api/admin-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: '__probe__' }),
+    });
+    const json = await resp.json();
+    if (json.gateDisabled) {
+      // Env var not set — skip gate, boot normally
+      console.log('[BOOT] PIN gate disabled (MERAKI_ADMIN_PIN not set)');
+      await _bootLoadData();
+      return;
+    }
+  } catch(e) {
+    // Can't reach server — still show gate to be safe
+    console.warn('[BOOT] Could not probe admin-auth:', e.message);
+  }
+
+  // Show PIN gate — do NOT boot until unlocked
+  document.getElementById('adminPinGate').style.display = 'flex';
+  document.getElementById('adminPinInput').focus();
 }
 
 async function retryAppBoot() {
