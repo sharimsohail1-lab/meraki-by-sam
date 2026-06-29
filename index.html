@@ -3692,7 +3692,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-freesize';
+const _MERAKI_BUILD = '2026-06-29-exh-adjust';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7903,17 +7903,9 @@ async function voidExhSale(saleId) {
 
 // ── Adjust Inventory ─────────────────────────────────────────────────────────
 function openAdjustExhItem(itemId) {
-  const item = exhItems.find(i => i.id === itemId);
-  if (!item) return;
-  _exhItem = item;
-  // Use item's actual size keys — never force EXH_SIZES onto existing items
-  const existingKeys = Object.keys(item.size_inventory || {});
-  const sizeKeys = existingKeys.length ? existingKeys : EXH_SIZES;
-  _exhAddSizes = { ...Object.fromEntries(sizeKeys.map(s => [s, 0])), ...(item.size_inventory || {}) };
-  document.getElementById('adjustExhItemTitle').textContent = 'Adjust — ' + item.name;
-  document.getElementById('adjustExhReason').value = '';
-  document.getElementById('adjustExhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdj', sizeKeys);
-  openSheet('adjustExhItemSheet');
+  // Adjust now opens Edit Item — same form, all sizes, no data loss.
+  // The old adjustExhItemSheet is preserved in the DOM but no longer opened.
+  openEditExhItem(itemId);
 }
 
 function exhAdjSizeChange(size, delta) {
