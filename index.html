@@ -1726,7 +1726,7 @@ let _exhAddSizes = {};       // size counts in Add/Edit Item form
 let _exhAddPhoto = null;     // compressed data URL for item photo
 let _exhSaleSize = '';       // selected size in Log Sale sheet
 let _exhSaleQty = 1;
-let _exhInventorySort = 'default';
+let _exhInventorySort = localStorage.getItem('exhInventorySort') || 'default';
 let currentCustomer = null;
 let selectedZones = new Set();
 let selectedProblems = new Set();
@@ -7613,6 +7613,7 @@ function getShadeFromExhibitionName(name) {
 
 function _setExhSort(val) {
   _exhInventorySort = val;
+  localStorage.setItem('exhInventorySort', val);
   _renderExhContent();
 }
 
