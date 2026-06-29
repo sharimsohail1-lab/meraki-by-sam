@@ -1354,8 +1354,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px">
       <button onclick="closeExhTracker()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px;touch-action:manipulation"><i class="ti ti-arrow-left"></i></button>
       <div id="exhTrackerTitle" style="font-family:'Playfair Display',serif;font-size:17px;font-weight:600;text-align:center"></div>
-      <div style="width:36px"></div>
+      <button id="exhRefreshBtn" onclick="refreshExhTracker()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px;touch-action:manipulation;width:36px" title="Refresh"><i class="ti ti-refresh"></i></button>
     </div>
+    <div id="exhLastUpdated" style="text-align:center;font-size:11px;color:rgba(255,255,255,0.65);padding:0 16px 8px"></div>
   </div>
   <!-- tab bar -->
   <div style="display:flex;background:#fff;border-bottom:1px solid var(--border);flex-shrink:0">
@@ -3691,7 +3692,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-visual';
+const _MERAKI_BUILD = '2026-06-29-exh-sync';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7310,9 +7311,11 @@ function closeExhTracker() {
   document.body.style.overflow = '';
 }
 
-async function _loadExhData() {
+async function _loadExhData(silent = false) {
   const content = document.getElementById('exhTrackerContent');
-  content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading…</div></div>';
+  if (!silent) {
+    content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading…</div></div>';
+  }
   try {
     const [items, allSales] = await Promise.all([
       db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id } }),
@@ -7320,9 +7323,37 @@ async function _loadExhData() {
     ]);
     exhItems = items || [];
     exhSales = (allSales || []).filter(s => !s.voided);
+    _stampExhLastUpdated();
     _renderExhContent();
   } catch(e) {
-    content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
+    if (!silent) {
+      content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
+    }
+    throw e;
+  }
+}
+
+function _stampExhLastUpdated() {
+  const el = document.getElementById('exhLastUpdated');
+  if (!el) return;
+  const t = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  el.textContent = 'Updated ' + t;
+}
+
+async function refreshExhTracker() {
+  if (!currentExhibition) return;
+  const btn = document.getElementById('exhRefreshBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i>'; }
+  const el = document.getElementById('exhLastUpdated');
+  if (el) el.textContent = 'Refreshing…';
+  try {
+    await _loadExhData(true);
+    showToast('Updated ✓');
+  } catch(e) {
+    showToast('Could not refresh exhibition');
+    if (el) el.textContent = 'Refresh failed';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i>'; }
   }
 }
 
@@ -7808,35 +7839,42 @@ function selectExhPayment(method) {
 async function saveExhSale() {
   if (!_exhItem || !currentExhibition) return;
   if (!_exhSaleSize) { showToast('Select a size'); return; }
-  const remaining = Number((_exhItem.size_inventory || {})[_exhSaleSize]) || 0;
-  if (_exhSaleQty > remaining) { showToast(`Only ${remaining} left in size ${_exhSaleSize}`); return; }
   const price = parseFloat(document.getElementById('exhSalePriceInput').value);
   if (!price || price <= 0) { showToast('Enter sold price'); return; }
+  const btn = document.querySelector('#logExhSaleSheet .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
-    const saleData = {
-      exhibition_id: currentExhibition.id,
-      item_id: _exhItem.id,
-      size: _exhSaleSize,
-      quantity: _exhSaleQty,
-      sold_price_usd: price,
-      payment_method: _exhSelectedPayment || 'Unaccounted',
-      notes: document.getElementById('exhSaleNotesInput').value.trim() || null,
-      voided: false,
-    };
-    const rows = await db('insert', 'exh_sales', { data: saleData });
-    if (rows && rows[0]) exhSales.push(rows[0]);
-    // Decrement size_inventory
-    const newInv = { ...(_exhItem.size_inventory || {}) };
-    newInv[_exhSaleSize] = Math.max(0, (Number(newInv[_exhSaleSize]) || 0) - _exhSaleQty);
-    await db('update', 'exh_items', { id: _exhItem.id, data: { size_inventory: newInv, updated_at: new Date().toISOString() } });
-    const idx = exhItems.findIndex(i => i.id === _exhItem.id);
-    if (idx >= 0) exhItems[idx] = { ...exhItems[idx], size_inventory: newInv };
+    const r = await fetch('/api/exhibition-log-sale', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exhibitionId: currentExhibition.id,
+        itemId: _exhItem.id,
+        size: _exhSaleSize,
+        quantity: _exhSaleQty,
+        soldPriceUsd: price,
+        paymentMethod: _exhSelectedPayment || 'Unaccounted',
+        notes: document.getElementById('exhSaleNotesInput').value.trim() || null,
+      }),
+    });
+    const json = await r.json();
+    if (json.error) throw new Error(json.error);
+    // Update local state from server response
+    if (json.sale) exhSales.push(json.sale);
+    if (json.item) {
+      const idx = exhItems.findIndex(i => i.id === json.item.id);
+      if (idx >= 0) exhItems[idx] = json.item;
+      else exhItems.push(json.item);
+    }
+    _stampExhLastUpdated();
     closeSheet('logExhSaleSheet');
     _renderExhContent();
     showToast('Sale logged ✓');
   } catch(e) {
     console.warn('[EXH SAVE SALE]', e.message);
-    showToast('Could not log sale: ' + e.message);
+    showToast(e.message || 'Could not log sale');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-receipt"></i> Save Sale'; }
   }
 }
 
