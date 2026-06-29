@@ -3692,7 +3692,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-adjust';
+const _MERAKI_BUILD = '2026-06-29-exh-backfill';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7323,6 +7323,7 @@ async function _loadExhData(silent = false) {
     ]);
     exhItems = items || [];
     exhSales = (allSales || []).filter(s => !s.voided);
+    await _backfillExhSizes();
     _stampExhLastUpdated();
     _renderExhContent();
   } catch(e) {
@@ -7331,6 +7332,26 @@ async function _loadExhData(silent = false) {
     }
     throw e;
   }
+}
+
+async function _backfillExhSizes() {
+  // For each item missing any EXH_SIZES key, add the missing keys at 0.
+  // Existing counts are never changed. Runs silently; errors are non-fatal.
+  const toUpdate = exhItems.filter(item => {
+    const inv = item.size_inventory || {};
+    return EXH_SIZES.some(s => !(s in inv));
+  });
+  if (!toUpdate.length) return;
+  await Promise.all(toUpdate.map(async item => {
+    const merged = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...(item.size_inventory || {}) };
+    try {
+      await db('update', 'exh_items', { id: item.id, data: { size_inventory: merged, updated_at: new Date().toISOString() } });
+      const idx = exhItems.findIndex(i => i.id === item.id);
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], size_inventory: merged };
+    } catch(e) {
+      console.warn('[EXH BACKFILL] could not update item', item.id, e.message);
+    }
+  }));
 }
 
 function _stampExhLastUpdated() {
