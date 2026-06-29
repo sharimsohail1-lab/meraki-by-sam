@@ -86,6 +86,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .loading span:nth-child(2) { animation-delay: 0.2s; }
 .loading span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes pulse { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-7px)} }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Toast */
 .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--ink); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; z-index: 999; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
@@ -2181,7 +2182,10 @@ function applyTranslations() {
   document.body.style.direction = lang === 'ur' ? 'rtl' : 'ltr';
 }
 
+const _DATA_SCREENS = ['stock', 'people', 'show'];
+
 function showScreen(name) {
+  if (_DATA_SCREENS.includes(name) && !requireAppDataLoaded(name)) return;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
@@ -2237,6 +2241,27 @@ function renderGreeting() {
 
 function buildSmartRecommendations() {
   const container = document.getElementById('smartRecommendations');
+  const boot = window._appBootState;
+
+  if (boot.loading) {
+    container.innerHTML = `<div class="rec-all-good" style="padding:40px 20px;text-align:center">
+      <div style="width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--burgundy);border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto 16px"></div>
+      <p style="font-weight:600;color:var(--ink);margin-bottom:6px">Loading your boutique…</p>
+      <p style="font-size:13px;color:var(--muted)">Connecting to inventory</p>
+    </div>`;
+    return;
+  }
+
+  if (boot.error) {
+    container.innerHTML = `<div class="rec-all-good" style="padding:40px 20px;text-align:center">
+      <i class="ti ti-wifi-off" style="font-size:40px;color:var(--muted);display:block;margin-bottom:12px"></i>
+      <p style="font-weight:600;color:var(--ink);margin-bottom:6px">Could not load inventory</p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Check your connection and try again.</p>
+      <button onclick="retryAppBoot()" style="padding:11px 28px;background:var(--burgundy);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation">Retry</button>
+    </div>`;
+    return;
+  }
+
   const recs = [];
 
   if (!inventory.length) {
@@ -3694,24 +3719,39 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-sort';
-async function init() {
-  console.log('[BOOT] start', _MERAKI_BUILD);
-  if (MERAKI_LOGO_SRC) {
-    document.getElementById('headerLogo').src = MERAKI_LOGO_SRC;
-  }
-  applyTranslations();
+const _MERAKI_BUILD = '2026-06-29-boot-loading';
 
-  // Load all three independently — no single failure blocks Home from rendering.
+window._appBootState = { loading: true, loaded: false, error: null };
+
+function requireAppDataLoaded(actionName) {
+  if (window._appBootState.loading) {
+    showToast('Still loading inventory…');
+    return false;
+  }
+  if (window._appBootState.error) {
+    showToast('Could not load data. Tap Retry.');
+    return false;
+  }
+  return true;
+}
+
+async function _bootLoadData() {
+  window._appBootState = { loading: true, loaded: false, error: null };
+  renderHome();
+
+  let productsOk = false;
   try {
     console.log('[BOOT] loading products');
     const prods = await db('select', 'products');
     inventory = prods || [];
+    productsOk = true;
     console.log('[BOOT] products loaded', inventory.length);
   } catch(e) {
     console.warn('[BOOT] products failed', e?.message || e);
     inventory = [];
-    showToast('Could not load inventory — check connection');
+    window._appBootState = { loading: false, loaded: false, error: e?.message || 'Failed to load inventory' };
+    renderHome();
+    return; // stop — customers/exhibitions are useless without products context
   }
 
   try {
@@ -3733,9 +3773,23 @@ async function init() {
     exhibitions = [];
   }
 
+  window._appBootState = { loading: false, loaded: true, error: null };
   renderHome();
   renderProviderPills();
   loadAppSettings();
+}
+
+async function init() {
+  console.log('[BOOT] start', _MERAKI_BUILD);
+  if (MERAKI_LOGO_SRC) {
+    document.getElementById('headerLogo').src = MERAKI_LOGO_SRC;
+  }
+  applyTranslations();
+  await _bootLoadData();
+}
+
+async function retryAppBoot() {
+  await _bootLoadData();
 }
 
 // ─── NUDGES ───────────────────────────────────────────────────────────────────
