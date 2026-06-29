@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
   // POST — public signup (upsert by phone+source_event)
   if (req.method === 'POST') {
-    const { name, phone, state, preferred_sizes, preferred_contact, interests, notes, source, source_event, exhibition_id } = req.body || {};
+    const { name, phone, state, preferred_sizes, preferred_contact, interests, has_purchased, notes, source, source_event, exhibition_id } = req.body || {};
 
     if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
 
@@ -45,6 +45,7 @@ export default async function handler(req, res) {
       preferred_sizes: Array.isArray(preferred_sizes) ? preferred_sizes : [],
       preferred_contact: preferred_contact || null,
       interests: Array.isArray(interests) ? interests : [],
+      has_purchased: typeof has_purchased === 'boolean' ? has_purchased : null,
       notes: notes?.trim() || null,
       source: source || 'qr',
       source_event: source_event || "APPNA'26",

@@ -266,7 +266,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .add-extra-btn { padding: 9px 14px; background: var(--burgundy); color: white; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; white-space: nowrap; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .chip { padding: 6px 13px; background: white; border: 1px solid var(--border); border-radius: 20px; font-size: 12px; color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; }
-.chip.selected { background: var(--burgundy); color: white; border-color: var(--burgundy); }
+.chip.selected, .chip.selected:hover { background: var(--burgundy); color: white; border-color: var(--burgundy); }
 .chip:hover { border-color: var(--burgundy); color: var(--burgundy); }
 
 /* Analysis result */
@@ -744,6 +744,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </div>
       <!-- Leads panel -->
       <div id="panel-leads">
+        <div id="leadsPtrIndicator" style="display:none;text-align:center;padding:8px 0;font-size:12px;color:var(--muted)"><i class="ti ti-refresh"></i> Refreshing…</div>
         <!-- QR card -->
         <div onclick="openLeadQR()" style="display:flex;align-items:center;gap:14px;background:var(--gold-pale,#fffbf0);border:1px solid var(--gold,#c9a84c);border-radius:12px;padding:14px 16px;margin-bottom:14px;cursor:pointer;touch-action:manipulation">
           <div style="width:40px;height:40px;background:var(--burgundy);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -1396,6 +1397,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="size-pill" onclick="selectLeadContact(this,'WhatsApp')">WhatsApp</div>
       <div class="size-pill" onclick="selectLeadContact(this,'Text')">Text</div>
       <div class="size-pill" onclick="selectLeadContact(this,'Either')">Either</div>
+    </div>
+    <div class="field-label">Did they buy? <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <div class="size-pills" id="leadPurchasedPills" style="margin-bottom:12px">
+      <div class="size-pill" onclick="selectLeadPurchased(this,true)">Yes</div>
+      <div class="size-pill" onclick="selectLeadPurchased(this,false)">No</div>
     </div>
     <div class="field-label">Notes <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
     <input type="text" id="leadNotesInput" class="field-input" placeholder="e.g. looking for Eid, wants size 44" style="margin-bottom:16px">
@@ -7060,6 +7066,8 @@ let _currentPeopleTab = 'leads';
 let _leadSizes = new Set();
 let _leadInterests = new Set();
 let _leadContact = null;
+let _leadPurchased = null;
+let _leadsRefreshing = false;
 
 function _setPeopleTab(tab) {
   _currentPeopleTab = tab;
@@ -7113,6 +7121,7 @@ function renderLeads() {
       ${sizes.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Sizes: ${sizes.join(', ')}</div>` : ''}
       ${lead.preferred_contact ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Contact: ${lead.preferred_contact}</div>` : ''}
       ${interests.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Interests: ${interests.join(', ')}</div>` : ''}
+      ${lead.has_purchased !== null && lead.has_purchased !== undefined ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Purchased: ${lead.has_purchased ? 'Yes' : 'No'}</div>` : ''}
       ${lead.notes ? `<div style="font-size:12px;color:var(--muted);margin-bottom:6px;font-style:italic">"${lead.notes}"</div>` : ''}
       <div style="font-size:11px;font-weight:600;color:var(--burgundy);margin-bottom:10px">Registered at: ${lead.source_event || 'Unknown'}</div>
       ${phone ? `<div style="display:flex;gap:8px">
@@ -7157,7 +7166,8 @@ function openAddLeadSheet() {
   sel.innerHTML = '<option value="">Select state</option>' +
     US_STATES.map(([abbr, name]) => `<option value="${abbr}">${name}</option>`).join('');
   sel.value = '';
-  document.querySelectorAll('#leadSizePills .size-pill, #leadContactPills .size-pill').forEach(p => p.classList.remove('selected'));
+  _leadPurchased = null;
+  document.querySelectorAll('#leadSizePills .size-pill, #leadContactPills .size-pill, #leadPurchasedPills .size-pill').forEach(p => p.classList.remove('selected'));
   document.querySelectorAll('#leadInterestChips .chip').forEach(p => p.classList.remove('selected'));
   openSheet('addLeadSheet');
 }
@@ -7178,6 +7188,12 @@ function selectLeadContact(el, val) {
   el.classList.add('selected');
 }
 
+function selectLeadPurchased(el, val) {
+  _leadPurchased = val;
+  document.querySelectorAll('#leadPurchasedPills .size-pill').forEach(p => p.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
 async function saveLead() {
   const name = document.getElementById('leadNameInput').value.trim();
   const phone = document.getElementById('leadPhoneInput').value.trim();
@@ -7190,6 +7206,7 @@ async function saveLead() {
     preferred_sizes: Array.from(_leadSizes),
     interests: Array.from(_leadInterests),
     preferred_contact: _leadContact,
+    has_purchased: _leadPurchased,
     notes: document.getElementById('leadNotesInput').value.trim() || null,
     source: 'manual',
     source_event: "APPNA'26",
@@ -7217,6 +7234,42 @@ async function deleteLeadPrompt(id) {
     showToast('Lead deleted');
   } catch(e) { showToast('Error: ' + e.message); }
 }
+
+async function refreshLeads() {
+  if (_leadsRefreshing) return;
+  _leadsRefreshing = true;
+  const ind = document.getElementById('leadsPtrIndicator');
+  if (ind) ind.style.display = 'block';
+  try {
+    const resp = await fetch('/api/leads', { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const json = await resp.json();
+    if (resp.ok) { leads = json.data || []; renderLeads(); }
+    else showToast('Refresh failed');
+  } catch(e) { showToast('Refresh failed'); }
+  finally {
+    _leadsRefreshing = false;
+    if (ind) ind.style.display = 'none';
+  }
+}
+
+(function _initLeadsPTR() {
+  const scroller = document.querySelector('.screens');
+  if (!scroller) return;
+  let startY = 0, pulling = false;
+  scroller.addEventListener('touchstart', e => {
+    if (document.getElementById('screen-people')?.style.display === 'none') return;
+    if (document.getElementById('panel-leads')?.style.display === 'none') return;
+    if (scroller.scrollTop === 0) { startY = e.touches[0].clientY; pulling = true; }
+  }, { passive: true });
+  scroller.addEventListener('touchend', () => {
+    pulling = false; startY = 0;
+  }, { passive: true });
+  scroller.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 60 && scroller.scrollTop === 0) { pulling = false; refreshLeads(); }
+  }, { passive: true });
+})();
 
 function openLeadQR() {
   openSheet('leadQRSheet');
