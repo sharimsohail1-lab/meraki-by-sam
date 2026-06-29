@@ -7259,6 +7259,7 @@ async function refreshLeads() {
   scroller.addEventListener('touchstart', e => {
     if (document.getElementById('screen-people')?.style.display === 'none') return;
     if (document.getElementById('panel-leads')?.style.display === 'none') return;
+    if (document.querySelector('.sheet-overlay.open')) return;
     if (scroller.scrollTop === 0) { startY = e.touches[0].clientY; pulling = true; }
   }, { passive: true });
   scroller.addEventListener('touchend', () => {
