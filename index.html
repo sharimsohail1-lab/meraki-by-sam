@@ -1725,6 +1725,7 @@ let _exhAddSizes = {};       // size counts in Add/Edit Item form
 let _exhAddPhoto = null;     // compressed data URL for item photo
 let _exhSaleSize = '';       // selected size in Log Sale sheet
 let _exhSaleQty = 1;
+let _exhInventorySort = 'default';
 let currentCustomer = null;
 let selectedZones = new Set();
 let selectedProblems = new Set();
@@ -3693,7 +3694,7 @@ async function regenerateWithFeedback() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-const _MERAKI_BUILD = '2026-06-29-exh-payments';
+const _MERAKI_BUILD = '2026-06-29-exh-sort';
 async function init() {
   console.log('[BOOT] start', _MERAKI_BUILD);
   if (MERAKI_LOGO_SRC) {
@@ -7430,22 +7431,74 @@ function _exhInventoryHTML() {
     return filterBar + `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">${_exhItemFilter === 'archived' ? 'No archived items.' : 'No active items.'}</div>`;
   }
 
+  const sortBar = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <span style="font-size:12px;color:var(--muted);white-space:nowrap">Sort by</span>
+    <select onchange="_setExhSort(this.value)" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;color:var(--ink);cursor:pointer;touch-action:manipulation">
+      <option value="default"${_exhInventorySort==='default'?' selected':''}>Default</option>
+      <option value="color"${_exhInventorySort==='color'?' selected':''}>Color / Shade</option>
+      <option value="name"${_exhInventorySort==='name'?' selected':''}>Name A→Z</option>
+      <option value="remaining_asc"${_exhInventorySort==='remaining_asc'?' selected':''}>Least Remaining</option>
+      <option value="remaining_desc"${_exhInventorySort==='remaining_desc'?' selected':''}>Most Remaining</option>
+      <option value="price_asc"${_exhInventorySort==='price_asc'?' selected':''}>Price Low→High</option>
+      <option value="price_desc"${_exhInventorySort==='price_desc'?' selected':''}>Price High→Low</option>
+      <option value="sold_desc"${_exhInventorySort==='sold_desc'?' selected':''}>Sold Count</option>
+    </select>
+  </div>`;
+
+  let sorted = [...visible];
+  if (_exhInventorySort === 'color') {
+    sorted.sort((a, b) => {
+      const ai = EXHIBITION_SHADE_ORDER.indexOf(getShadeFromExhibitionName(a.name));
+      const bi = EXHIBITION_SHADE_ORDER.indexOf(getShadeFromExhibitionName(b.name));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+  } else if (_exhInventorySort === 'name') {
+    sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  } else if (_exhInventorySort === 'remaining_asc') {
+    sorted.sort((a, b) => _exhItemRemaining(a) - _exhItemRemaining(b));
+  } else if (_exhInventorySort === 'remaining_desc') {
+    sorted.sort((a, b) => _exhItemRemaining(b) - _exhItemRemaining(a));
+  } else if (_exhInventorySort === 'price_asc') {
+    sorted.sort((a, b) => (Number(a.price_usd) || 0) - (Number(b.price_usd) || 0));
+  } else if (_exhInventorySort === 'price_desc') {
+    sorted.sort((a, b) => (Number(b.price_usd) || 0) - (Number(a.price_usd) || 0));
+  } else if (_exhInventorySort === 'sold_desc') {
+    sorted.sort((a, b) => _exhItemSold(b) - _exhItemSold(a));
+  }
+
   window._exhItemMenuIds = [];
   window._exhInvItemIds = [];
-  return filterBar + visible.map(item => {
+
+  let cards = '';
+  let lastShade = null;
+  sorted.forEach(item => {
+    if (_exhInventorySort === 'color') {
+      const shade = getShadeFromExhibitionName(item.name);
+      if (shade !== lastShade) {
+        lastShade = shade;
+        cards += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);padding:4px 0 6px">${shade}</div>`;
+      }
+    }
     const midx = window._exhItemMenuIds.length;
     window._exhItemMenuIds.push(item.id);
     const pidx = window._exhInvItemIds.length;
     window._exhInvItemIds.push(item.id);
-    const remaining = _exhItemRemaining(item);
-    const sold = _exhItemSold(item);
-    const inv = item.size_inventory || {};
-    const sizeStr = Object.keys(inv).filter(s => (Number(inv[s]) || 0) > 0)
-      .map(s => `${s}:${inv[s]}`).join(' · ');
-    const statusCls = remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
-    const statusLabel = remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
-    const isArchived = item.status === 'archived';
-    return `<div class="exh-item-card" style="position:relative;${isArchived?'opacity:0.65':''}">
+    cards += _exhItemCardHTML(item, midx, pidx);
+  });
+
+  return filterBar + sortBar + cards;
+}
+
+function _exhItemCardHTML(item, midx, pidx) {
+  const remaining = _exhItemRemaining(item);
+  const sold = _exhItemSold(item);
+  const inv = item.size_inventory || {};
+  const sizeStr = Object.keys(inv).filter(s => (Number(inv[s]) || 0) > 0)
+    .map(s => `${s}:${inv[s]}`).join(' · ');
+  const statusCls = remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
+  const statusLabel = remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
+  const isArchived = item.status === 'archived';
+  return `<div class="exh-item-card" style="position:relative;${isArchived?'opacity:0.65':''}">
       <button onclick="showExhItemMenu(window._exhItemMenuIds[${midx}])" style="position:absolute;top:10px;right:10px;background:none;border:none;padding:4px 6px;cursor:pointer;font-size:18px;color:var(--muted);touch-action:manipulation;z-index:1">⋯</button>
       <div style="display:flex;gap:12px;align-items:flex-start">
         ${item.photo
@@ -7468,11 +7521,44 @@ function _exhInventoryHTML() {
         <button onclick="openAdjustExhItem('${item.id}')" style="flex:1;padding:11px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation">Adjust</button>
       </div>` : ''}
     </div>`;
-  }).join('');
 }
+
 
 function _setExhItemFilter(f) {
   _exhItemFilter = f;
+  _renderExhContent();
+}
+
+const EXHIBITION_SHADE_ORDER = [
+  "White","Ivory","Cream","Beige","Gold","Yellow","Orange","Pink","Red","Maroon",
+  "Purple","Blue","Navy","Green","Brown","Gray","Black","Multi","Other","Unknown"
+];
+
+function getShadeFromExhibitionName(name) {
+  const n = String(name || "").toLowerCase();
+  if (/\b(off white|off-white|ivory)\b/.test(n)) return "Ivory";
+  if (/\b(cream)\b/.test(n)) return "Cream";
+  if (/\b(beige|nude|tan|champagne)\b/.test(n)) return "Beige";
+  if (/\b(gold|golden)\b/.test(n)) return "Gold";
+  if (/\b(yellow|mustard)\b/.test(n)) return "Yellow";
+  if (/\b(orange|rust|coral)\b/.test(n)) return "Orange";
+  if (/\b(pink|rose|blush|magenta|fuchsia)\b/.test(n)) return "Pink";
+  if (/\b(maroon|burgundy|wine)\b/.test(n)) return "Maroon";
+  if (/\b(red)\b/.test(n)) return "Red";
+  if (/\b(purple|lavender|lilac|plum)\b/.test(n)) return "Purple";
+  if (/\b(navy)\b/.test(n)) return "Navy";
+  if (/\b(blue|teal|turquoise|aqua)\b/.test(n)) return "Blue";
+  if (/\b(green|olive|mint|emerald)\b/.test(n)) return "Green";
+  if (/\b(brown|coffee|chocolate)\b/.test(n)) return "Brown";
+  if (/\b(gray|grey|silver)\b/.test(n)) return "Gray";
+  if (/\b(black)\b/.test(n)) return "Black";
+  if (/\b(white)\b/.test(n)) return "White";
+  if (/\b(multi|multicolor|multi-color)\b/.test(n)) return "Multi";
+  return "Unknown";
+}
+
+function _setExhSort(val) {
+  _exhInventorySort = val;
   _renderExhContent();
 }
 
