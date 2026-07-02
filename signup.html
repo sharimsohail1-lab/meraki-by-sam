@@ -16,10 +16,6 @@
   .field-label.first{margin-top:0}
   .field-input{width:100%;padding:13px 14px;border:1.5px solid #ddd;border-radius:10px;font-size:16px;background:#fff;-webkit-appearance:none;outline:none}
   .field-input:focus{border-color:#6B1B2B}
-  select.field-input{color:#1a1a1a}
-  .pill-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
-  .pill{padding:8px 14px;border:1.5px solid #ddd;border-radius:20px;font-size:14px;background:#fff;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-  .pill.selected{background:#6B1B2B;color:#fff;border-color:#6B1B2B}
   .submit-btn{width:100%;padding:15px;background:#6B1B2B;color:#fff;border:none;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:24px;touch-action:manipulation}
   .submit-btn:active{opacity:0.85}
   .submit-btn:disabled{opacity:0.5;cursor:not-allowed}
@@ -50,66 +46,6 @@
   <div class="field-label">Email <span style="font-weight:400;color:#aaa">(optional)</span></div>
   <input type="email" id="f-email" class="field-input" placeholder="you@example.com" autocomplete="email" inputmode="email">
 
-  <div class="field-label">State *</div>
-  <select id="f-state" class="field-input"></select>
-  <script>
-  (function(){
-    var states=[["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],
-    ["CO","Colorado"],["CT","Connecticut"],["DC","District of Columbia"],["DE","Delaware"],
-    ["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],
-    ["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],
-    ["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],
-    ["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],
-    ["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],
-    ["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],
-    ["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],
-    ["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],
-    ["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"]];
-    var sel=document.getElementById('f-state');
-    sel.innerHTML='<option value="">Select state</option>'+
-      states.map(function(s){return'<option value="'+s[0]+'">'+s[1]+'</option>';}).join('');
-  })();
-  </script>
-
-  <div class="field-label">Preferred sizes <span style="font-weight:400;color:#aaa">(optional — select all that apply)</span></div>
-  <div class="pill-row" id="sizePills">
-    <div class="pill" data-val="38">38</div>
-    <div class="pill" data-val="40">40</div>
-    <div class="pill" data-val="42">42</div>
-    <div class="pill" data-val="44">44</div>
-    <div class="pill" data-val="46">46</div>
-    <div class="pill" data-val="48">48</div>
-    <div class="pill" data-val="50">50</div>
-    <div class="pill" data-val="52">52</div>
-    <div class="pill" data-val="Free Size">Free Size</div>
-  </div>
-
-  <div class="field-label">Interested in <span style="font-weight:400;color:#aaa">(optional)</span></div>
-  <div class="pill-row" id="interestPills">
-    <div class="pill" data-val="Casual">Casual</div>
-    <div class="pill" data-val="Semi-formal">Semi-formal</div>
-    <div class="pill" data-val="Formal">Formal</div>
-    <div class="pill" data-val="Wedding">Wedding</div>
-    <div class="pill" data-val="Party">Party</div>
-    <div class="pill" data-val="Unstitched">Unstitched</div>
-  </div>
-
-  <div class="field-label">Preferred contact <span style="font-weight:400;color:#aaa">(optional)</span></div>
-  <div class="pill-row" id="contactPills">
-    <div class="pill" data-val="WhatsApp">WhatsApp</div>
-    <div class="pill" data-val="Text">Text</div>
-    <div class="pill" data-val="Either">Either</div>
-  </div>
-
-  <div class="field-label">Did you buy something from us? <span style="font-weight:400;color:#aaa">(optional)</span></div>
-  <div class="pill-row" id="purchasedPills">
-    <div class="pill" data-val="yes">Yes</div>
-    <div class="pill" data-val="no">No</div>
-  </div>
-
-  <div class="field-label">Notes <span style="font-weight:400;color:#aaa">(optional)</span></div>
-  <input type="text" id="f-notes" class="field-input" placeholder="e.g. looking for Eid, likes modest cuts">
-
   <div id="submitError" class="error-msg"></div>
   <button class="submit-btn" id="submitBtn" onclick="submitLead()">Join the list →</button>
   <p class="consent">By submitting, you agree to receive Meraki catalog updates by text or WhatsApp.</p>
@@ -122,33 +58,6 @@
 </div>
 
 <script>
-// Multi-select pills
-document.querySelectorAll('#sizePills .pill, #interestPills .pill').forEach(p => {
-  p.addEventListener('click', () => p.classList.toggle('selected'));
-});
-// Single-select contact
-document.querySelectorAll('#contactPills .pill').forEach(p => {
-  p.addEventListener('click', () => {
-    document.querySelectorAll('#contactPills .pill').forEach(x => x.classList.remove('selected'));
-    p.classList.add('selected');
-  });
-});
-// Single-select purchased
-document.querySelectorAll('#purchasedPills .pill').forEach(p => {
-  p.addEventListener('click', () => {
-    document.querySelectorAll('#purchasedPills .pill').forEach(x => x.classList.remove('selected'));
-    p.classList.add('selected');
-  });
-});
-
-function getSelected(containerId) {
-  return Array.from(document.querySelectorAll('#' + containerId + ' .pill.selected')).map(p => p.dataset.val);
-}
-function getSingle(containerId) {
-  const sel = document.querySelector('#' + containerId + ' .pill.selected');
-  return sel ? sel.dataset.val : null;
-}
-
 async function submitLead() {
   const btn = document.getElementById('submitBtn');
   const errEl = document.getElementById('submitError');
@@ -156,11 +65,9 @@ async function submitLead() {
 
   const name = document.getElementById('f-name').value.trim();
   const phone = document.getElementById('f-phone').value.trim();
-  const state = document.getElementById('f-state').value;
 
   if (!name) { errEl.textContent = 'Please enter your name.'; errEl.style.display = 'block'; return; }
   if (!phone) { errEl.textContent = 'Please enter your phone number.'; errEl.style.display = 'block'; return; }
-  if (!state) { errEl.textContent = 'Please select your state.'; errEl.style.display = 'block'; return; }
 
   btn.disabled = true;
   btn.textContent = 'Saving…';
@@ -168,13 +75,7 @@ async function submitLead() {
   const body = {
     name,
     phone,
-    state,
     email: document.getElementById('f-email').value.trim() || null,
-    preferred_sizes: getSelected('sizePills'),
-    interests: getSelected('interestPills'),
-    preferred_contact: getSingle('contactPills'),
-    has_purchased: getSingle('purchasedPills') === 'yes' ? true : getSingle('purchasedPills') === 'no' ? false : null,
-    notes: document.getElementById('f-notes').value.trim() || null,
     source: 'qr',
     source_event: "APPNA'26",
   };
