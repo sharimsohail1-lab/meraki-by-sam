@@ -47,6 +47,9 @@
   <div class="field-label">Phone number *</div>
   <input type="tel" id="f-phone" class="field-input" placeholder="(732) 555-1234" autocomplete="tel" inputmode="tel">
 
+  <div class="field-label">Email <span style="font-weight:400;color:#aaa">(optional)</span></div>
+  <input type="email" id="f-email" class="field-input" placeholder="you@example.com" autocomplete="email" inputmode="email">
+
   <div class="field-label">State *</div>
   <select id="f-state" class="field-input"></select>
   <script>
@@ -166,6 +169,7 @@ async function submitLead() {
     name,
     phone,
     state,
+    email: document.getElementById('f-email').value.trim() || null,
     preferred_sizes: getSelected('sizePills'),
     interests: getSelected('interestPills'),
     preferred_contact: getSingle('contactPills'),

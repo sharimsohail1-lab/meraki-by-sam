@@ -1357,6 +1357,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <input type="text" id="leadNameInput" class="field-input" placeholder="Customer name" style="margin-bottom:12px">
     <div class="field-label">Phone *</div>
     <input type="tel" id="leadPhoneInput" class="field-input" placeholder="(732) 555-1234" style="margin-bottom:12px" inputmode="tel">
+    <div class="field-label">Email <span style="font-size:11px;font-weight:400;color:var(--muted)">(optional)</span></div>
+    <input type="email" id="leadEmailInput" class="field-input" placeholder="you@example.com" style="margin-bottom:12px" inputmode="email">
     <div class="field-label">State *</div>
     <select id="leadStateInput" class="field-input" style="margin-bottom:12px">
       <option value="">Select state</option>
@@ -7118,6 +7120,7 @@ function renderLeads() {
         <button onclick="deleteLeadPrompt(window._leadIds[${idx}])" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--muted);font-size:16px;touch-action:manipulation"><i class="ti ti-trash"></i></button>
       </div>
       ${phone ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtPhone(phone)}${lead.state ? ' · ' + _fmtState(lead.state) : ''}</div>` : (lead.state ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${_fmtState(lead.state)}</div>` : '')}
+      ${lead.email ? `<div style="font-size:13px;color:var(--muted);margin-bottom:3px">${lead.email}</div>` : ''}
       ${sizes.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Sizes: ${sizes.join(', ')}</div>` : ''}
       ${lead.preferred_contact ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Contact: ${lead.preferred_contact}</div>` : ''}
       ${interests.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:3px">Interests: ${interests.join(', ')}</div>` : ''}
@@ -7160,6 +7163,7 @@ function openAddLeadSheet() {
   _leadSizes.clear(); _leadInterests.clear(); _leadContact = null;
   document.getElementById('leadNameInput').value = '';
   document.getElementById('leadPhoneInput').value = '';
+  document.getElementById('leadEmailInput').value = '';
   document.getElementById('leadNotesInput').value = '';
   // Populate state dropdown with full names (value = abbreviation)
   const sel = document.getElementById('leadStateInput');
@@ -7203,6 +7207,7 @@ async function saveLead() {
   if (!state) { showToast('State is required'); return; }
   const body = {
     name, phone, state,
+    email: document.getElementById('leadEmailInput').value.trim() || null,
     preferred_sizes: Array.from(_leadSizes),
     interests: Array.from(_leadInterests),
     preferred_contact: _leadContact,
