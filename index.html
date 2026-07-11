@@ -2562,7 +2562,13 @@ async function analyzePhoto() {
   const allPhotos = Object.values(uploadedPhotos);
   if (!allPhotos.length) { showToast('Please add at least one photo'); return; }
 
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Analyzing…'; }
+
   goToStep(3);
+  // Scroll to top so the step indicator and loading spinner are visible
+  const _scroller = document.querySelector('.screens');
+  if (_scroller) _scroller.scrollTop = 0;
   document.getElementById('analysisLoading').style.display = 'block';
   document.getElementById('analysisResult').style.display = 'none';
 
@@ -2784,6 +2790,9 @@ Return only the JSON object. No explanation, no markdown fences.` }
     document.getElementById('analysisLoading').style.display = 'none';
     showToast('Analysis failed: ' + e.message);
     goToStep(2);
+  } finally {
+    // Restore Analyze button regardless of outcome
+    if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.innerHTML = '<i class="ti ti-wand"></i><span id="t-analyzeBtn">Analyze Garment →</span>'; }
   }
 }
 
@@ -6961,7 +6970,7 @@ async function generateDetailModelPhoto() {
   const btn = document.getElementById('detailModelBtn');
   if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
   if (btn && btn.disabled) return;
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-user"></i> Opening Models…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Opening Models…'; }
 
   const tempAnalysis = currentAnalysis;
   // Attach the saved product photo so Ideogram sees the actual garment
