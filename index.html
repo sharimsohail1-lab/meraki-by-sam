@@ -803,7 +803,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- FASHN MODEL PICKER SHEET -->
-<div class="sheet-overlay" id="fashnPickerSheet" onclick="if(event.target===this)_cancelFashnPicker()">
+<div class="sheet-overlay" id="fashnPickerSheet" style="z-index:400" onclick="if(event.target===this)_cancelFashnPicker()">
   <div class="sheet" style="height:85vh">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-user-check"></i> Choose Model</div>
@@ -924,6 +924,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeProductDetail()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
+    <div id="detailReplacePhotoRow" style="display:none;text-align:right;margin-top:4px">
+      <button onclick="openReplaceOriginalPhotoOptions()" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline;padding:0"><i class="ti ti-replace" style="font-size:11px"></i> Replace photo</button>
+    </div>
     <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
@@ -984,6 +987,14 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           </div>
         </div>
       </div><!-- end detailModelGenerationBlock -->
+      <div id="detailOriginalPhotoSection" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="field-label" style="margin-bottom:4px">Original Garment Photo</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4">Used for reference and future AI generations.</div>
+        <img id="detailOriginalPhoto" src="" alt="Original garment photo" style="display:none;width:100%;max-height:240px;object-fit:contain;border-radius:10px;margin-bottom:8px">
+        <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="openReplaceOriginalPhotoOptions()">
+          <i class="ti ti-replace"></i> Replace original photo
+        </button>
+      </div>
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
@@ -1187,6 +1198,36 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This permanently removes this product from Stock, collections, and marketing. <strong>This cannot be undone.</strong> To keep the record but hide it, Archive instead.</div>
     <button class="btn" id="confirmDeleteProductBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px" onclick="deleteProduct()"><i class="ti ti-trash"></i> Yes, Delete Permanently</button>
     <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('deleteProductSheet')">Cancel</button>
+  </div>
+</div>
+
+<!-- REPLACE ORIGINAL PHOTO — OPTIONS -->
+<div class="sheet-overlay" id="replaceOrigPhotoOptionsSheet" onclick="closeSheetOutside(event,'replaceOrigPhotoOptionsSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:16px">Replace original photo</div>
+    <input type="file" id="replaceOrigCameraInput" accept="image/*" capture="environment" style="display:none" onchange="_handleReplaceOriginalFile(this)">
+    <input type="file" id="replaceOrigGalleryInput" accept="image/*" style="display:none" onchange="_handleReplaceOriginalFile(this)">
+    <button class="btn btn-primary" style="width:100%;margin-bottom:10px" onclick="document.getElementById('replaceOrigCameraInput').click()">
+      <i class="ti ti-camera"></i> Take Photo
+    </button>
+    <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink);margin-bottom:10px" onclick="document.getElementById('replaceOrigGalleryInput').click()">
+      <i class="ti ti-photo"></i> Upload Photo
+    </button>
+    <button class="btn" style="width:100%" onclick="closeSheet('replaceOrigPhotoOptionsSheet')">Cancel</button>
+  </div>
+</div>
+
+<!-- REPLACE ORIGINAL PHOTO — PREVIEW + CONFIRM -->
+<div class="sheet-overlay" id="replaceOrigPhotoConfirmSheet" onclick="closeSheetOutside(event,'replaceOrigPhotoConfirmSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:4px">Replace the original reference photo?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.5">This will be used for future AI generations. Your existing AI model photo will not be removed.</div>
+    <img id="replaceOrigPreviewImg" src="" alt="" style="display:none;width:100%;max-height:260px;object-fit:contain;border-radius:10px;margin-bottom:12px">
+    <div id="replaceOrigPhotoNote" style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:12px;min-height:1.2em"></div>
+    <button class="btn btn-primary" id="replaceOrigConfirmBtn" style="width:100%;margin-bottom:8px" onclick="confirmReplaceOriginalPhoto()">Replace</button>
+    <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="cancelReplaceOriginalPhoto()">Cancel</button>
   </div>
 </div>
 
@@ -3222,6 +3263,16 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
         if (_dph) { _dph.src = watermarked; _dph.style.display = 'block'; }
         const _nullState = document.getElementById('detailModelNullState');
         if (_nullState) _nullState.style.display = 'none';
+        // Reveal original garment photo section now that both photos exist
+        const _dop2 = document.getElementById('detailOriginalPhotoSection');
+        const _doi2 = document.getElementById('detailOriginalPhoto');
+        if (_dop2 && currentProduct?.photo) {
+          _dop2.style.display = 'block';
+          if (_doi2) { _doi2.src = currentProduct.photo; _doi2.style.display = 'block'; }
+        }
+        // Hide the hero "Replace photo" row — model photo is now the hero
+        const _drr2 = document.getElementById('detailReplacePhotoRow');
+        if (_drr2) _drr2.style.display = 'none';
         showToast('Model photo ready ✓');
       } catch(_saveErr) {
         showToast('Photo generated — tap Save to product to keep it');
@@ -5464,6 +5515,9 @@ function _openProductDetailUI(p) {
   const detailDisplayPhoto = p.model_photo || p.photo;
   document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
   document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
+  // "Replace photo" row under hero — only when no model_photo (the original IS the hero)
+  const _drr = document.getElementById('detailReplacePhotoRow');
+  if (_drr) _drr.style.display = (p.photo && !p.model_photo) ? 'block' : 'none';
 
   // Detail photo insets — always render with add button
   const _dpRaw = p.detail_photos;
@@ -5512,6 +5566,16 @@ function _openProductDetailUI(p) {
     if (_dmi) _dmi.src = '';
     if (_dfr) _dfr.style.display = 'none';
     if (_dmn) _dmn.style.display = 'block';
+  }
+  // Original garment photo section — only shown when model_photo also exists (avoids duplication)
+  const _dop = document.getElementById('detailOriginalPhotoSection');
+  const _doi = document.getElementById('detailOriginalPhoto');
+  if (p.model_photo && p.photo && _dop) {
+    _dop.style.display = 'block';
+    if (_doi) { _doi.src = p.photo; _doi.style.display = 'block'; }
+  } else {
+    if (_dop) _dop.style.display = 'none';
+    if (_doi) { _doi.src = ''; _doi.style.display = 'none'; }
   }
   const _mso = document.getElementById('mktShareOutput');
   if (_mso) { _mso.style.display = 'none'; _mso.innerHTML = ''; }
@@ -9288,6 +9352,84 @@ let _fashnPickerTarget = null;  // { targetImgId, outputDivId, btnId }
 let _fashnPickerSelected = null;  // defId selected in picker
 let _fashnPickerConfirming = false;  // double-submit guard for Confirm button
 let _fashnCategory = localStorage.getItem('fashnCategory') || 'tops';
+
+// ── Replace original photo ───────────────────────────────────────────────────
+
+let _replaceOrigPhotoPreview = null;
+
+function openReplaceOriginalPhotoOptions() {
+  openSheet('replaceOrigPhotoOptionsSheet');
+}
+
+function _handleReplaceOriginalFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  closeSheet('replaceOrigPhotoOptionsSheet');
+  openSheet('replaceOrigPhotoConfirmSheet');
+  const prevImg = document.getElementById('replaceOrigPreviewImg');
+  const prevNote = document.getElementById('replaceOrigPhotoNote');
+  const confirmBtn = document.getElementById('replaceOrigConfirmBtn');
+  if (prevImg) { prevImg.style.display = 'none'; prevImg.src = ''; }
+  if (prevNote) prevNote.textContent = 'Processing photo…';
+  if (confirmBtn) confirmBtn.disabled = true;
+  _replaceOrigPhotoPreview = null;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1600;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > MAX || h > MAX) { const r = Math.min(MAX / w, MAX / h); w = Math.round(w * r); h = Math.round(h * r); }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      _replaceOrigPhotoPreview = c.toDataURL('image/jpeg', 0.88);
+      if (prevImg) { prevImg.src = _replaceOrigPhotoPreview; prevImg.style.display = 'block'; }
+      if (prevNote) prevNote.textContent = '';
+      if (confirmBtn) confirmBtn.disabled = false;
+    };
+    img.onerror = () => {
+      if (prevNote) prevNote.textContent = 'Could not process photo — try another image.';
+      if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = 'Replace'; }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function confirmReplaceOriginalPhoto() {
+  if (!_replaceOrigPhotoPreview || !currentProduct) return;
+  const confirmBtn = document.getElementById('replaceOrigConfirmBtn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Saving…'; }
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: { photo: _replaceOrigPhotoPreview } });
+    const idx = inventory.findIndex(p => p.id === currentProduct.id);
+    if (idx >= 0) {
+      inventory[idx] = { ...inventory[idx], photo: _replaceOrigPhotoPreview };
+      currentProduct = inventory[idx];
+    }
+    // Update hero photo only when no model_photo (original is the hero in that case)
+    if (!currentProduct.model_photo) {
+      const hero = document.getElementById('detailPhoto');
+      if (hero) { hero.src = _replaceOrigPhotoPreview; hero.style.display = 'block'; }
+    }
+    // Update original photo section if visible
+    const _doi = document.getElementById('detailOriginalPhoto');
+    if (_doi && _doi.src) { _doi.src = _replaceOrigPhotoPreview; }
+    closeSheet('replaceOrigPhotoConfirmSheet');
+    _replaceOrigPhotoPreview = null;
+    showToast('Original photo replaced ✓');
+  } catch(e) {
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = 'Replace'; }
+    showToast('Failed to save — ' + e.message);
+  }
+}
+
+function cancelReplaceOriginalPhoto() {
+  closeSheet('replaceOrigPhotoConfirmSheet');
+  _replaceOrigPhotoPreview = null;
+}
 
 function _setFashnCategory(cat) {
   _fashnCategory = cat;
