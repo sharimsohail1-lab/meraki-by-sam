@@ -3129,21 +3129,34 @@ async function buildGarmentComposite(photos) {
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   if (productTryOnProvider === 'fashn') {
-    await loadModelTemplates();
-    const hasAny = modelTemplates.some(r => r.image);
-    if (!hasAny) {
-      showToast('No templates yet — go to Settings → Manage Templates first');
-      // Restore button if it was disabled by the caller (e.g. generateDetailModelPhoto)
+    // Open the picker immediately with a loading state so the user sees feedback
+    // right away, before the network call for templates completes.
+    _openFashnPickerLoading(targetImgId, outputDivId, btnId);
+    let loadErr = null;
+    try {
+      await loadModelTemplates();
+    } catch(e) {
+      loadErr = e;
+    }
+    if (loadErr || !modelTemplates.some(r => r.image)) {
+      // Close loading sheet, restore button, show error
+      const _grid = document.getElementById('fashnPickerGrid');
+      if (_grid) _grid.innerHTML = '';
+      closeSheet('fashnPickerSheet');
       const _fbtn = document.getElementById(btnId);
-      if (_fbtn && _fbtn.disabled) {
+      if (_fbtn) {
         const _fhtml = btnId === 'detailModelBtn'
           ? '<i class="ti ti-user"></i> Generate AI Model Photo'
           : '<i class="ti ti-user"></i> <span id="t-genModel">' + (T[lang]?.genModel || 'Generate AI Model Photo') + '</span>';
         setLoading(btnId, false, _fhtml);
       }
+      showToast(loadErr ? 'Could not load models — try again' : 'No templates yet — go to Settings → Manage Templates first');
       return;
     }
-    _openFashnPicker(targetImgId, outputDivId, btnId);
+    // Templates loaded — replace loading state with actual grid
+    _fashnPickerSelected = activeModelTemplateId;
+    _renderFashnPickerGrid();
+    setTimeout(() => _setFashnCategory(_fashnCategory), 50);
   } else {
     await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
   }
@@ -7012,6 +7025,7 @@ async function generateDetailModelPhoto() {
   if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
   if (btn && btn.disabled) return;
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Opening Models…'; }
+  await new Promise(r => requestAnimationFrame(r));
 
   const tempAnalysis = currentAnalysis;
   // Attach the saved product photo so Ideogram sees the actual garment
@@ -9283,6 +9297,14 @@ function _setFashnCategory(cat) {
     if (btn) btn.style.background = c === cat ? 'var(--burgundy)' : '';
     if (btn) btn.style.color = c === cat ? 'white' : '';
   });
+}
+
+function _openFashnPickerLoading(targetImgId, outputDivId, btnId) {
+  if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
+  _fashnPickerTarget = { targetImgId, outputDivId, btnId };
+  const _grid = document.getElementById('fashnPickerGrid');
+  if (_grid) _grid.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:24px 0;color:var(--muted)"><div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Loading models…</div>';
+  openSheet('fashnPickerSheet');
 }
 
 function _openFashnPicker(targetImgId, outputDivId, btnId) {
