@@ -3211,6 +3211,15 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     _genStatusEl.textContent = 'Generating model photo… This may take up to 2 minutes.';
   }
   try {
+    // Product Detail uses currentProduct as the stable source of truth for prompt and source
+    // photo. currentAnalysis is unreliable here: generateDetailModelPhoto() restores it to
+    // its prior value before _confirmFashnPicker() calls this function (FASHN picker path).
+    const _isDetail = btnId === 'detailModelBtn';
+    const _ideogramPrompt = _isDetail && currentProduct?.ideogram_prompt
+      ? currentProduct.ideogram_prompt
+      : currentAnalysis?.ideogramPrompt;
+    if (!_ideogramPrompt) throw new Error('No prompt available — re-open Product Detail and try again');
+
     const uploadCount = Object.keys(uploadedPhotos).length;
     // Use the front photo (or first available) as the Ideogram reference.
     // Sending a composite grid breaks model generation — Ideogram recreates the
@@ -3218,14 +3227,13 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     // the debug "View reference" preview only.
     const singleRef = uploadedPhotos['front']?.dataUrl
       || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl
-      || currentAnalysis._uploadedPhotoB64
-      || null;
+      || (_isDetail ? (currentProduct?.photo || null) : (currentAnalysis?._uploadedPhotoB64 || null));
 
     // Build composite only for the debug view — never sent to Ideogram.
     const debugComposite = uploadCount > 1
       ? await buildGarmentComposite(uploadedPhotos)
       : singleRef;
-    currentAnalysis._referencePhoto = debugComposite || singleRef;
+    if (currentAnalysis) currentAnalysis._referencePhoto = debugComposite || singleRef;
 
     const intakeSlider = document.getElementById('imageWeightSlider');
     const detailSlider = document.getElementById('detailWeightSlider');
@@ -3235,8 +3243,8 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     console.group('[Meraki] Model photo generation');
     console.log('Ideogram reference:', singleRef ? (uploadCount > 1 ? `front photo (${uploadCount} zones uploaded; composite shown in debug view only)` : 'single upload') : 'saved garment photo');
     console.log('Image weight:', imageWeight);
-    console.log('Prompt length:', currentAnalysis.ideogramPrompt?.length, 'chars');
-    console.log('Prompt preview:', currentAnalysis.ideogramPrompt?.slice(0, 200));
+    console.log('Prompt length:', _ideogramPrompt?.length, 'chars');
+    console.log('Prompt preview:', _ideogramPrompt?.slice(0, 200));
     console.log('Reference image size:', singleRef ? Math.round(singleRef.length / 1024) + ' KB' : 'none');
     console.groupEnd();
 
@@ -3244,12 +3252,12 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     const provider = IMAGE_GEN_PROVIDERS[productTryOnProvider] || IMAGE_GEN_PROVIDERS['fashn'];
     if (!provider) throw new Error('No provider available');
     console.log('[Meraki] Using provider:', provider.id, '(product try-on)');
-    const url = await provider.generate(currentAnalysis.ideogramPrompt, singleRef, imageWeight);
+    const url = await provider.generate(_ideogramPrompt, singleRef, imageWeight);
     const watermarked = await applyWatermark(url);
     const img = document.getElementById(targetImgId);
     img.src = watermarked;
     document.getElementById(outputDivId).style.display = 'block';
-    currentAnalysis._modelPhotoUrl = watermarked;
+    if (currentAnalysis) currentAnalysis._modelPhotoUrl = watermarked;
 
     if (btnId === 'detailModelBtn' && currentProduct) {
       try {
