@@ -599,6 +599,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div style="font-size:13px;color:var(--muted);margin-top:12px" id="t-analyzing">Analyzing your garment...</div>
         </div>
         <div id="analysisResult" style="display:none">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Review &amp; Save</div>
           <div id="generatedSKU" class="sku-badge"></div>
           <div class="field-label" id="t-itemNameLabel">Item Name</div>
           <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
@@ -610,70 +611,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div class="result-box">
             <div class="result-label" id="t-analysisLabel">Garment Analysis</div>
             <div id="analysisText" style="white-space:pre-wrap"></div>
-          </div>
-          <div id="modelPhotoSection" style="margin-top:14px">
-                        <div id="intakeProviderPills" style="display:none"></div>
-            <div id="intakeFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
-              <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better than Ideogram.
-            </div>
-<div id="intakeWeightRow">
-            <div style="margin-bottom:8px">
-              <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-                <span>Garment accuracy</span><span id="imageWeightLabel">60%</span>
-              </div>
-              <input type="range" id="imageWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('imageWeightLabel').textContent=this.value+'%'">
-              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
-            </div>
-            </div>
-            <button class="btn btn-gold" id="genModelBtn" onclick="generateModelPhoto()">
-              <i class="ti ti-user"></i><span id="t-genModel">Generate AI Model Photo</span>
-            </button>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-6px;margin-bottom:10px">
-              <span id="intakeCreditNote" style="font-size:11px;color:var(--muted)">Uses 1 FASHN credit — only on tap</span>
-              <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:2px 0;text-decoration:underline">View reference</button>
-            </div>
-            <div id="modelPhotoOutput" style="display:none">
-              <img id="modelPhotoImg" class="preview-img" src="" alt="Model photo">
-              <div id="modelPhotoStockNote" style="display:none;background:#E8F5E9;color:#2E7D32;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:6px;text-align:center">
-                <i class="ti ti-check"></i> This photo will appear in your stock
-              </div>
-              <div id="fashnRetryRow" style="display:none;margin-bottom:8px">
-                <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('modelPhotoImg','modelPhotoOutput','genModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
-              </div>
-              <div style="display:flex;gap:8px">
-                <button class="btn btn-secondary btn-sm" onclick="downloadModelPhoto()" style="flex:1"><i class="ti ti-download"></i> Download</button>
-              </div>
-              <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
-                <button class="btn btn-secondary" style="margin-bottom:0" onclick="document.getElementById('feedbackPanel').style.display=document.getElementById('feedbackPanel').style.display==='none'?'block':'none'">
-                  <i class="ti ti-adjustments"></i> Fix this photo
-                </button>
-              </div>
-              <div class="feedback-panel" id="feedbackPanel" style="display:none">
-                <div class="feedback-step">
-                  <div class="feedback-step-title">① Areas that are wrong</div>
-                  <div class="chip-row" id="zoneChipRow" style="flex-wrap:wrap;gap:8px"></div>
-                </div>
-                <div class="feedback-step" id="problemStep" style="display:none">
-                  <div class="feedback-step-title">② What is wrong?</div>
-                  <div class="problem-grid">
-                    <button class="problem-btn" onclick="toggleProblem('color',this)"><span class="problem-icon">🎨</span><span>Wrong Color</span></button>
-                    <button class="problem-btn" onclick="toggleProblem('embroidery',this)"><span class="problem-icon">✨</span><span>Wrong Embroidery</span></button>
-                    <button class="problem-btn" onclick="toggleProblem('shape',this)"><span class="problem-icon">📐</span><span>Wrong Shape</span></button>
-                    <button class="problem-btn" onclick="toggleProblem('wrong',this)"><span class="problem-icon">❌</span><span>Completely Wrong</span></button>
-                  </div>
-                </div>
-                <div class="feedback-step" id="refStep" style="display:none">
-                  <div class="feedback-step-title">③ Which photo shows correct version?</div>
-                  <div class="ref-scroll" id="refPhotoRow"></div>
-                </div>
-                <div class="feedback-step">
-                  <div class="feedback-step-title">④ Voice note (Urdu or English)</div>
-                  <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()"><i class="ti ti-microphone" style="font-size:20px"></i> Tap to speak</button>
-                  <div class="voice-transcript" id="voiceTranscript"></div>
-                </div>
-                <button class="btn btn-primary" id="regenBtn" onclick="regenerateWithFeedback()"><i class="ti ti-refresh"></i> Regenerate with Corrections</button>
-              </div>
-            </div>
           </div>
           <div class="card" style="margin-top:14px">
             <div class="field-label" id="t-priceLabel">Price (USD)</div>
@@ -691,6 +628,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div class="size-stepper-grid" id="intakeSizeGrid"></div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="intakeSizeTotalNote"></div>
           </div>
+          <div style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:6px">Save this piece to finish adding it.</div>
           <button class="btn btn-green" id="saveProductBtn" onclick="saveProduct()"><i class="ti ti-device-floppy"></i><span id="t-saveProduct">Save to Inventory</span></button>
           <div id="saveSuccess" style="display:none"></div>
           <button class="btn btn-secondary" id="backToPhotosBtn" onclick="goToStep(2)" style="margin-top:4px">← Back to Photos</button>
@@ -865,11 +803,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- FASHN MODEL PICKER SHEET -->
-<div class="sheet-overlay" id="fashnPickerSheet" onclick="closeSheetOutside(event,'fashnPickerSheet')">
+<div class="sheet-overlay" id="fashnPickerSheet" onclick="if(event.target===this)_cancelFashnPicker()">
   <div class="sheet" style="height:85vh">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-user-check"></i> Choose Model</div>
-      <button class="modal-close" style="position:static" onclick="closeSheet('fashnPickerSheet')"><i class="ti ti-x"></i></button>
+      <button class="modal-close" style="position:static" onclick="_cancelFashnPicker()"><i class="ti ti-x"></i></button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Select the model photo to use for this generation.</div>
     <div style="margin-bottom:12px">
@@ -883,7 +821,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div id="fashnPickerGrid" style="display:flex;flex-direction:column;gap:10px"></div>
     <div style="margin-top:16px;display:flex;gap:8px">
-      <button class="btn" style="flex:1" onclick="closeSheet('fashnPickerSheet')">Cancel</button>
+      <button class="btn" style="flex:1" onclick="_cancelFashnPicker()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" id="fashnPickerConfirmBtn" onclick="_confirmFashnPicker()">Generate with Selected</button>
     </div>
   </div>
@@ -1011,38 +949,40 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Reserved For</div>
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
-    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
-      <!-- Model generation UI hidden from Product Detail — backend routes intact -->
-      <div id="detailModelGenerationBlock" style="display:none">
-            <div id="detailProviderPills" style="display:none"></div>
-      <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
-        <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
-      </div>
-<div id="detailWeightRow">
-      <div style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-          <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+      <div class="field-label" style="margin-bottom:4px">AI Model Photo</div>
+      <div id="detailModelNullState" style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">Create an optional model image for marketing and sharing.</div>
+      <div id="detailModelGenerationBlock">
+        <div id="detailProviderPills" style="display:none"></div>
+        <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
+          <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
         </div>
-        <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
-      </div>
-      </div>
-      <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
-        <i class="ti ti-user"></i> Generate AI Model Photo
-      </button>
-      <div style="text-align:right;margin-bottom:10px">
-        <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
-      </div>
-      <div id="detailModelOutput" style="display:none;margin-bottom:10px">
-        <img id="detailModelImg" class="preview-img" src="" alt="">
-        <div id="detailFashnRetryRow" style="display:none;margin-bottom:6px">
-          <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('detailModelImg','detailModelOutput','detailModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
+        <div id="detailWeightRow" style="display:none">
+          <div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+              <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
+            </div>
+            <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
+          </div>
         </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-primary" style="flex:1" id="saveDetailModelBtn" onclick="saveDetailModelPhoto(this)"><i class="ti ti-device-floppy"></i> Save to product</button>
-          <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
+        <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
+          <i class="ti ti-user"></i> Generate AI Model Photo
+        </button>
+        <div id="detailModelStatus" style="font-size:12px;color:var(--muted);margin:4px 0 6px;text-align:center;min-height:1.2em;line-height:1.5"></div>
+        <div style="text-align:right;margin-bottom:4px">
+          <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
         </div>
-      </div>
+        <div id="detailModelOutput" style="display:none;margin-bottom:10px">
+          <img id="detailModelImg" class="preview-img" src="" alt="">
+          <div id="detailFashnRetryRow" style="display:none;margin-bottom:6px">
+            <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('detailModelImg','detailModelOutput','detailModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-primary" style="flex:1" id="saveDetailModelBtn" onclick="saveDetailModelPhoto(this)"><i class="ti ti-device-floppy"></i> Save to product</button>
+            <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
+          </div>
+        </div>
       </div><!-- end detailModelGenerationBlock -->
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
@@ -1225,6 +1165,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Wait for the model photo to finish, or save now without it. You can always generate a model photo later from Stock.</div>
     <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('saveWithoutModelSheet')"><i class="ti ti-clock"></i> Wait</button>
     <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeSheet('saveWithoutModelSheet');_isGeneratingModelPhoto=false;_doSaveProduct()">Save without model photo</button>
+  </div>
+</div>
+
+<!-- DISCARD UNSAVED INTAKE CONFIRMATION -->
+<div class="sheet-overlay" id="discardIntakeSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px">Discard this unsaved piece?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Your uploaded photos and entered details have not been saved.</div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('discardIntakeSheet');_intakePendingNav=null;">Keep Editing</button>
+    <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_confirmDiscardIntake()">Discard</button>
   </div>
 </div>
 
@@ -2312,12 +2263,54 @@ function applyTranslations() {
 
 const _DATA_SCREENS = ['stock', 'people', 'show'];
 
+// Stores the intended destination while the discard sheet is shown.
+let _intakePendingNav = null;
+
+function hasUnsavedIntakeChanges() {
+  // Step > 1 means the user has advanced past the initial form
+  const activePanel = document.querySelector('.step-panel.active');
+  if (activePanel && activePanel.id !== 'step-panel-1') return true;
+  // Uploaded at least one photo
+  if (Object.values(uploadedPhotos).some(p => p?.dataUrl)) return true;
+  // Claude analysis has run
+  if (currentAnalysis) return true;
+  // Any text entered in Step 3 fields
+  if ((document.getElementById('itemNameInput')?.value || '').trim()) return true;
+  if ((document.getElementById('priceInput')?.value || '').trim()) return true;
+  if ((document.getElementById('costInput')?.value || '').trim()) return true;
+  // Any size count > 0
+  const sizeState = window._sizeStates?.['intakeSizeGrid'] || {};
+  if (Object.values(sizeState).some(v => (Number(v) || 0) > 0)) return true;
+  return false;
+}
+
+function _confirmDiscardIntake() {
+  closeSheet('discardIntakeSheet');
+  resetIntake();
+  const dest = _intakePendingNav;
+  _intakePendingNav = null;
+  if (dest) showScreen(dest);
+}
+
 function showScreen(name) {
   if (_DATA_SCREENS.includes(name) && !requireAppDataLoaded(name)) return;
+
+  // Guard: if leaving Add with unsaved progress, show discard confirmation sheet.
+  // Only one sheet can be open — if already showing, ignore repeated taps.
+  const currentScreen = document.querySelector('.screen.active');
+  const leavingAdd = currentScreen && currentScreen.id === 'screen-add' && name !== 'add';
+  if (leavingAdd && hasUnsavedIntakeChanges()) {
+    if (document.getElementById('discardIntakeSheet').classList.contains('open')) return;
+    _intakePendingNav = name;
+    openSheet('discardIntakeSheet');
+    return;
+  }
+
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
-  document.getElementById('nav-' + name).classList.add('active');
+  const navEl = document.getElementById('nav-' + name);
+  if (navEl) navEl.classList.add('active');
   const homeBtn = document.getElementById('headerHomeBtn');
   if (homeBtn) homeBtn.style.display = name === 'home' ? 'none' : 'flex';
   if (name === 'home') renderHome();
@@ -2328,20 +2321,7 @@ function showScreen(name) {
 }
 
 function goHomeFromAdd() {
-  const activeScreen = document.querySelector('.screen.active');
-  const isOnAdd = activeScreen && activeScreen.id === 'screen-add';
-  const hasWork = isOnAdd && (
-    Object.keys(uploadedPhotos).some(k => uploadedPhotos[k]?.dataUrl) ||
-    (document.getElementById('priceInput')?.value || '').trim() ||
-    (document.getElementById('collectionNameInput')?.value || '').trim() ||
-    (document.getElementById('itemNameInput')?.value || '').trim()
-  );
-  if (hasWork) {
-    const msg = lang === 'ur'
-      ? 'یہ کپڑا چھوڑ دیں؟ تصویریں اور تفصیلات ضائع ہو سکتی ہیں۔'
-      : 'Leave this item? Unsaved photos and details may be lost.';
-    if (!confirm(msg)) return;
-  }
+  // goHomeFromAdd is now just a showScreen call — the guard is inside showScreen.
   showScreen('home');
 }
 
@@ -2623,7 +2603,13 @@ async function analyzePhoto() {
   const allPhotos = Object.values(uploadedPhotos);
   if (!allPhotos.length) { showToast('Please add at least one photo'); return; }
 
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Analyzing…'; }
+
   goToStep(3);
+  // Scroll to top so the step indicator and loading spinner are visible
+  const _scroller = document.querySelector('.screens');
+  if (_scroller) _scroller.scrollTop = 0;
   document.getElementById('analysisLoading').style.display = 'block';
   document.getElementById('analysisResult').style.display = 'none';
 
@@ -2845,15 +2831,14 @@ Return only the JSON object. No explanation, no markdown fences.` }
     document.getElementById('analysisLoading').style.display = 'none';
     showToast('Analysis failed: ' + e.message);
     goToStep(2);
+  } finally {
+    // Restore Analyze button regardless of outcome
+    if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.innerHTML = '<i class="ti ti-wand"></i><span id="t-analyzeBtn">Analyze Garment →</span>'; }
   }
 }
 
 async function saveProduct() {
   if (!currentAnalysis) return;
-  if (_isGeneratingModelPhoto) {
-    openSheet('saveWithoutModelSheet');
-    return;
-  }
   _doSaveProduct();
 }
 
@@ -2958,14 +2943,10 @@ async function _doSaveProduct() {
     console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
     const saved = rows[0];
     inventory.unshift(saved);
-    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
-    btn.disabled = false;
-    document.getElementById('saveProductBtn').style.display = 'none';
-    document.getElementById('backToPhotosBtn').style.display = 'none';
-    document.getElementById('saveSuccess').style.display = 'block';
-    renderNextSteps(saved);
-    showToast(T[lang].savedMsg);
     buildSmartRecommendations();
+    showToast('Saved to inventory ✓');
+    resetIntake();
+    openProductDetail(saved.id);
   } catch(e) {
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
     btn.disabled = false;
@@ -3069,9 +3050,9 @@ function resetIntake() {
   document.getElementById('saveSuccess').style.display = 'none';
   document.getElementById('saveProductBtn').style.display = '';
   document.getElementById('backToPhotosBtn').style.display = '';
-  document.getElementById('modelPhotoOutput').style.display = 'none';
-  document.getElementById('modelPhotoStockNote').style.display = 'none';
-  document.getElementById('feedbackPanel').style.display = 'none';
+  const _mpo = document.getElementById('modelPhotoOutput'); if (_mpo) _mpo.style.display = 'none';
+  const _msn = document.getElementById('modelPhotoStockNote'); if (_msn) _msn.style.display = 'none';
+  const _fp = document.getElementById('feedbackPanel'); if (_fp) _fp.style.display = 'none';
   document.querySelectorAll('#garmentTypePills .tab-pill').forEach((p, i) => p.classList.toggle('active', i === 0));
   document.querySelectorAll('#seasonPills .tab-pill').forEach(p => p.classList.remove('active'));
   intakeSeason = '';
@@ -3148,10 +3129,34 @@ async function buildGarmentComposite(photos) {
 async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = 'modelPhotoOutput', btnId = 'genModelBtn') {
   if (!currentAnalysis?.ideogramPrompt) { showToast('Analyze garment first'); return; }
   if (productTryOnProvider === 'fashn') {
-    await loadModelTemplates();
-    const hasAny = modelTemplates.some(r => r.image);
-    if (!hasAny) { showToast('No templates yet — go to Settings → Manage Templates first'); return; }
-    _openFashnPicker(targetImgId, outputDivId, btnId);
+    // Open the picker immediately with a loading state so the user sees feedback
+    // right away, before the network call for templates completes.
+    _openFashnPickerLoading(targetImgId, outputDivId, btnId);
+    let loadErr = null;
+    try {
+      await loadModelTemplates();
+    } catch(e) {
+      loadErr = e;
+    }
+    if (loadErr || !modelTemplates.some(r => r.image)) {
+      // Close loading sheet, restore button, show error
+      const _grid = document.getElementById('fashnPickerGrid');
+      if (_grid) _grid.innerHTML = '';
+      closeSheet('fashnPickerSheet');
+      const _fbtn = document.getElementById(btnId);
+      if (_fbtn) {
+        const _fhtml = btnId === 'detailModelBtn'
+          ? '<i class="ti ti-user"></i> Generate AI Model Photo'
+          : '<i class="ti ti-user"></i> <span id="t-genModel">' + (T[lang]?.genModel || 'Generate AI Model Photo') + '</span>';
+        setLoading(btnId, false, _fhtml);
+      }
+      showToast(loadErr ? 'Could not load models — try again' : 'No templates yet — go to Settings → Manage Templates first');
+      return;
+    }
+    // Templates loaded — replace loading state with actual grid
+    _fashnPickerSelected = activeModelTemplateId;
+    _renderFashnPickerGrid();
+    setTimeout(() => _setFashnCategory(_fashnCategory), 50);
   } else {
     await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
   }
@@ -3160,6 +3165,10 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
   if (btnId === 'genModelBtn') _isGeneratingModelPhoto = true;
   setLoading(btnId, true, '');
+  const _genStatusEl = document.getElementById('detailModelStatus');
+  if (btnId === 'detailModelBtn' && _genStatusEl) {
+    _genStatusEl.textContent = 'Generating model photo… This may take up to 2 minutes.';
+  }
   try {
     const uploadCount = Object.keys(uploadedPhotos).length;
     // Use the front photo (or first available) as the Ideogram reference.
@@ -3201,6 +3210,24 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     document.getElementById(outputDivId).style.display = 'block';
     currentAnalysis._modelPhotoUrl = watermarked;
 
+    if (btnId === 'detailModelBtn' && currentProduct) {
+      try {
+        await db('update', 'products', { id: currentProduct.id, data: { model_photo: watermarked } });
+        const idx = inventory.findIndex(p => p.id === currentProduct.id);
+        if (idx >= 0) {
+          inventory[idx] = { ...inventory[idx], model_photo: watermarked };
+          currentProduct = inventory[idx];
+        }
+        const _dph = document.getElementById('detailPhoto');
+        if (_dph) { _dph.src = watermarked; _dph.style.display = 'block'; }
+        const _nullState = document.getElementById('detailModelNullState');
+        if (_nullState) _nullState.style.display = 'none';
+        showToast('Model photo ready ✓');
+      } catch(_saveErr) {
+        showToast('Photo generated — tap Save to product to keep it');
+      }
+    }
+
     console.log('[Meraki] Generation complete. model_photo and photo will be saved separately on Save.');
 
     // Show indicator that stock will use this photo
@@ -3226,7 +3253,11 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     showToast('Photo generation failed: ' + e.message);
   }
   if (btnId === 'genModelBtn') _isGeneratingModelPhoto = false;
-  setLoading(btnId, false, '<i class="ti ti-user"></i> <span id="t-genModel">' + T[lang].genModel + '</span>');
+  if (_genStatusEl) _genStatusEl.textContent = '';
+  const _btnRestoreHTML = btnId === 'detailModelBtn'
+    ? '<i class="ti ti-user"></i> Generate AI Model Photo'
+    : '<i class="ti ti-user"></i> <span id="t-genModel">' + T[lang].genModel + '</span>';
+  setLoading(btnId, false, _btnRestoreHTML);
 }
 
 function viewReferenceImage() {
@@ -3769,18 +3800,21 @@ async function downloadModelPhoto() {
 // ─── FEEDBACK PANEL ───────────────────────────────────────────────────────────
 function initFeedbackPanel() {
   selectedZones.clear(); selectedProblems.clear(); selectedRefPhoto = null; voiceTranscriptText = '';
+  const zoneRow = document.getElementById('zoneChipRow');
+  if (!zoneRow) return; // feedback panel removed from intake — nothing to init
   const zones = GARMENT_ZONES[garmentType] || ['Front', 'Back', 'Details'];
-  document.getElementById('zoneChipRow').innerHTML = zones.map(z =>
+  zoneRow.innerHTML = zones.map(z =>
     `<div class="zone-chip" onclick="toggleZone('${z}',this)">${z}</div>`
   ).join('');
   const photos = Object.values(uploadedPhotos);
   const refRow = document.getElementById('refPhotoRow');
-  refRow.innerHTML = photos.map((p, i) =>
+  if (refRow) refRow.innerHTML = photos.map((p, i) =>
     `<img src="${p.dataUrl}" class="ref-thumb" onclick="selectRefPhoto(${i},this)" alt="${p.label}">`
   ).join('');
-  document.getElementById('refStep').style.display = photos.length ? 'block' : 'none';
-  document.getElementById('voiceTranscript').style.display = 'none';
-  document.getElementById('voiceTranscript').textContent = '';
+  const refStep = document.getElementById('refStep');
+  if (refStep) refStep.style.display = photos.length ? 'block' : 'none';
+  const vt = document.getElementById('voiceTranscript');
+  if (vt) { vt.style.display = 'none'; vt.textContent = ''; }
 }
 
 function toggleZone(zone, el) {
@@ -5461,7 +5495,24 @@ function _openProductDetailUI(p) {
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = getProductCollections(p).join(', ');
-  document.getElementById('detailModelOutput').style.display = 'none';
+  // Model photo section: show existing model photo if present, else show null-state description
+  const _dmo = document.getElementById('detailModelOutput');
+  const _dmi = document.getElementById('detailModelImg');
+  const _dms = document.getElementById('detailModelStatus');
+  const _dmn = document.getElementById('detailModelNullState');
+  const _dfr = document.getElementById('detailFashnRetryRow');
+  if (_dms) _dms.textContent = '';
+  if (p.model_photo && _dmi && _dmo) {
+    _dmi.src = p.model_photo;
+    _dmo.style.display = 'block';
+    if (_dfr) _dfr.style.display = productTryOnProvider === 'fashn' ? 'block' : 'none';
+    if (_dmn) _dmn.style.display = 'none';
+  } else {
+    if (_dmo) _dmo.style.display = 'none';
+    if (_dmi) _dmi.src = '';
+    if (_dfr) _dfr.style.display = 'none';
+    if (_dmn) _dmn.style.display = 'block';
+  }
   const _mso = document.getElementById('mktShareOutput');
   if (_mso) { _mso.style.display = 'none'; _mso.innerHTML = ''; }
   window._currentShareCardUrl = null;
@@ -6968,6 +7019,14 @@ document.addEventListener('click', function(e) {
 
 async function generateDetailModelPhoto() {
   if (!currentProduct?.ideogram_prompt) { showToast('No prompt available for this item'); return; }
+
+  // Guard: prevent double-tap and duplicate picker
+  const btn = document.getElementById('detailModelBtn');
+  if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Opening Models…'; }
+  await new Promise(r => requestAnimationFrame(r));
+
   const tempAnalysis = currentAnalysis;
   // Attach the saved product photo so Ideogram sees the actual garment
   currentAnalysis = {
@@ -6981,6 +7040,8 @@ async function generateDetailModelPhoto() {
   };
   await generateModelPhoto('detailModelImg', 'detailModelOutput', 'detailModelBtn');
   currentAnalysis = tempAnalysis;
+  // For FASHN: picker is now open; button stays disabled until _cancelFashnPicker or
+  // _runGenerateModelPhoto resets it. For Ideogram: generation has already completed.
 }
 
 async function downloadDetailModel() {
@@ -9225,6 +9286,7 @@ function _renderActiveTemplatePreview() {
 
 let _fashnPickerTarget = null;  // { targetImgId, outputDivId, btnId }
 let _fashnPickerSelected = null;  // defId selected in picker
+let _fashnPickerConfirming = false;  // double-submit guard for Confirm button
 let _fashnCategory = localStorage.getItem('fashnCategory') || 'tops';
 
 function _setFashnCategory(cat) {
@@ -9237,12 +9299,35 @@ function _setFashnCategory(cat) {
   });
 }
 
+function _openFashnPickerLoading(targetImgId, outputDivId, btnId) {
+  if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
+  _fashnPickerTarget = { targetImgId, outputDivId, btnId };
+  const _grid = document.getElementById('fashnPickerGrid');
+  if (_grid) _grid.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:24px 0;color:var(--muted)"><div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Loading models…</div>';
+  openSheet('fashnPickerSheet');
+}
+
 function _openFashnPicker(targetImgId, outputDivId, btnId) {
+  if (document.getElementById('fashnPickerSheet').classList.contains('open')) return;
   _fashnPickerTarget = { targetImgId, outputDivId, btnId };
   _fashnPickerSelected = activeModelTemplateId;
   _renderFashnPickerGrid();
   openSheet('fashnPickerSheet');
   setTimeout(() => _setFashnCategory(_fashnCategory), 50);
+}
+
+function _cancelFashnPicker() {
+  _fashnPickerConfirming = false;
+  const _confirmBtn = document.getElementById('fashnPickerConfirmBtn');
+  if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
+  closeSheet('fashnPickerSheet');
+  const { btnId } = _fashnPickerTarget || {};
+  if (btnId) {
+    const _restoreHTML = btnId === 'detailModelBtn'
+      ? '<i class="ti ti-user"></i> Generate AI Model Photo'
+      : '<i class="ti ti-user"></i> <span id="t-genModel">' + (T[lang]?.genModel || 'Generate AI Model Photo') + '</span>';
+    setLoading(btnId, false, _restoreHTML);
+  }
 }
 
 function _renderFashnPickerGrid() {
@@ -9293,7 +9378,13 @@ function _fashnPickerSelect(defId) {
 }
 
 async function _confirmFashnPicker() {
+  // Keep picker open and usable if no model is selected yet
   if (!_fashnPickerSelected) { showToast('Select a model first'); return; }
+  // Double-submit guard — first valid tap wins
+  if (_fashnPickerConfirming) return;
+  _fashnPickerConfirming = true;
+  const _confirmBtn = document.getElementById('fashnPickerConfirmBtn');
+  if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.innerHTML = '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Starting…'; }
 
   let defIdToUse = _fashnPickerSelected;
 
@@ -9302,12 +9393,19 @@ async function _confirmFashnPicker() {
     defIdToUse = getNextCFSTemplate();
     if (!defIdToUse) {
       showToast('No approved Classic Front Stand templates. Approve some in Settings → Manage Templates.');
+      _fashnPickerConfirming = false;
+      if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
       return;
     }
   }
 
   const row = modelTemplates.find(r => r.def_id === defIdToUse);
-  if (!row?.image) { showToast('No image for selected template'); return; }
+  if (!row?.image) {
+    showToast('No image for selected template');
+    _fashnPickerConfirming = false;
+    if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
+    return;
+  }
 
   // Save selected mode (cfs-auto or specific defId) as the active preference
   activeModelTemplateId = _fashnPickerSelected;
@@ -9317,7 +9415,12 @@ async function _confirmFashnPicker() {
   saveSetting('activeModelTemplateId', _fashnPickerSelected);
   closeSheet('fashnPickerSheet');
   const { targetImgId, outputDivId, btnId } = _fashnPickerTarget;
-  await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  try {
+    await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  } finally {
+    _fashnPickerConfirming = false;
+    if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
+  }
 }
 
 // ─── PROVIDER LAB & BENCHMARKS ───────────────────────────────────────────────
