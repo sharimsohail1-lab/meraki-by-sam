@@ -952,6 +952,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Reserved For</div>
       <input type="text" id="reservedForInput" class="field-input" placeholder="Customer name">
     </div>
+    <div id="markAllSoldRow" style="display:none;text-align:right;margin-top:4px;margin-bottom:2px">
+      <button onclick="openMarkAllSoldConfirm()" style="background:none;border:none;font-size:11px;color:var(--muted);cursor:pointer;padding:0;text-decoration:underline">Mark entire product sold</button>
+    </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
       <div class="field-label" style="margin-bottom:4px">AI Model Photo</div>
       <div id="detailModelNullState" style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">Create an optional model image for marketing and sharing.</div>
@@ -1235,12 +1238,42 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 <div class="sheet-overlay" id="sizeSoldSheet" onclick="closeSheetOutside(event,'sizeSoldSheet')">
   <div class="sheet" style="min-height:auto">
     <div class="sheet-handle"></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-weight:600;font-size:15px">Which size was sold?</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-weight:600;font-size:15px">What was sold?</div>
       <button onclick="closeSheet('sizeSoldSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
-    <div id="sizeSoldBtnRow" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Select a size and confirm the quantity.</div>
+    <div id="sizeSoldBtnRow" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+    <div id="sizeSoldQtyRow" style="display:none;align-items:center;gap:14px;margin-bottom:16px;padding:10px 14px;background:var(--sand-light);border-radius:8px">
+      <div style="font-size:13px;font-weight:600;color:var(--ink);flex:1">Quantity to mark sold</div>
+      <button onclick="_sizeSoldQtyStep(-1)" style="background:var(--border);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">&minus;</button>
+      <div id="sizeSoldQtyNum" style="font-size:17px;font-weight:700;min-width:24px;text-align:center">1</div>
+      <button onclick="_sizeSoldQtyStep(1)" style="background:var(--border);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+    </div>
+    <button id="sizeSoldConfirmBtn" class="btn btn-primary" onclick="_confirmSizeSold()" style="display:none;width:100%;margin-bottom:8px">Confirm sale</button>
     <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('sizeSoldSheet')">Cancel</button>
+  </div>
+</div>
+
+<!-- NO INVENTORY SOLD CONFIRMATION -->
+<div class="sheet-overlay" id="soldNoInventorySheet" onclick="closeSheetOutside(event,'soldNoInventorySheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:600;font-size:15px;margin-bottom:10px">Mark this product as sold?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will make the item appear sold in Stock and future marketing materials.</div>
+    <button class="btn btn-primary" id="soldNoInvConfirmBtn" onclick="_confirmSoldNoInventory(this)" style="width:100%;margin-bottom:8px">Mark Sold</button>
+    <button class="btn btn-secondary" onclick="closeSheet('soldNoInventorySheet')" style="width:100%">Cancel</button>
+  </div>
+</div>
+
+<!-- MARK ENTIRE PRODUCT SOLD CONFIRMATION -->
+<div class="sheet-overlay" id="markAllSoldSheet" onclick="closeSheetOutside(event,'markAllSoldSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:600;font-size:15px;margin-bottom:10px">Mark the entire product as sold?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will set every remaining size quantity to 0 and show the item as sold in future marketing materials.</div>
+    <button class="btn btn-primary" id="markAllSoldConfirmBtn" onclick="_confirmMarkAllSold(this)" style="width:100%;margin-bottom:8px;background:var(--burgundy);color:#fff">Mark sold and clear remaining inventory</button>
+    <button class="btn btn-secondary" onclick="closeSheet('markAllSoldSheet')" style="width:100%">Cancel</button>
   </div>
 </div>
 
@@ -3281,6 +3314,7 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
         // Hide the hero "Replace photo" row — model photo is now the hero
         const _drr2 = document.getElementById('detailReplacePhotoRow');
         if (_drr2) _drr2.style.display = 'none';
+        _invalidateMktPreview();
         showToast('Model photo ready ✓');
       } catch(_saveErr) {
         showToast('Photo generated — tap Save to product to keep it');
@@ -5595,6 +5629,8 @@ function _openProductDetailUI(p) {
   if (_msb) _msb.innerHTML = `<i class="ti ti-package"></i> Marketing &amp; Share`;
   document.getElementById('reservedForRow').style.display = p.status === 'reserved' ? 'block' : 'none';
   document.getElementById('reservedForInput').value = p.reserved_for || '';
+  const _masr = document.getElementById('markAllSoldRow');
+  if (_masr) _masr.style.display = getSizeInventory(p) ? 'block' : 'none';
   ['available','reserved','sold'].forEach(s => {
     document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
   });
@@ -5630,54 +5666,149 @@ async function updateProductStatus(status) {
     ['available','reserved','sold'].forEach(s => {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
+    renderInventory();
+    _invalidateMktPreview();
     showToast('Status updated');
   } catch(e) { showToast('Error: ' + e.message); }
 }
 
-// If product has multiple available sizes, ask which size was sold; otherwise mark sold directly.
+// Sold button handler — routes to size sheet (tracked inventory) or simple confirm (untracked).
 function markSoldWithSizePicker() {
   if (!currentProduct) return;
   const inv = getSizeInventory(currentProduct);
-  if (!inv) { updateProductStatus('sold'); return; }
-
-  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
-  if (available.length <= 1) {
-    // Only one (or zero) sizes available — mark sold directly
-    updateProductStatus('sold');
+  if (!inv) {
+    // No size tracking — show simple whole-product confirmation
+    const btn = document.getElementById('soldNoInvConfirmBtn');
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Mark Sold'; }
+    openSheet('soldNoInventorySheet');
     return;
   }
-
-  // Show size picker
+  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  if (available.length === 0) {
+    showToast('All inventory already at zero');
+    return;
+  }
+  // Always open the size picker — even when only one size remains
+  window._sizeSoldSelected = null;
+  window._sizeSoldMaxQty = 1;
   const row = document.getElementById('sizeSoldBtnRow');
   row.innerHTML = available.map(s =>
-    `<button class="size-sold-btn" onclick="_markSizeAsSold('${s}')">${s}</button>`
+    `<button class="size-sold-btn" id="sizeSoldBtn-${s}" onclick="_selectSizeSold('${s}',${inv[s] || 0})">${s} <span style="font-size:10px;opacity:0.7">(${inv[s] || 0})</span></button>`
   ).join('');
+  const qtyRow = document.getElementById('sizeSoldQtyRow');
+  const confirmBtn = document.getElementById('sizeSoldConfirmBtn');
+  if (qtyRow) qtyRow.style.display = 'none';
+  if (confirmBtn) confirmBtn.style.display = 'none';
+  showToast('Opening sale details…');
   openSheet('sizeSoldSheet');
 }
 
-async function _markSizeAsSold(size) {
+let _sizeSoldSelected = null;
+let _sizeSoldMaxQty = 1;
+
+function _selectSizeSold(size, max) {
+  window._sizeSoldSelected = size;
+  window._sizeSoldMaxQty = max;
+  // Highlight selected size button
+  document.querySelectorAll('.size-sold-btn').forEach(b => b.style.background = '');
+  const btn = document.getElementById('sizeSoldBtn-' + size);
+  if (btn) btn.style.background = 'var(--burgundy)';
+  // Show qty row
+  const qtyRow = document.getElementById('sizeSoldQtyRow');
+  const qtyNum = document.getElementById('sizeSoldQtyNum');
+  const confirmBtn = document.getElementById('sizeSoldConfirmBtn');
+  if (qtyNum) qtyNum.textContent = '1';
+  if (qtyRow) { qtyRow.style.display = 'flex'; }
+  if (confirmBtn) { confirmBtn.style.display = 'block'; confirmBtn.disabled = false; confirmBtn.innerHTML = 'Confirm sale'; }
+}
+
+function _sizeSoldQtyStep(delta) {
+  const el = document.getElementById('sizeSoldQtyNum');
+  if (!el) return;
+  const cur = parseInt(el.textContent) || 1;
+  const max = window._sizeSoldMaxQty || 1;
+  el.textContent = Math.min(max, Math.max(1, cur + delta));
+}
+
+async function _confirmSizeSold() {
+  const size = window._sizeSoldSelected;
+  const qty = parseInt(document.getElementById('sizeSoldQtyNum')?.textContent) || 1;
+  if (!size || !currentProduct) return;
+  const confirmBtn = document.getElementById('sizeSoldConfirmBtn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Updating inventory…'; }
   closeSheet('sizeSoldSheet');
+  await _markSizeAsSold(size, qty);
+}
+
+async function _markSizeAsSold(size, qty) {
   if (!currentProduct) return;
-  const inv = decrementSizeInventory(currentProduct, size);
+  qty = Math.max(1, parseInt(qty) || 1);
+  const inv = normalizeSizeInventory(getSizeInventory(currentProduct));
+  inv[size] = Math.max(0, (inv[size] || 0) - qty);
   const newStatus = deriveStatusFromInventory(currentProduct, inv);
   const total = SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
   const update = {
     size_inventory: JSON.stringify(inv),
     status: newStatus,
-    sold_at: newStatus === 'sold' ? new Date().toISOString() : currentProduct.sold_at
+    sold_at: newStatus === 'sold' ? new Date().toISOString() : (newStatus === 'available' ? null : currentProduct.sold_at)
   };
   try {
     await db('update', 'products', { id: currentProduct.id, data: update });
     const idx = inventory.findIndex(p => p.id === currentProduct.id);
     inventory[idx] = { ...inventory[idx], ...update };
     currentProduct = inventory[idx];
-    // Refresh size steppers and status buttons
     initDetailSizeSteppers(currentProduct);
     ['available','reserved','sold'].forEach(s => {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (newStatus === s ? ' active-' + s : '');
     });
-    showToast(total === 0 ? 'All sizes sold — marked Sold Out' : `Size ${size} sold · ${total} remaining`);
+    renderInventory();
+    _invalidateMktPreview();
+    showToast(total === 0 ? 'Inventory updated — item marked Sold Out' : `Inventory updated · ${total} remaining`);
   } catch(e) { showToast('Error: ' + e.message); }
+}
+
+async function _confirmSoldNoInventory(btn) {
+  if (!currentProduct) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Marking sold…'; }
+  closeSheet('soldNoInventorySheet');
+  await updateProductStatus('sold');
+}
+
+function openMarkAllSoldConfirm() {
+  if (!currentProduct) return;
+  const btn = document.getElementById('markAllSoldConfirmBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = 'Mark sold and clear remaining inventory'; }
+  openSheet('markAllSoldSheet');
+}
+
+async function _confirmMarkAllSold(btn) {
+  if (!currentProduct) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Marking sold…'; }
+  closeSheet('markAllSoldSheet');
+  const inv = normalizeSizeInventory(getSizeInventory(currentProduct) || {});
+  // Zero every size key
+  SIZE_ORDER.forEach(s => { inv[s] = 0; });
+  const update = {
+    size_inventory: JSON.stringify(inv),
+    status: 'sold',
+    sold_at: new Date().toISOString()
+  };
+  try {
+    await db('update', 'products', { id: currentProduct.id, data: update });
+    const idx = inventory.findIndex(p => p.id === currentProduct.id);
+    inventory[idx] = { ...inventory[idx], ...update };
+    currentProduct = inventory[idx];
+    initDetailSizeSteppers(currentProduct);
+    ['available','reserved','sold'].forEach(s => {
+      document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + ('sold' === s ? ' active-sold' : '');
+    });
+    renderInventory();
+    _invalidateMktPreview();
+    showToast('All inventory cleared — marked Sold Out');
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Mark sold and clear remaining inventory'; }
+    showToast('Error: ' + e.message);
+  }
 }
 
 async function saveProductEdits() {
@@ -5716,6 +5847,9 @@ async function saveProductEdits() {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
     _updateSizeTotalNote('detailSizeGrid', detailSizeState);
+    const _masr2 = document.getElementById('markAllSoldRow');
+    if (_masr2) _masr2.style.display = size_inventory ? 'block' : 'none';
+    _invalidateMktPreview();
     if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓'; }
     showToast('Changes saved');
     setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 1600);
@@ -5724,6 +5858,17 @@ async function saveProductEdits() {
     if (btn) { btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save'; }
     showToast('Could not save changes. Please try again.');
     setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 2200);
+  }
+}
+
+// Nullify the current share card and show a stale notice if the workspace is open.
+// Called whenever price, status, inventory, name, description, or photos change.
+function _invalidateMktPreview() {
+  window._currentShareCardUrl = null;
+  const mso = document.getElementById('mktShareOutput');
+  const cardEl = document.getElementById('mktCardArea');
+  if (mso && mso.style.display !== 'none' && cardEl && cardEl.querySelector('img')) {
+    cardEl.innerHTML = '<div style="font-size:12px;color:var(--burgundy);background:#fdf3f3;padding:10px 12px;border-radius:6px;text-align:center;line-height:1.5">Product details changed — regenerate the marketing image.</div>';
   }
 }
 
@@ -6565,6 +6710,11 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
 }
 
 async function _buildItemShareCard(p) {
+  // Always use the latest saved state for this product
+  if (p && p.id) {
+    const latest = inventory.find(x => x.id === p.id);
+    if (latest) p = latest;
+  }
   // Catalog-style layout: image on top, white info panel on bottom.
   // Canvas height is dynamic — expands to fit the complete garment bio.
   // No text truncation. No ellipsis on product bios.
@@ -6593,8 +6743,8 @@ async function _buildItemShareCard(p) {
   // Compute info panel height to fit all content
   const nameBlockH = nameLines.length * NAME_LH + 16;
   const bioBlockH = bioLines.length > 0 ? bioLines.length * BIO_LH + 18 : 0;
-  // Price row: sold = 1 line; available = price + sizes = 2 rows
-  const priceBlockH = p.status === 'sold' ? 40 : 48 + 36;
+  // Price row: sold out = 1 line; available = price + sizes = 2 rows
+  const priceBlockH = isProductSoldOut(p) ? 40 : 48 + 36;
   const INFO_H = INFO_PAD_TOP + nameBlockH + bioBlockH + priceBlockH + INFO_PAD_BOT;
   const H = IMG_H + INFO_H;
 
@@ -6634,9 +6784,10 @@ async function _buildItemShareCard(p) {
   }
 
   // ── Sold / Reserved stamp ─────────────────────────────────────────────────
-  if (p.status === 'sold' || p.status === 'reserved') {
-    const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
-    const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
+  const _isSoldOut = isProductSoldOut(p);
+  if (_isSoldOut || p.status === 'reserved') {
+    const label = _isSoldOut ? 'SOLD' : 'RESERVED';
+    const stampBg = _isSoldOut ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
     ctx.font = `bold 28px "Playfair Display", serif`;
     const textW = ctx.measureText(label).width;
     const sw = textW + 36, sh = 48;
@@ -6677,7 +6828,7 @@ async function _buildItemShareCard(p) {
   }
 
   // ── Price / status ────────────────────────────────────────────────────────
-  if (p.status === 'sold') {
+  if (_isSoldOut) {
     ctx.fillStyle = '#B71C1C';
     ctx.font = `600 30px Inter, sans-serif`;
     ctx.fillText('SOLD OUT · Message for similar pieces', PAD, ty);
@@ -6735,8 +6886,10 @@ async function _shareItemCard(dataUrl, caption, productName) {
 
 
 async function openMktShareWorkspace() {
-  const p = currentProduct;
-  if (!p) return;
+  if (!currentProduct) return;
+  // Always use the freshest saved state — avoid stale captured reference
+  const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
+  currentProduct = p;
   const output = document.getElementById('mktShareOutput');
   if (!output) return;
 
@@ -7144,6 +7297,7 @@ async function saveDetailModelPhoto(btn) {
     currentProduct = inventory[idx];
     document.getElementById('detailPhoto').src = src;
     document.getElementById('detailPhoto').style.display = 'block';
+    _invalidateMktPreview();
     showToast('Model photo saved');
     btn.innerHTML = '<i class="ti ti-check"></i> Saved';
   } catch(e) {
@@ -9427,6 +9581,7 @@ async function confirmReplaceOriginalPhoto() {
     if (_doi && _doi.src) { _doi.src = _replaceOrigPhotoPreview; }
     closeSheet('replaceOrigPhotoConfirmSheet');
     _replaceOrigPhotoPreview = null;
+    _invalidateMktPreview();
     showToast('Original photo replaced ✓');
   } catch(e) {
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = 'Replace'; }
