@@ -628,6 +628,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div class="size-stepper-grid" id="intakeSizeGrid"></div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="intakeSizeTotalNote"></div>
           </div>
+          <div style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:6px">Save this piece to finish adding it.</div>
           <button class="btn btn-green" id="saveProductBtn" onclick="saveProduct()"><i class="ti ti-device-floppy"></i><span id="t-saveProduct">Save to Inventory</span></button>
           <div id="saveSuccess" style="display:none"></div>
           <button class="btn btn-secondary" id="backToPhotosBtn" onclick="goToStep(2)" style="margin-top:4px">← Back to Photos</button>
@@ -1164,6 +1165,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Wait for the model photo to finish, or save now without it. You can always generate a model photo later from Stock.</div>
     <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('saveWithoutModelSheet')"><i class="ti ti-clock"></i> Wait</button>
     <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeSheet('saveWithoutModelSheet');_isGeneratingModelPhoto=false;_doSaveProduct()">Save without model photo</button>
+  </div>
+</div>
+
+<!-- DISCARD UNSAVED INTAKE CONFIRMATION -->
+<div class="sheet-overlay" id="discardIntakeSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px">Discard this unsaved piece?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">Your uploaded photos and entered details have not been saved.</div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="closeSheet('discardIntakeSheet')">Keep Editing</button>
+    <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_confirmDiscardIntake()">Discard</button>
   </div>
 </div>
 
@@ -2251,12 +2263,58 @@ function applyTranslations() {
 
 const _DATA_SCREENS = ['stock', 'people', 'show'];
 
+// Set to true by the save-success path so that navigating away after a successful
+// save does not trigger the discard confirmation.
+let _intakeNavBypass = false;
+// Stores the intended destination while the discard sheet is shown.
+let _intakePendingNav = null;
+
+function hasUnsavedIntakeChanges() {
+  // Step > 1 means the user has advanced past the initial form
+  const activePanel = document.querySelector('.step-panel.active');
+  if (activePanel && activePanel.id !== 'step-panel-1') return true;
+  // Uploaded at least one photo
+  if (Object.values(uploadedPhotos).some(p => p?.dataUrl)) return true;
+  // Claude analysis has run
+  if (currentAnalysis) return true;
+  // Any text entered in Step 3 fields
+  if ((document.getElementById('itemNameInput')?.value || '').trim()) return true;
+  if ((document.getElementById('priceInput')?.value || '').trim()) return true;
+  if ((document.getElementById('costInput')?.value || '').trim()) return true;
+  // Any size count > 0
+  const sizeState = window._sizeStates?.['intakeSizeGrid'] || {};
+  if (Object.values(sizeState).some(v => (Number(v) || 0) > 0)) return true;
+  return false;
+}
+
+function _confirmDiscardIntake() {
+  closeSheet('discardIntakeSheet');
+  resetIntake();
+  const dest = _intakePendingNav;
+  _intakePendingNav = null;
+  if (dest) showScreen(dest);
+}
+
 function showScreen(name) {
   if (_DATA_SCREENS.includes(name) && !requireAppDataLoaded(name)) return;
+
+  // Guard: if leaving Add with unsaved progress, show discard confirmation sheet.
+  // Bypass when: navigating within Add itself (name === 'add'), save-success path
+  // sets _intakeNavBypass, or there are no meaningful changes.
+  const currentScreen = document.querySelector('.screen.active');
+  const leavingAdd = currentScreen && currentScreen.id === 'screen-add' && name !== 'add';
+  if (leavingAdd && !_intakeNavBypass && hasUnsavedIntakeChanges()) {
+    _intakePendingNav = name;
+    openSheet('discardIntakeSheet');
+    return;
+  }
+  _intakeNavBypass = false;
+
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
-  document.getElementById('nav-' + name).classList.add('active');
+  const navEl = document.getElementById('nav-' + name);
+  if (navEl) navEl.classList.add('active');
   const homeBtn = document.getElementById('headerHomeBtn');
   if (homeBtn) homeBtn.style.display = name === 'home' ? 'none' : 'flex';
   if (name === 'home') renderHome();
@@ -2267,20 +2325,7 @@ function showScreen(name) {
 }
 
 function goHomeFromAdd() {
-  const activeScreen = document.querySelector('.screen.active');
-  const isOnAdd = activeScreen && activeScreen.id === 'screen-add';
-  const hasWork = isOnAdd && (
-    Object.keys(uploadedPhotos).some(k => uploadedPhotos[k]?.dataUrl) ||
-    (document.getElementById('priceInput')?.value || '').trim() ||
-    (document.getElementById('collectionNameInput')?.value || '').trim() ||
-    (document.getElementById('itemNameInput')?.value || '').trim()
-  );
-  if (hasWork) {
-    const msg = lang === 'ur'
-      ? 'یہ کپڑا چھوڑ دیں؟ تصویریں اور تفصیلات ضائع ہو سکتی ہیں۔'
-      : 'Leave this item? Unsaved photos and details may be lost.';
-    if (!confirm(msg)) return;
-  }
+  // goHomeFromAdd is now just a showScreen call — the guard is inside showScreen.
   showScreen('home');
 }
 
