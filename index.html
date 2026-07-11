@@ -612,6 +612,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             <div class="result-label" id="t-analysisLabel">Garment Analysis</div>
             <div id="analysisText" style="white-space:pre-wrap"></div>
           </div>
+          <button id="intakeAmendBtn" onclick="openAmendAnalysisSheet('intake')" style="background:none;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 14px;width:100%;margin-top:8px;margin-bottom:2px"><i class="ti ti-edit" style="font-size:12px"></i> Amend AI analysis</button>
           <div class="card" style="margin-top:14px">
             <div class="field-label" id="t-priceLabel">Price (USD)</div>
             <input type="number" id="priceInput" class="field-input" placeholder="e.g. 150">
@@ -941,7 +942,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </button>
       <div id="mktShareOutput" style="display:none;margin-top:12px"></div>
     </div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 10px" id="detailDesc"></div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 4px" id="detailDesc"></div>
+    <div style="text-align:right;margin-bottom:10px">
+      <button onclick="openAmendAnalysisSheet('detail')" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0;text-decoration:underline"><i class="ti ti-wand" style="font-size:11px"></i> Amend AI analysis</button>
+    </div>
     <div class="field-label" id="t-updateStatus">Update Status</div>
     <div class="status-row">
       <button class="status-btn" id="statusBtnAvail" onclick="updateProductStatus('available')">Available</button>
@@ -1274,6 +1278,41 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will set every remaining size quantity to 0 and show the item as sold in future marketing materials.</div>
     <button class="btn btn-primary" id="markAllSoldConfirmBtn" onclick="_confirmMarkAllSold(this)" style="width:100%;margin-bottom:8px;background:var(--burgundy);color:#fff">Mark sold and clear remaining inventory</button>
     <button class="btn btn-secondary" onclick="closeSheet('markAllSoldSheet')" style="width:100%">Cancel</button>
+  </div>
+</div>
+
+<!-- AMEND GARMENT ANALYSIS — text input -->
+<div class="sheet-overlay" id="analyzeAmendSheet" onclick="closeSheetOutside(event,'analyzeAmendSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-weight:600;font-size:15px">Amend garment analysis</div>
+      <button onclick="closeSheet('analyzeAmendSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;line-height:1.5">Tell the AI what it misunderstood or what should be changed.</div>
+    <div style="font-size:11px;color:var(--muted);background:var(--sand-light);padding:8px 12px;border-radius:8px;line-height:1.8;margin-bottom:12px">
+      Examples:<br>
+      <em>This is a kaftan, not a kameez.</em><br>
+      <em>The birds are peacocks, not phoenixes.</em><br>
+      <em>The fabric is raw silk, not satin.</em>
+    </div>
+    <textarea id="amendFeedbackInput" class="field-input" rows="4" placeholder="Describe what needs to change…" style="resize:none;margin-bottom:12px"></textarea>
+    <button id="amendSubmitBtn" class="btn btn-primary" onclick="_submitAmendAnalysis(this)" style="width:100%;margin-bottom:8px"><i class="ti ti-wand"></i> Amend analysis</button>
+    <button class="btn btn-secondary" onclick="closeSheet('analyzeAmendSheet')" style="width:100%">Cancel</button>
+  </div>
+</div>
+
+<!-- AMEND GARMENT ANALYSIS — review revised output -->
+<div class="sheet-overlay" id="analyzeAmendReviewSheet" onclick="closeSheetOutside(event,'analyzeAmendReviewSheet')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-weight:600;font-size:15px">Review revised analysis</div>
+      <button onclick="_cancelAmendReview()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="amendReviewContent" style="margin-bottom:14px"></div>
+    <button id="amendApplyBtn" class="btn btn-primary" onclick="_applyAmendChanges(this)" style="width:100%;margin-bottom:8px"><i class="ti ti-check"></i> Apply changes</button>
+    <button class="btn btn-secondary" onclick="_cancelAmendReview()" style="width:100%">Cancel</button>
   </div>
 </div>
 
@@ -7024,6 +7063,356 @@ Create all of the following in this EXACT JSON format (no markdown, no extra tex
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-package"></i> Generate Marketing Copy'; }
     if (output) output.innerHTML = '<div style="font-size:12px;color:var(--burgundy);padding:8px 0">Error: ' + e.message + '</div>';
   }
+}
+
+// ─── AMEND GARMENT ANALYSIS ──────────────────────────────────────────────────
+// Lets Sam correct inaccurate garment descriptions without rerunning full intake.
+// Works from both intake Step 3 (pre-save) and Product Detail (post-save).
+
+let _amendContext = null;      // 'intake' | 'detail'
+let _amendResult = null;       // parsed Claude response
+let _amendBefore = null;       // field snapshot at amendment time
+let _amendCurrentName = null;  // product name at amendment time
+let _amendSelectedName = null; // name chip chosen in review
+let _amendNameReplaceOn = false;
+let _amendInProgress = false;
+
+function openAmendAnalysisSheet(ctx) {
+  window._amendContext = ctx;
+  const input = document.getElementById('amendFeedbackInput');
+  if (input) input.value = '';
+  const btn = document.getElementById('amendSubmitBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-wand"></i> Amend analysis'; }
+  window._amendInProgress = false;
+  openSheet('analyzeAmendSheet');
+}
+
+function _dataUrlToImageBlock(dataUrl) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+  const semi = dataUrl.indexOf(';');
+  const comma = dataUrl.indexOf(',');
+  if (semi < 0 || comma < 0 || comma < semi) return null;
+  const mediaType = dataUrl.slice(5, semi);
+  if (!['image/jpeg','image/png','image/gif','image/webp'].includes(mediaType)) return null;
+  const base64 = dataUrl.slice(comma + 1);
+  if (!base64) return null;
+  return { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+}
+
+async function _submitAmendAnalysis(btn) {
+  if (window._amendInProgress) return;
+  const feedback = (document.getElementById('amendFeedbackInput')?.value || '').trim();
+  if (!feedback) { showToast('Please describe what needs to change'); return; }
+
+  window._amendInProgress = true;
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Preparing amendment…';
+
+  try {
+    const ctx = window._amendContext;
+    let currentFields, photoDataUrl, currentName, nameWasManual;
+
+    if (ctx === 'intake') {
+      if (!currentAnalysis) throw new Error('No analysis to amend. Please analyze the garment first.');
+      currentFields = {
+        description_en: currentAnalysis.description || '',
+        colors: currentAnalysis.colors || '',
+        occasion: currentAnalysis.occasion || null,
+        category: currentAnalysis.category || '',
+        neckline: currentAnalysis.neckline || 'unknown',
+        has_placket: currentAnalysis.has_placket ?? false,
+        has_dupatta: currentAnalysis.has_dupatta ?? false,
+        motifs: currentAnalysis.motifs || [],
+        ideogram_prompt: currentAnalysis.ideogramPrompt || '',
+        catalog_blurb: null,
+        share_blurb: currentAnalysis.shareBlurb || '',
+      };
+      photoDataUrl = currentAnalysis._uploadedPhotoB64 || null;
+      currentName = document.getElementById('itemNameInput')?.value?.trim() || currentAnalysis.name || '';
+      nameWasManual = currentName !== (currentAnalysis.name || '');
+    } else {
+      if (!currentProduct) throw new Error('No product open');
+      const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
+      let motifsParsed = [];
+      try { const r = p.motifs; motifsParsed = Array.isArray(r) ? r : (typeof r === 'string' && r ? JSON.parse(r) : []); } catch(_) {}
+      currentFields = {
+        description_en: p.description_en || '',
+        colors: p.colors || '',
+        occasion: p.occasion || null,
+        category: p.category || '',
+        neckline: p.neckline || 'unknown',
+        has_placket: p.has_placket ?? false,
+        has_dupatta: p.has_dupatta ?? false,
+        motifs: motifsParsed,
+        ideogram_prompt: p.ideogram_prompt || '',
+        catalog_blurb: p.catalog_blurb || '',
+        share_blurb: p.share_blurb || '',
+      };
+      photoDataUrl = p.photo || null;
+      currentName = p.name || '';
+      nameWasManual = true;
+    }
+
+    window._amendBefore = currentFields;
+    window._amendCurrentName = currentName;
+
+    btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Re-analyzing garment…';
+
+    const content = [];
+    const imgBlock = _dataUrlToImageBlock(photoDataUrl);
+    if (imgBlock) content.push(imgBlock);
+
+    const motifsSummary = Array.isArray(currentFields.motifs) && currentFields.motifs.length
+      ? currentFields.motifs.map(m => `${m.type || '?'} at ${m.placement || '?'}`).join('; ')
+      : 'none';
+
+    content.push({ type: 'text', text: `Current garment analysis:
+- Description: ${currentFields.description_en || 'not set'}
+- Colors: ${currentFields.colors || 'not set'}
+- Category: ${currentFields.category || 'not set'}
+- Occasion: ${currentFields.occasion || 'none'}
+- Neckline: ${currentFields.neckline}
+- Has center front placket: ${currentFields.has_placket}
+- Has dupatta: ${currentFields.has_dupatta}
+- Motifs: ${motifsSummary}
+- Catalog blurb: ${currentFields.catalog_blurb || 'not set'}
+- Share blurb: ${currentFields.share_blurb || 'not set'}
+
+Current product name: "${currentName}"
+${nameWasManual ? 'The product name may have been set manually. Provide 1–3 alternative name suggestions only if the garment type itself changed.' : 'Provide 1–3 revised name suggestions if the correction changes what the garment should be called.'}
+
+User correction: "${feedback}"
+
+Revise the garment analysis to incorporate this correction precisely. Keep everything not mentioned in the correction unchanged. Do not return commerce fields (price, inventory, status). Return only a single JSON object — no markdown, no explanation:
+{
+  "nameSuggestions": ["short evocative name 1", "short evocative name 2"],
+  "description_en": "2-3 sentence garment bio grounded in revised details",
+  "colors": "comma-separated main colors",
+  "occasion": "occasion string or null",
+  "category": "Formal / Semi-Formal / Casual / Bridal",
+  "neckline": "high / round / v-neck-shallow / v-neck-deep / square / boat / collar / mandarin / open-front / unknown",
+  "has_placket": true or false,
+  "has_dupatta": true or false,
+  "motifs": [{"type":"...","count":"...","placement":"...","absent_from":"...","colors":"...","surrounding":"...","repeats":true,"symmetrical":true,"style_notes":"..."}],
+  "ideogram_prompt": "complete revised Ideogram v4 fashion prompt incorporating the correction",
+  "catalog_blurb": "2-sentence catalog entry reflecting revised details",
+  "share_blurb": "1-2 sentence share card blurb, 140-220 characters, no hashtags, no price"
+}` });
+
+    const resp = await callClaude([{ role: 'user', content }], 'You are a Pakistani fashion expert. Return only valid JSON.', 2200);
+
+    let revised;
+    try { revised = JSON.parse(resp); }
+    catch(_) {
+      let clean = resp.replace(/```json|```/g, '').trim();
+      try { revised = JSON.parse(clean); }
+      catch(_) {
+        const m = clean.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error('Could not parse the AI response. Please try again.');
+        revised = JSON.parse(m[0]);
+      }
+    }
+    if (!Array.isArray(revised.motifs)) revised.motifs = [];
+    if (!Array.isArray(revised.nameSuggestions)) revised.nameSuggestions = [];
+
+    window._amendResult = revised;
+    closeSheet('analyzeAmendSheet');
+    _showAmendReview(revised, ctx, currentFields, currentName);
+
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-wand"></i> Amend analysis';
+    showToast('Amendment failed: ' + e.message);
+  } finally {
+    window._amendInProgress = false;
+  }
+}
+
+const _AMEND_FIELD_LABELS = {
+  description_en: 'Description', colors: 'Colors', occasion: 'Occasion',
+  category: 'Category', neckline: 'Neckline', has_placket: 'Center front placket',
+  has_dupatta: 'Dupatta included', motifs: 'Motifs', ideogram_prompt: 'AI model prompt',
+  catalog_blurb: 'Catalog blurb', share_blurb: 'Share blurb',
+};
+const _AMEND_FIELDS = ['description_en','colors','occasion','category','neckline','has_placket','has_dupatta','motifs','ideogram_prompt','catalog_blurb','share_blurb'];
+
+function _amendFormatFieldDisplay(field, val) {
+  if (val === null || val === undefined) return '(none)';
+  if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+  if (Array.isArray(val)) return val.length ? val.map(m => m.type || JSON.stringify(m)).join(', ') : '(none)';
+  const s = String(val);
+  return s.length > 110 ? s.slice(0, 110) + '…' : s;
+}
+
+function _showAmendReview(revised, ctx, before, currentName) {
+  window._amendSelectedName = null;
+  window._amendNameReplaceOn = false;
+
+  const changed = [];
+  for (const field of _AMEND_FIELDS) {
+    if (ctx === 'intake' && field === 'catalog_blurb') continue;
+    const revVal = revised[field];
+    const prevVal = before[field];
+    const prevStr = typeof prevVal === 'object' ? JSON.stringify(prevVal) : String(prevVal ?? '');
+    const revStr = typeof revVal === 'object' ? JSON.stringify(revVal) : String(revVal ?? '');
+    if (prevStr !== revStr) changed.push({ field, label: _AMEND_FIELD_LABELS[field], before: prevVal, after: revVal });
+  }
+
+  let html = '';
+
+  if (changed.length === 0) {
+    html += '<div style="font-size:13px;color:var(--muted);padding:8px 0;line-height:1.5">No fields were changed. Try a more specific correction.</div>';
+  } else {
+    html += `<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">${changed.length} field${changed.length > 1 ? 's' : ''} revised</div>`;
+    for (const c of changed) {
+      const isPrompt = c.field === 'ideogram_prompt';
+      const prevDisp = _amendFormatFieldDisplay(c.field, c.before);
+      const nextDisp = isPrompt ? _amendFormatFieldDisplay(c.field, c.after).slice(0, 160) + '…' : _amendFormatFieldDisplay(c.field, c.after);
+      html += `<div style="margin-bottom:10px;padding:10px 12px;background:var(--sand-light);border-radius:8px">
+        <div style="font-size:11px;font-weight:600;color:var(--burgundy);margin-bottom:4px">${c.label}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px;text-decoration:line-through;line-height:1.4">${prevDisp}</div>
+        <div style="font-size:12px;color:var(--ink);line-height:1.4">${nextDisp}</div>
+        ${isPrompt ? '<div style="font-size:10px;color:var(--burgundy);margin-top:5px"><i class="ti ti-info-circle"></i> Future AI model generations will use the revised garment description.</div>' : ''}
+      </div>`;
+    }
+  }
+
+  // Name suggestions
+  if (revised.nameSuggestions.length) {
+    if (ctx === 'intake') {
+      html += '<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Name suggestions</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px" id="amendNameChips">';
+      revised.nameSuggestions.forEach((name, i) => {
+        const esc = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += `<button class="amend-name-chip" id="amendChip-${i}" onclick="_selectAmendName(${i},'${esc}')" style="background:var(--border);border:1.5px solid var(--border);border-radius:16px;padding:5px 13px;font-size:12px;cursor:pointer;color:var(--ink)">${name}</button>`;
+      });
+      html += '</div>';
+      html += '<div id="amendSelectedNameNote" style="font-size:11px;color:var(--muted)">Tap a suggestion to select it. Current name stays if none selected.</div></div>';
+    } else {
+      html += `<div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--sand-light);border-radius:8px;margin-bottom:6px">
+          <input type="checkbox" id="amendReplaceNameToggle" onchange="_toggleAmendNameReplace(this.checked)" style="width:16px;height:16px;accent-color:var(--burgundy);flex-shrink:0;cursor:pointer">
+          <label for="amendReplaceNameToggle" style="font-size:12px;color:var(--ink);cursor:pointer;line-height:1.4">Also replace product name</label>
+        </div>
+        <div id="amendDetailNamePicker" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:4px">`;
+      revised.nameSuggestions.forEach((name, i) => {
+        const esc = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += `<button class="amend-name-chip-d" id="amendChipD-${i}" onclick="_selectAmendName(${i},'${esc}')" style="background:var(--border);border:1.5px solid var(--border);border-radius:16px;padding:5px 13px;font-size:12px;cursor:pointer;color:var(--ink)">${name}</button>`;
+      });
+      html += `</div><div id="amendDetailNameNote" style="font-size:11px;color:var(--muted);display:none">Tap a name to select it.</div></div>`;
+    }
+  }
+
+  const content = document.getElementById('amendReviewContent');
+  if (content) content.innerHTML = html;
+  const applyBtn = document.getElementById('amendApplyBtn');
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.innerHTML = '<i class="ti ti-check"></i> Apply changes'; }
+  openSheet('analyzeAmendReviewSheet');
+}
+
+function _selectAmendName(idx, name) {
+  window._amendSelectedName = name;
+  document.querySelectorAll('.amend-name-chip,.amend-name-chip-d').forEach(c => {
+    c.style.background = 'var(--border)'; c.style.borderColor = 'var(--border)'; c.style.color = 'var(--ink)';
+  });
+  const chip = document.getElementById('amendChip-' + idx) || document.getElementById('amendChipD-' + idx);
+  if (chip) { chip.style.background = 'var(--burgundy)'; chip.style.borderColor = 'var(--burgundy)'; chip.style.color = '#fff'; }
+  const note = document.getElementById('amendSelectedNameNote') || document.getElementById('amendDetailNameNote');
+  if (note) note.textContent = `Selected: "${name}"`;
+}
+
+function _toggleAmendNameReplace(checked) {
+  window._amendNameReplaceOn = checked;
+  window._amendSelectedName = null;
+  const picker = document.getElementById('amendDetailNamePicker');
+  const note = document.getElementById('amendDetailNameNote');
+  if (picker) picker.style.display = checked ? 'flex' : 'none';
+  if (note) { note.style.display = checked ? 'block' : 'none'; note.textContent = 'Tap a name to select it.'; }
+  if (!checked) {
+    document.querySelectorAll('.amend-name-chip-d').forEach(c => {
+      c.style.background = 'var(--border)'; c.style.borderColor = 'var(--border)'; c.style.color = 'var(--ink)';
+    });
+  }
+}
+
+async function _applyAmendChanges(btn) {
+  if (!window._amendResult) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Applying changes…'; }
+
+  const ctx = window._amendContext;
+  const r = window._amendResult;
+
+  try {
+    if (ctx === 'intake') {
+      // Update in-memory state only — DB write happens on Save to Inventory
+      currentAnalysis.description = r.description_en;
+      currentAnalysis.colors = r.colors;
+      currentAnalysis.occasion = r.occasion;
+      currentAnalysis.category = r.category;
+      currentAnalysis.neckline = r.neckline;
+      currentAnalysis.has_placket = r.has_placket;
+      currentAnalysis.has_dupatta = r.has_dupatta;
+      currentAnalysis.motifs = r.motifs;
+      currentAnalysis.ideogramPrompt = r.ideogram_prompt;
+      currentAnalysis.shareBlurb = r.share_blurb;
+      // Refresh Step 3 description display
+      const analysisText = document.getElementById('analysisText');
+      if (analysisText) analysisText.textContent = r.description_en || '';
+      // Apply selected name to the editable input
+      if (window._amendSelectedName) {
+        const nameInput = document.getElementById('itemNameInput');
+        if (nameInput) nameInput.value = window._amendSelectedName;
+      }
+      closeSheet('analyzeAmendReviewSheet');
+      showToast('Analysis updated ✓');
+
+    } else {
+      if (!currentProduct) throw new Error('No product open');
+      const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
+      const update = {
+        description_en: r.description_en,
+        colors: r.colors,
+        occasion: r.occasion,
+        category: r.category,
+        neckline: r.neckline,
+        has_placket: r.has_placket,
+        has_dupatta: r.has_dupatta,
+        motifs: r.motifs ? JSON.stringify(r.motifs) : null,
+        ideogram_prompt: r.ideogram_prompt,
+        catalog_blurb: r.catalog_blurb,
+        share_blurb: r.share_blurb,
+      };
+      // Include name only when explicitly opted in and a suggestion selected
+      if (window._amendNameReplaceOn && window._amendSelectedName) {
+        update.name = window._amendSelectedName;
+      }
+      await db('update', 'products', { id: p.id, data: update });
+      const idx = inventory.findIndex(x => x.id === p.id);
+      inventory[idx] = { ...inventory[idx], ...update };
+      currentProduct = inventory[idx];
+      // Refresh Product Detail DOM
+      const _dd = document.getElementById('detailDesc');
+      if (_dd) _dd.textContent = currentProduct.description_en || '';
+      const _dm = document.getElementById('detailMeta');
+      if (_dm) _dm.innerHTML = [currentProduct.garment_type, currentProduct.season, currentProduct.category, currentProduct.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
+      if (update.name) {
+        const _dn = document.getElementById('detailName');
+        if (_dn) _dn.textContent = currentProduct.name;
+      }
+      _invalidateMktPreview();
+      closeSheet('analyzeAmendReviewSheet');
+      showToast('Analysis updated ✓');
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Apply changes'; }
+    showToast('Could not apply changes: ' + e.message);
+  }
+}
+
+function _cancelAmendReview() {
+  closeSheet('analyzeAmendReviewSheet');
+  window._amendResult = null;
+  window._amendSelectedName = null;
 }
 
 // ─── BIO EDIT FLOW ─────────────────────────────────────────────────────────────
