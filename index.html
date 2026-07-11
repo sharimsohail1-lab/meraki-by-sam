@@ -9222,6 +9222,7 @@ function _renderActiveTemplatePreview() {
 
 let _fashnPickerTarget = null;  // { targetImgId, outputDivId, btnId }
 let _fashnPickerSelected = null;  // defId selected in picker
+let _fashnPickerConfirming = false;  // double-submit guard for Confirm button
 let _fashnCategory = localStorage.getItem('fashnCategory') || 'tops';
 
 function _setFashnCategory(cat) {
@@ -9244,6 +9245,9 @@ function _openFashnPicker(targetImgId, outputDivId, btnId) {
 }
 
 function _cancelFashnPicker() {
+  _fashnPickerConfirming = false;
+  const _confirmBtn = document.getElementById('fashnPickerConfirmBtn');
+  if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
   closeSheet('fashnPickerSheet');
   const { btnId } = _fashnPickerTarget || {};
   if (btnId) {
@@ -9302,7 +9306,13 @@ function _fashnPickerSelect(defId) {
 }
 
 async function _confirmFashnPicker() {
+  // Keep picker open and usable if no model is selected yet
   if (!_fashnPickerSelected) { showToast('Select a model first'); return; }
+  // Double-submit guard — first valid tap wins
+  if (_fashnPickerConfirming) return;
+  _fashnPickerConfirming = true;
+  const _confirmBtn = document.getElementById('fashnPickerConfirmBtn');
+  if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.innerHTML = '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Starting…'; }
 
   let defIdToUse = _fashnPickerSelected;
 
@@ -9311,12 +9321,19 @@ async function _confirmFashnPicker() {
     defIdToUse = getNextCFSTemplate();
     if (!defIdToUse) {
       showToast('No approved Classic Front Stand templates. Approve some in Settings → Manage Templates.');
+      _fashnPickerConfirming = false;
+      if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
       return;
     }
   }
 
   const row = modelTemplates.find(r => r.def_id === defIdToUse);
-  if (!row?.image) { showToast('No image for selected template'); return; }
+  if (!row?.image) {
+    showToast('No image for selected template');
+    _fashnPickerConfirming = false;
+    if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
+    return;
+  }
 
   // Save selected mode (cfs-auto or specific defId) as the active preference
   activeModelTemplateId = _fashnPickerSelected;
@@ -9326,7 +9343,12 @@ async function _confirmFashnPicker() {
   saveSetting('activeModelTemplateId', _fashnPickerSelected);
   closeSheet('fashnPickerSheet');
   const { targetImgId, outputDivId, btnId } = _fashnPickerTarget;
-  await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  try {
+    await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
+  } finally {
+    _fashnPickerConfirming = false;
+    if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
+  }
 }
 
 // ─── PROVIDER LAB & BENCHMARKS ───────────────────────────────────────────────
