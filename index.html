@@ -3081,7 +3081,18 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
   if (productTryOnProvider === 'fashn') {
     await loadModelTemplates();
     const hasAny = modelTemplates.some(r => r.image);
-    if (!hasAny) { showToast('No templates yet — go to Settings → Manage Templates first'); return; }
+    if (!hasAny) {
+      showToast('No templates yet — go to Settings → Manage Templates first');
+      // Restore button if it was disabled by the caller (e.g. generateDetailModelPhoto)
+      const _fbtn = document.getElementById(btnId);
+      if (_fbtn && _fbtn.disabled) {
+        const _fhtml = btnId === 'detailModelBtn'
+          ? '<i class="ti ti-user"></i> Generate AI Model Photo'
+          : '<i class="ti ti-user"></i> <span id="t-genModel">' + (T[lang]?.genModel || 'Generate AI Model Photo') + '</span>';
+        setLoading(btnId, false, _fhtml);
+      }
+      return;
+    }
     _openFashnPicker(targetImgId, outputDivId, btnId);
   } else {
     await _runGenerateModelPhoto(targetImgId, outputDivId, btnId);
