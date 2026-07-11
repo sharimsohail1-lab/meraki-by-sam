@@ -3726,18 +3726,21 @@ async function downloadModelPhoto() {
 // ─── FEEDBACK PANEL ───────────────────────────────────────────────────────────
 function initFeedbackPanel() {
   selectedZones.clear(); selectedProblems.clear(); selectedRefPhoto = null; voiceTranscriptText = '';
+  const zoneRow = document.getElementById('zoneChipRow');
+  if (!zoneRow) return; // feedback panel removed from intake — nothing to init
   const zones = GARMENT_ZONES[garmentType] || ['Front', 'Back', 'Details'];
-  document.getElementById('zoneChipRow').innerHTML = zones.map(z =>
+  zoneRow.innerHTML = zones.map(z =>
     `<div class="zone-chip" onclick="toggleZone('${z}',this)">${z}</div>`
   ).join('');
   const photos = Object.values(uploadedPhotos);
   const refRow = document.getElementById('refPhotoRow');
-  refRow.innerHTML = photos.map((p, i) =>
+  if (refRow) refRow.innerHTML = photos.map((p, i) =>
     `<img src="${p.dataUrl}" class="ref-thumb" onclick="selectRefPhoto(${i},this)" alt="${p.label}">`
   ).join('');
-  document.getElementById('refStep').style.display = photos.length ? 'block' : 'none';
-  document.getElementById('voiceTranscript').style.display = 'none';
-  document.getElementById('voiceTranscript').textContent = '';
+  const refStep = document.getElementById('refStep');
+  if (refStep) refStep.style.display = photos.length ? 'block' : 'none';
+  const vt = document.getElementById('voiceTranscript');
+  if (vt) { vt.style.display = 'none'; vt.textContent = ''; }
 }
 
 function toggleZone(zone, el) {
