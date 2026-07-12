@@ -51,20 +51,20 @@ function stripOptionalCols(data) {
   return Object.fromEntries(Object.entries(data).filter(([k]) => !OPTIONAL_COLS.includes(k)));
 }
 
+// Returns the validated column string, or throws with a safe message listing only
+// the invalid column names and table — never logs or exposes row contents.
+// When no columns param is supplied (undefined / '*'), returns '*' to preserve
+// legacy callers that rely on full-row selects.
 function safeColumns(raw, table) {
   if (!raw || raw === '*') return '*';
   const allowlist = ALLOWED_COLUMNS_BY_TABLE[table] || KNOWN_PRODUCT_COLS;
   const requested = raw.split(',').map(c => c.trim()).filter(Boolean);
   const rejected = requested.filter(c => !allowlist.has(c));
-  if (rejected.length) console.warn('[db] rejected unknown columns for', table, ':', rejected.join(','));
-  const valid = requested.filter(c => allowlist.has(c));
-  // If caller supplied an explicit list but every column was invalid, fall back to * rather
-  // than silently changing the semantics — log a clear warning so it's caught in dev.
-  if (!valid.length) {
-    console.warn('[db] all requested columns invalid for table', table, '— falling back to *');
-    return '*';
+  if (rejected.length) {
+    // Reject the entire request — do not silently strip or fall back to *.
+    throw new RangeError(`Invalid columns for table "${table}": ${rejected.join(', ')}`);
   }
-  return valid.join(',');
+  return requested.join(',');
 }
 
 export default async function handler(req, res) {
@@ -116,7 +116,12 @@ export default async function handler(req, res) {
     let query;
     switch (action) {
       case 'select': {
-        const cols = safeColumns(columns, table);
+        let cols;
+        try { cols = safeColumns(columns, table); }
+        catch(colErr) {
+          console.warn('[db] column validation failed:', colErr.message);
+          return res.status(400).json({ error: colErr.message });
+        }
         query = supabase.from(table).select(cols).order('created_at', { ascending: false });
         if (filter) {
           Object.entries(JSON.parse(filter)).forEach(([k, v]) => { query = query.eq(k, v); });
