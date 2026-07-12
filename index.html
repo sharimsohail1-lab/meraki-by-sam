@@ -391,6 +391,37 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 /* Model photo */
 .preview-img { width: 100%; height: auto; object-fit: contain; border-radius: 10px; margin-bottom: 12px; background: var(--sand-light); }
 
+/* Marketing image source selector */
+.mkt-img-src-row { display:flex; gap:8px; margin-bottom:14px; }
+.mkt-img-src-btn { flex:1; padding:9px 6px; border-radius:8px; border:1.5px solid var(--border); background:#fff; font-size:12px; color:var(--ink); cursor:pointer; text-align:center; line-height:1.3; }
+.mkt-img-src-btn.active { border-color:var(--burgundy); background:var(--burgundy); color:#fff; }
+.mkt-img-src-btn:disabled { opacity:.45; cursor:default; }
+
+/* Catalog per-product image controls */
+.cat-img-ctrl { display:flex; align-items:center; gap:6px; margin-top:5px; flex-wrap:wrap; }
+.cat-img-btn { font-size:10px; padding:3px 8px; border-radius:12px; border:1.5px solid var(--border); background:#fff; color:var(--ink); cursor:pointer; white-space:nowrap; }
+.cat-img-btn.active { border-color:var(--burgundy); background:var(--burgundy); color:#fff; }
+.cat-img-btn:disabled { opacity:.4; cursor:default; }
+.cat-blur-btn { font-size:10px; padding:3px 8px; border-radius:12px; border:1.5px solid #e67e22; background:#fff; color:#e67e22; cursor:pointer; white-space:nowrap; }
+.cat-blur-btn.ready { border-color:#27ae60; color:#27ae60; }
+.cat-no-image { font-size:10px; color:#c0392b; padding:3px 0; }
+
+/* Blur editor overlay */
+#blurEditorSheet .sheet { height:92vh; display:flex; flex-direction:column; }
+.blur-editor-canvas-wrap { position:relative; flex:1; overflow:hidden; background:#111; display:flex; align-items:center; justify-content:center; touch-action:none; }
+.blur-editor-canvas-wrap canvas { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+.blur-overlay-svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.blur-handle { position:absolute; width:22px; height:22px; border-radius:50%; background:#fff; border:2px solid rgba(0,0,0,.4); cursor:pointer; touch-action:none; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+.blur-editor-controls { flex-shrink:0; padding:12px 16px; background:#1a1a1a; }
+.blur-size-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.blur-size-row label { font-size:11px; color:#aaa; white-space:nowrap; }
+.blur-size-row input[type=range] { flex:1; accent-color:var(--burgundy); }
+.blur-editor-btns { display:flex; gap:8px; }
+.blur-editor-btns button { flex:1; padding:10px; border-radius:8px; border:none; font-size:13px; cursor:pointer; font-weight:600; }
+.blur-editor-btn-cancel { background:#333; color:#ccc; }
+.blur-editor-btn-reset { background:#2a2a2a; color:#aaa; }
+.blur-editor-btn-apply { background:var(--burgundy); color:#fff; }
+
 /* Feedback panel */
 .feedback-panel { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 14px; }
 .feedback-step { margin-bottom: 16px; }
@@ -1812,6 +1843,48 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="whatsapp-box" id="catalogText"></div>
     <button class="copy-btn" onclick="copyCatalog(this)"><i class="ti ti-copy" style="font-size:15px"></i> Copy catalog</button>
     <a id="catalogWhatsAppLink" href="" target="_blank" class="btn btn-green" style="text-decoration:none;margin-top:10px"><i class="ti ti-brand-whatsapp"></i> Open WhatsApp</a>
+  </div>
+</div>
+
+<!-- MARKETING PHOTO PRIVACY SHEET -->
+<div class="sheet-overlay" id="mktPhotoPrivacySheet" onclick="closeSheetOutside(event,'mktPhotoPrivacySheet')" style="z-index:3100">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:4px">Prepare original photo</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.5">Does the face need to be hidden?</div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="_mktPrivacyChoice('as-is')"><i class="ti ti-photo"></i> Use original as is</button>
+    <button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="_mktPrivacyChoice('blur')"><i class="ti ti-eye-off"></i> Blur face</button>
+    <button class="btn" style="width:100%;background:none;color:var(--muted)" onclick="closeSheet('mktPhotoPrivacySheet')">Cancel</button>
+  </div>
+</div>
+
+<!-- FACE BLUR EDITOR SHEET -->
+<div class="sheet-overlay" id="blurEditorSheet" onclick="if(event.target===this)_cancelBlurEditor()" style="z-index:3200">
+  <div class="sheet" style="height:92vh;padding:0;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#1a1a1a;flex-shrink:0">
+      <div style="font-size:13px;font-weight:600;color:#fff"><i class="ti ti-eye-off" style="color:var(--burgundy)"></i> Blur face area</div>
+      <button onclick="_cancelBlurEditor()" style="background:none;border:none;color:#aaa;font-size:22px;cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:11px;color:#aaa;padding:8px 16px;background:#111;flex-shrink:0;line-height:1.4">Drag to position · Use slider to resize · Only the selected area will be blurred</div>
+    <div class="blur-editor-canvas-wrap" id="blurEditorWrap">
+      <canvas id="blurEditorCanvas"></canvas>
+      <!-- drag handle overlay rendered by JS -->
+      <div id="blurOverlayDiv" style="position:absolute;inset:0;pointer-events:none"></div>
+      <div id="blurDragHandle" class="blur-handle" style="display:none;pointer-events:auto"></div>
+    </div>
+    <div class="blur-editor-controls">
+      <div class="blur-size-row">
+        <label>Blur area size</label>
+        <input type="range" id="blurSizeSlider" min="40" max="400" value="130" oninput="_updateBlurOverlay()">
+        <span id="blurSizeLabel" style="font-size:11px;color:#aaa;min-width:28px;text-align:right">130</span>
+      </div>
+      <div class="blur-editor-btns">
+        <button class="blur-editor-btn-cancel" onclick="_cancelBlurEditor()">Cancel</button>
+        <button class="blur-editor-btn-reset" onclick="_resetBlurEditor()">Reset</button>
+        <button class="blur-editor-btn-apply" id="blurApplyBtn" onclick="_applyBlurEditor()">Use blurred photo</button>
+      </div>
+      <div id="blurEditorStatus" style="font-size:11px;color:#e74c3c;text-align:center;margin-top:8px;min-height:16px"></div>
+    </div>
   </div>
 </div>
 
@@ -5860,6 +5933,193 @@ function _closeHeroLightbox() {
   if (img) img.src = '';
 }
 
+// ─── FACE BLUR EDITOR ────────────────────────────────────────────────────────
+// Opens the blur editor for a given image src.
+// Returns a Promise that resolves with a JPEG data URL of the blurred image,
+// or rejects with 'cancelled' if Sam taps Cancel, or rejects with an Error on failure.
+function _openBlurEditor(imgSrc) {
+  return new Promise((resolve, reject) => {
+    _blurEditorResolve = resolve;
+    _blurEditorReject = reject;
+    _blurEditorImgSrc = imgSrc;
+    const status = document.getElementById('blurEditorStatus');
+    if (status) status.textContent = '';
+    const applyBtn = document.getElementById('blurApplyBtn');
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Use blurred photo'; }
+
+    const img = new Image();
+    img.onload = () => {
+      _blurEditorNatW = img.naturalWidth;
+      _blurEditorNatH = img.naturalHeight;
+      const wrap = document.getElementById('blurEditorWrap');
+      const canvas = document.getElementById('blurEditorCanvas');
+      if (!wrap || !canvas) { reject(new Error('Blur editor not available')); return; }
+
+      // Size the display canvas to fit the wrap
+      const wrapW = wrap.clientWidth || 320;
+      const wrapH = wrap.clientHeight || 400;
+      const scale = Math.min(wrapW / img.naturalWidth, wrapH / img.naturalHeight, 1);
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.style.width = Math.round(img.naturalWidth * scale) + 'px';
+      canvas.style.height = Math.round(img.naturalHeight * scale) + 'px';
+      _blurEditorDisplayW = img.naturalWidth * scale;
+      _blurEditorDisplayH = img.naturalHeight * scale;
+      // Center offsets within the wrap
+      _blurEditorOffsetX = (wrapW - _blurEditorDisplayW) / 2;
+      _blurEditorOffsetY = (wrapH - _blurEditorDisplayH) / 2;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // Initial position: upper-center, 20% down
+      _blurEditorCx = wrapW / 2;
+      _blurEditorCy = _blurEditorOffsetY + _blurEditorDisplayH * 0.20;
+
+      // Reset slider
+      const slider = document.getElementById('blurSizeSlider');
+      if (slider) { slider.value = 130; document.getElementById('blurSizeLabel').textContent = '130'; }
+
+      _updateBlurOverlay();
+      _attachBlurDragHandlers();
+      openSheet('blurEditorSheet');
+    };
+    img.onerror = () => reject(new Error('Could not load image for blur editor'));
+    img.src = imgSrc;
+  });
+}
+
+function _updateBlurOverlay() {
+  const slider = document.getElementById('blurSizeSlider');
+  const sizeLabel = document.getElementById('blurSizeLabel');
+  const handle = document.getElementById('blurDragHandle');
+  const wrap = document.getElementById('blurEditorWrap');
+  if (!slider || !handle || !wrap) return;
+  const r = parseInt(slider.value);
+  if (sizeLabel) sizeLabel.textContent = r;
+
+  // Position the drag handle circle
+  handle.style.display = 'block';
+  handle.style.left = (_blurEditorCx - r / 2 - 11) + 'px';
+  handle.style.top = (_blurEditorCy - r / 2 - 11) + 'px';
+  handle.style.width = (r + 22) + 'px';
+  handle.style.height = (r + 22) + 'px';
+  handle.style.borderRadius = '50%';
+  handle.style.background = 'transparent';
+  handle.style.border = '2px dashed rgba(255,255,255,0.7)';
+  handle.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,.35)';
+}
+
+function _attachBlurDragHandlers() {
+  const handle = document.getElementById('blurDragHandle');
+  if (!handle || handle._blurDragBound) return;
+  handle._blurDragBound = true;
+
+  function onStart(e) {
+    e.stopPropagation();
+    _blurDragging = true;
+    const touch = e.touches?.[0] || e;
+    _blurDragStartX = touch.clientX;
+    _blurDragStartY = touch.clientY;
+    _blurDragStartCx = _blurEditorCx;
+    _blurDragStartCy = _blurEditorCy;
+  }
+  function onMove(e) {
+    if (!_blurDragging) return;
+    e.preventDefault();
+    const touch = e.touches?.[0] || e;
+    const dx = touch.clientX - _blurDragStartX;
+    const dy = touch.clientY - _blurDragStartY;
+    const wrap = document.getElementById('blurEditorWrap');
+    const wrapRect = wrap?.getBoundingClientRect() || { width: 320, height: 400 };
+    _blurEditorCx = Math.max(0, Math.min(wrapRect.width, _blurDragStartCx + dx));
+    _blurEditorCy = Math.max(0, Math.min(wrapRect.height, _blurDragStartCy + dy));
+    _updateBlurOverlay();
+  }
+  function onEnd() { _blurDragging = false; }
+
+  handle.addEventListener('touchstart', onStart, { passive: false });
+  handle.addEventListener('mousedown', onStart);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('touchend', onEnd);
+  document.addEventListener('mouseup', onEnd);
+}
+
+function _resetBlurEditor() {
+  const wrap = document.getElementById('blurEditorWrap');
+  const wrapW = wrap?.clientWidth || 320;
+  _blurEditorCx = wrapW / 2;
+  _blurEditorCy = _blurEditorOffsetY + _blurEditorDisplayH * 0.20;
+  const slider = document.getElementById('blurSizeSlider');
+  if (slider) { slider.value = 130; document.getElementById('blurSizeLabel').textContent = '130'; }
+  _updateBlurOverlay();
+}
+
+function _cancelBlurEditor() {
+  closeSheet('blurEditorSheet');
+  if (_blurEditorReject) { _blurEditorReject('cancelled'); _blurEditorReject = null; _blurEditorResolve = null; }
+}
+
+async function _applyBlurEditor() {
+  const btn = document.getElementById('blurApplyBtn');
+  const status = document.getElementById('blurEditorStatus');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying blur…'; }
+  if (status) status.textContent = '';
+  try {
+    const slider = document.getElementById('blurSizeSlider');
+    const r = parseInt(slider?.value || 130);
+    const wrap = document.getElementById('blurEditorWrap');
+    const wrapRect = wrap?.getBoundingClientRect() || { width: 320, height: 400 };
+
+    // Convert display-space centre to image-space centre
+    const scaleX = _blurEditorNatW / _blurEditorDisplayW;
+    const scaleY = _blurEditorNatH / _blurEditorDisplayH;
+    const imgCx = (_blurEditorCx - _blurEditorOffsetX) * scaleX;
+    const imgCy = (_blurEditorCy - _blurEditorOffsetY) * scaleY;
+    const imgR = r * Math.max(scaleX, scaleY); // scale the radius too
+
+    // Draw original image
+    const offscreen = document.createElement('canvas');
+    offscreen.width = _blurEditorNatW;
+    offscreen.height = _blurEditorNatH;
+    const octx = offscreen.getContext('2d');
+
+    const srcImg = new Image();
+    await new Promise((res, rej) => {
+      srcImg.onload = res; srcImg.onerror = rej;
+      srcImg.src = _blurEditorImgSrc;
+    });
+    octx.drawImage(srcImg, 0, 0);
+
+    // Blur the face region using a stack-blur approximation via CSS filter on a temp canvas
+    const blurRadius = Math.max(8, Math.round(imgR * 0.18));
+    const tempC = document.createElement('canvas');
+    tempC.width = _blurEditorNatW;
+    tempC.height = _blurEditorNatH;
+    const tempCtx = tempC.getContext('2d');
+    tempCtx.filter = `blur(${blurRadius}px)`;
+    tempCtx.drawImage(srcImg, 0, 0);
+    tempCtx.filter = 'none';
+
+    // Composite: use blurred version only inside the ellipse
+    octx.save();
+    octx.beginPath();
+    octx.ellipse(imgCx, imgCy, imgR * 0.55, imgR * 0.65, 0, 0, Math.PI * 2);
+    octx.clip();
+    octx.drawImage(tempC, 0, 0);
+    octx.restore();
+
+    const result = offscreen.toDataURL('image/jpeg', 0.90);
+    closeSheet('blurEditorSheet');
+    if (_blurEditorResolve) { _blurEditorResolve(result); _blurEditorResolve = null; _blurEditorReject = null; }
+  } catch(e) {
+    console.error('[BlurEditor] apply failed', e);
+    if (status) status.textContent = 'Could not prepare the blurred photo. Try again or use the AI model photo.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Use blurred photo'; }
+  }
+}
+
 function _showDetailHydrating(on) {
   const hb = document.getElementById('detailHydrateBanner');
   if (!hb) return;
@@ -6225,6 +6485,8 @@ async function saveProductEdits() {
 // Called whenever price, status, inventory, name, description, or photos change.
 function _invalidateMktPreview() {
   window._currentShareCardUrl = null;
+  // Release any prepared blur when the product changes
+  if (currentMarketingImageChoice) currentMarketingImageChoice.blurredDataUrl = null;
   const mso = document.getElementById('mktShareOutput');
   const cardEl = document.getElementById('mktCardArea');
   if (mso && mso.style.display !== 'none' && cardEl && cardEl.querySelector('img')) {
@@ -6372,6 +6634,34 @@ let catalogCollection = null;
 let catalogSelected = new Set();
 let catalogItems = [];
 
+// Per-product image-source choices for the current catalog session
+// { [productId]: { source:'model'|'original', blurFace:false, blurredDataUrl:null } }
+let catalogImageChoices = {};
+// Rendered-page cache — avoids re-rendering for PDF/Share when nothing changed
+let catalogRenderedPages = null;
+let catalogRenderSignature = null;
+
+// Individual Marketing & Share image choice for the current product
+let currentMarketingImageChoice = { source: 'model', blurFace: false, blurredDataUrl: null };
+
+// Blur editor state
+let _blurEditorResolve = null;
+let _blurEditorReject = null;
+let _blurEditorImgSrc = null;    // original image src passed in
+let _blurEditorNatW = 0;
+let _blurEditorNatH = 0;
+let _blurEditorDisplayW = 0;
+let _blurEditorDisplayH = 0;
+let _blurEditorOffsetX = 0;     // left offset of image in canvas wrap
+let _blurEditorOffsetY = 0;
+let _blurEditorCx = 0;          // centre x of blur region (display px)
+let _blurEditorCy = 0;          // centre y
+let _blurDragging = false;
+let _blurDragStartX = 0;
+let _blurDragStartY = 0;
+let _blurDragStartCx = 0;
+let _blurDragStartCy = 0;
+
 function openCatalogBuilder(collectionName) {
   catalogCollection = collectionName;
   catalogItems = (collectionName === null
@@ -6382,15 +6672,168 @@ function openCatalogBuilder(collectionName) {
   // Default: include available + reserved, exclude sold/sold-out
   catalogSelected = new Set(catalogItems.filter(p => isProductAvailable(p) || p.status === 'reserved').map(p => p.id));
 
+  // Reset per-session image choices and rendered-page cache
+  catalogImageChoices = {};
+  _clearCatalogRenderCache();
+
   document.getElementById('catalogSelTitle').textContent = collectionName || 'Select Items';
   goToCatalogSelection();
   document.getElementById('catalogBuilderOverlay').classList.remove('hidden');
-  // Close collection sheet underneath
   closeSheet('collectionDetailSheet');
+
+  // Hydrate images for all catalog items that are missing them
+  _hydrateCatalogImages();
 }
 
 function closeCatalogBuilder() {
   document.getElementById('catalogBuilderOverlay').classList.add('hidden');
+  _clearCatalogRenderCache();
+}
+
+function _clearCatalogRenderCache() {
+  catalogRenderedPages = null;
+  catalogRenderSignature = null;
+}
+
+function _catalogRenderSig() {
+  // Signature covers: selected set, per-product choices (source/blur/blurredDataUrl), and key display fields
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  return JSON.stringify({
+    coll: catalogCollection,
+    sel: selected.map(p => {
+      const ch = catalogImageChoices[p.id] || {};
+      return [p.id, p.name, p.price, p.status, p.size_inventory, ch.source || '', ch.blurFace || false, !!ch.blurredDataUrl];
+    })
+  });
+}
+
+function _invalidateCatalogCache(reason) {
+  _clearCatalogRenderCache();
+  // Show stale-preview notice if preview screen is visible
+  const previewScreen = document.getElementById('catalogPreviewScreen');
+  if (previewScreen && previewScreen.style.display !== 'none') {
+    const warn = document.getElementById('catalogWarnings');
+    if (warn) {
+      warn.style.display = 'block';
+      const existing = warn.querySelector('.cat-stale-notice');
+      if (!existing) {
+        const n = document.createElement('div');
+        n.className = 'cat-warning-bar cat-stale-notice';
+        n.textContent = 'Catalog choices changed — preview again.';
+        warn.prepend(n);
+      }
+    }
+  }
+}
+
+// Hydrate catalog images: fetch id+model_photo+photo for items missing both.
+// Uses _cardImageCache first, then batch-fetches with concurrency limit.
+async function _hydrateCatalogImages() {
+  const CONCURRENCY = 3;
+  // Build list of items that still need images
+  const needsFetch = catalogItems.filter(p => {
+    if (p.model_photo || p.photo) return false; // already on the object
+    const cached = _cardImageCache[p.id];
+    if (cached) {
+      // Apply cache to inventory object
+      if (cached.model_photo !== undefined) p.model_photo = cached.model_photo;
+      if (cached.photo !== undefined) p.photo = cached.photo;
+      return false;
+    }
+    return true;
+  });
+  if (!needsFetch.length) {
+    _initCatalogImageChoices();
+    renderCatalogSelection();
+    return;
+  }
+
+  // Fetch in batches
+  let i = 0;
+  async function fetchOne(p) {
+    try {
+      const rows = await db('select', 'products', { filter: { id: p.id }, columns: 'id,model_photo,photo' });
+      const row = rows?.[0];
+      if (row) {
+        p.model_photo = row.model_photo || null;
+        p.photo = row.photo || null;
+        _cardImageCache[p.id] = { model_photo: p.model_photo, photo: p.photo };
+        // Patch inventory too
+        const idx = inventory.findIndex(x => x.id === p.id);
+        if (idx >= 0) { inventory[idx].model_photo = p.model_photo; inventory[idx].photo = p.photo; }
+      }
+    } catch(_) { /* silent — catalog shows unavailable */ }
+    // Re-render this single item row
+    _refreshCatalogSelItem(p.id);
+  }
+
+  // Kick off up to CONCURRENCY at a time
+  const queue = [...needsFetch];
+  const runners = [];
+  async function drain() {
+    while (queue.length) {
+      const item = queue.shift();
+      await fetchOne(item);
+    }
+  }
+  for (let j = 0; j < Math.min(CONCURRENCY, queue.length); j++) runners.push(drain());
+  await Promise.allSettled(runners);
+  _initCatalogImageChoices();
+  renderCatalogSelection();
+}
+
+function _initCatalogImageChoices() {
+  // Set defaults for any item not yet in catalogImageChoices
+  catalogItems.forEach(p => {
+    if (catalogImageChoices[p.id]) return; // already set (e.g. user toggled before hydration finished)
+    catalogImageChoices[p.id] = {
+      source: p.model_photo ? 'model' : (p.photo ? 'original' : 'none'),
+      blurFace: false,
+      blurredDataUrl: null
+    };
+  });
+}
+
+function _refreshCatalogSelItem(id) {
+  // Re-render just this item's image controls without full list re-render
+  const p = catalogItems.find(x => x.id === id);
+  if (!p) return;
+  const ctrl = document.getElementById('cat-img-ctrl-' + id);
+  if (ctrl) ctrl.innerHTML = _catalogImgCtrlHTML(p);
+}
+
+function _setCatalogImgSource(id, source) {
+  const ch = catalogImageChoices[id] || (catalogImageChoices[id] = { source: 'model', blurFace: false, blurredDataUrl: null });
+  if (ch.source === source) return;
+  ch.source = source;
+  // Switching away from original+blur: clear prepared blur
+  if (source !== 'original') { ch.blurFace = false; ch.blurredDataUrl = null; }
+  _refreshCatalogSelItem(id);
+  _invalidateCatalogCache('source-change');
+}
+
+function _setCatalogBlurFace(id, val) {
+  const ch = catalogImageChoices[id] || (catalogImageChoices[id] = { source: 'original', blurFace: false, blurredDataUrl: null });
+  if (ch.blurFace === val) return;
+  ch.blurFace = val;
+  if (!val) ch.blurredDataUrl = null;
+  _refreshCatalogSelItem(id);
+  _invalidateCatalogCache('blur-toggle');
+}
+
+async function _catalogPrepareBlur(id) {
+  const p = catalogItems.find(x => x.id === id);
+  if (!p || !p.photo) { showToast('No original photo available'); return; }
+  const ch = catalogImageChoices[id];
+  if (!ch) return;
+  try {
+    const result = await _openBlurEditor(p.photo);
+    ch.blurredDataUrl = result;
+    _refreshCatalogSelItem(id);
+    _invalidateCatalogCache('blur-prepared');
+  } catch(e) {
+    if (e !== 'cancelled') showToast(e.message || 'Blur preparation failed');
+  }
 }
 
 function goToCatalogSelection() {
@@ -6401,8 +6844,25 @@ function goToCatalogSelection() {
 
 function goToCatalogPreview() {
   if (catalogSelected.size === 0) { showToast('Select at least one item'); return; }
-  // Warnings about missing price/photo are shown inline inside the preview.
-  // Only block if zero items selected.
+
+  // Block if any selected product has no image at all
+  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const noImage = selected.filter(p => !p.model_photo && !p.photo);
+  if (noImage.length) {
+    showToast(`${noImage.length} product${noImage.length > 1 ? 's' : ''} have no image — exclude them first`);
+    return;
+  }
+
+  // Block if any selected product has blur enabled but no prepared blurred image
+  const unprepared = selected.filter(p => {
+    const ch = catalogImageChoices[p.id];
+    return ch && ch.source === 'original' && ch.blurFace && !ch.blurredDataUrl;
+  });
+  if (unprepared.length) {
+    showToast(`Prepare face blur for: ${unprepared.map(p => p.name).join(', ')}`);
+    return;
+  }
+
   _showCatalogPreview();
 }
 
@@ -6427,6 +6887,35 @@ function _showCatalogPreview() {
   });
 }
 
+function _catalogImgCtrlHTML(p) {
+  const ch = catalogImageChoices[p.id];
+  const hasModel = !!p.model_photo;
+  const hasOrig = !!p.photo;
+  if (!hasModel && !hasOrig) {
+    return '<div class="cat-no-image"><i class="ti ti-photo-off"></i> No image — exclude to preview</div>';
+  }
+  if (!ch) return ''; // still loading
+  const aiActive = ch.source === 'model';
+  const origActive = ch.source === 'original';
+  let html = '<div class="cat-img-ctrl">';
+  if (hasModel) {
+    html += `<button class="cat-img-btn${aiActive ? ' active' : ''}" onclick="event.stopPropagation();_setCatalogImgSource('${p.id}','model')">AI</button>`;
+  }
+  if (hasOrig) {
+    html += `<button class="cat-img-btn${origActive ? ' active' : ''}" onclick="event.stopPropagation();_setCatalogImgSource('${p.id}','original')">Original</button>`;
+  }
+  if (origActive && hasOrig) {
+    const blurOn = ch.blurFace;
+    html += `<button class="cat-img-btn${blurOn ? ' active' : ''}" style="${blurOn ? '' : 'border-color:#e67e22;color:#e67e22'}" onclick="event.stopPropagation();_setCatalogBlurFace('${p.id}',${!blurOn})">${blurOn ? '✓ Blur face' : 'Blur face'}</button>`;
+    if (blurOn) {
+      const ready = !!ch.blurredDataUrl;
+      html += `<button class="cat-blur-btn${ready ? ' ready' : ''}" onclick="event.stopPropagation();_catalogPrepareBlur('${p.id}')">${ready ? '✓ Blur ready' : 'Prepare blur'}</button>`;
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 function renderCatalogSelection() {
   const count = catalogSelected.size;
   document.getElementById('catalogSelCount').textContent = `${count} of ${catalogItems.length} selected`;
@@ -6439,18 +6928,17 @@ function renderCatalogSelection() {
 
   list.innerHTML = '<div style="background:white">' + catalogItems.map((p, i) => {
     const on = catalogSelected.has(p.id);
-    const img = p.model_photo || p.photo;
-    const hasModel = !!p.model_photo;
+    const ch = catalogImageChoices[p.id];
+    const displaySrc = ch?.source === 'original' ? p.photo : (p.model_photo || p.photo);
     const noPrice = !p.price;
     return `<div class="catalog-sel-item" onclick="toggleCatalogItem('${p.id}',${i})">
-      <div class="catalog-sel-thumb">${img ? `<img src="${img}" alt="">` : '👗'}</div>
+      <div class="catalog-sel-thumb">${displaySrc ? `<img src="${displaySrc}" alt="">` : '<span style="font-size:20px">👗</span>'}</div>
       <div class="catalog-sel-info">
         <div class="catalog-sel-name">${p.name}</div>
-        <div class="catalog-sel-meta">${[p.garment_type, p.season].filter(Boolean).join(' · ')}
-          ${!hasModel ? '<br><span style="color:#E65100;font-size:10px">No model photo</span>' : '<br><span style="color:#2E7D32;font-size:10px">✓ Model photo</span>'}
-        </div>
+        <div class="catalog-sel-meta">${[p.garment_type, p.season].filter(Boolean).join(' · ')}</div>
         <div class="catalog-sel-price ${noPrice ? 'no-price' : ''}">${p.price ? '$' + p.price : 'No price'}</div>
-        ${!isProductAvailable(p) ? '<span style="font-size:10px;color:var(--muted)">Sold out — excluded by default</span>' : ''}
+        ${on ? `<div id="cat-img-ctrl-${p.id}">${_catalogImgCtrlHTML(p)}</div>` : ''}
+        ${!isProductAvailable(p) ? '<div style="font-size:10px;color:var(--muted)">Sold out — excluded by default</div>' : ''}
       </div>
       <div class="catalog-sel-check ${on ? 'on' : ''}" id="cat-chk-${p.id}">
         ${on ? '<i class="ti ti-check" style="font-size:14px"></i>' : ''}
@@ -6462,12 +6950,28 @@ function renderCatalogSelection() {
 function toggleCatalogItem(id, idx) {
   if (catalogSelected.has(id)) catalogSelected.delete(id);
   else catalogSelected.add(id);
-  // Update just the checkbox
-  const chk = document.getElementById('cat-chk-' + id);
   const on = catalogSelected.has(id);
-  chk.className = 'catalog-sel-check' + (on ? ' on' : '');
-  chk.innerHTML = on ? '<i class="ti ti-check" style="font-size:14px"></i>' : '';
+  const chk = document.getElementById('cat-chk-' + id);
+  if (chk) { chk.className = 'catalog-sel-check' + (on ? ' on' : ''); chk.innerHTML = on ? '<i class="ti ti-check" style="font-size:14px"></i>' : ''; }
+  // Show/hide image controls on the info block
+  const p = catalogItems[idx] || catalogItems.find(x => x.id === id);
+  if (p) {
+    const ctrlEl = document.getElementById('cat-img-ctrl-' + id);
+    if (on && !ctrlEl) {
+      // Add controls row inside the info cell
+      const info = chk?.parentElement?.querySelector('.catalog-sel-info');
+      if (info) {
+        const div = document.createElement('div');
+        div.id = 'cat-img-ctrl-' + id;
+        div.innerHTML = _catalogImgCtrlHTML(p);
+        info.appendChild(div);
+      }
+    } else if (!on && ctrlEl) {
+      ctrlEl.remove();
+    }
+  }
   document.getElementById('catalogSelCount').textContent = `${catalogSelected.size} of ${catalogItems.length} selected`;
+  _invalidateCatalogCache('selection-change');
 }
 
 function setCatalogSelAll(val) {
@@ -6546,6 +7050,12 @@ function _catalogWhatsAppMessage() {
 // pages[0] = cover, pages[1..] = product pages (all same W × H)
 // Preview, PDF download, and PDF share all call this single function.
 async function _buildCatalogPages() {
+  // Return cached result when signature matches (preview → PDF or Share without changes)
+  const sig = _catalogRenderSig();
+  if (catalogRenderedPages && catalogRenderSignature === sig) {
+    return catalogRenderedPages;
+  }
+
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   if (!selected.length) throw new Error('No products selected');
 
@@ -6597,7 +7107,12 @@ async function _buildCatalogPages() {
   }
 
   if (anyMissingData) showToast('Some pieces are missing photos or prices — placeholders were used.');
-  return { pages, collName, W, H: PAGE_H };
+
+  // Cache the result
+  const result = { pages, collName, W, H: PAGE_H };
+  catalogRenderedPages = result;
+  catalogRenderSignature = sig;
+  return result;
 }
 
 // Cover page canvas — adapts between light (cream) and dark themes
@@ -6837,7 +7352,17 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
   ctx.fillStyle = '#f0ede8';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  const imgSrc = p.model_photo || p.photo;
+  const ch = catalogImageChoices[p.id] || {};
+  let imgSrc;
+  if (ch.source === 'original') {
+    if (ch.blurFace) {
+      imgSrc = ch.blurredDataUrl || null; // should be prepared; block is in goToCatalogPreview
+    } else {
+      imgSrc = p.photo || null;
+    }
+  } else {
+    imgSrc = p.model_photo || p.photo || null; // default: AI, fallback original
+  }
   let imgLoaded = false;
   if (imgSrc) {
     try {
@@ -7069,8 +7594,9 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   return lines.length;
 }
 
-async function _buildItemShareCard(p) {
-  // Always use the latest saved state for this product
+// opts.imageSrc: explicit image data URL or URL to use; if omitted falls back to p.model_photo || p.photo
+async function _buildItemShareCard(p, opts) {
+  // Always use the latest saved state for metadata (name, description, price, etc.)
   if (p && p.id) {
     const latest = inventory.find(x => x.id === p.id);
     if (latest) p = latest;
@@ -7118,19 +7644,28 @@ async function _buildItemShareCard(p) {
   ctx.fillStyle = '#f5f0ea';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  // Load product photo — prefer already-loaded DOM element
+  // Load product photo — use explicit imageSrc if provided, otherwise model_photo || photo
   let imgEl = null;
-  try {
-    const domEl = document.getElementById('detailPhoto');
-    if (domEl && domEl.naturalWidth > 0) imgEl = domEl;
-  } catch(_) {}
-  if (!imgEl) {
-    const imgSrc = p.model_photo || p.photo;
-    if (imgSrc) {
-      try {
-        const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-        imgEl = await _loadImgWithTimeout(proxied, 8000);
-      } catch(_) {}
+  const explicitSrc = opts?.imageSrc || null;
+  if (explicitSrc) {
+    try {
+      const proxied = explicitSrc.startsWith('data:') ? explicitSrc : '/api/ideogram?url=' + encodeURIComponent(explicitSrc);
+      imgEl = await _loadImgWithTimeout(proxied, 8000);
+    } catch(_) {}
+  } else {
+    // Fallback: try the already-displayed DOM hero, then model_photo || photo
+    try {
+      const domEl = document.getElementById('detailPhoto');
+      if (domEl && domEl.naturalWidth > 0 && domEl.src && !domEl.src.endsWith('#')) imgEl = domEl;
+    } catch(_) {}
+    if (!imgEl) {
+      const imgSrc = p.model_photo || p.photo;
+      if (imgSrc) {
+        try {
+          const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
+          imgEl = await _loadImgWithTimeout(proxied, 8000);
+        } catch(_) {}
+      }
     }
   }
   if (imgEl) {
@@ -7248,7 +7783,6 @@ async function _shareItemCard(dataUrl, caption, productName) {
 async function openMktShareWorkspace() {
   if (!currentProduct) return;
   if (!currentProduct._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
-  // Always use the freshest saved state — avoid stale captured reference
   const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
   currentProduct = p;
   const output = document.getElementById('mktShareOutput');
@@ -7258,19 +7792,45 @@ async function openMktShareWorkspace() {
   window._currentShareCardUrl = null;
   output.style.display = 'block';
 
+  // Reset marketing image choice for this product
+  const hasModel = !!p.model_photo;
+  const hasOrig = !!p.photo;
+  currentMarketingImageChoice = {
+    source: hasModel ? 'model' : (hasOrig ? 'original' : 'none'),
+    blurFace: false,
+    blurredDataUrl: null
+  };
+
   const hasPkg = !!(p.caption_en || p.whatsapp_listing || p.story_text);
   const pkgBtnLabel = hasPkg ? 'Regenerate Marketing Copy' : 'Generate Marketing Copy';
 
   output.innerHTML =
-    `<div id="mktCardSection" style="margin-bottom:18px">
+    `<div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Marketing photo</div>
+      <div class="mkt-img-src-row" id="mktImgSrcRow">
+        <button id="mktSrcAiBtn" class="mkt-img-src-btn${hasModel ? ' active' : ''}" onclick="_setMktImgSource('model')" ${hasModel ? '' : 'disabled'}>
+          <div><i class="ti ti-user"></i> AI model</div>
+          <div style="font-size:10px;margin-top:2px;opacity:.8">${hasModel ? 'Available' : 'Not generated'}</div>
+        </button>
+        <button id="mktSrcOrigBtn" class="mkt-img-src-btn${!hasModel && hasOrig ? ' active' : ''}" onclick="_setMktImgSource('original')" ${hasOrig ? '' : 'disabled'}>
+          <div><i class="ti ti-photo"></i> Original</div>
+          <div style="font-size:10px;margin-top:2px;opacity:.8">${hasOrig ? 'Available' : 'Missing'}</div>
+        </button>
+      </div>
+      ${!hasModel && !hasOrig ? '<div style="font-size:12px;color:#c0392b;padding:6px 0">No image available — generate an AI model photo first.</div>' : ''}
+    </div>
+    <div id="mktCardSection" style="margin-bottom:18px">
       <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Share Image</div>
-      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Building share card…</div>
+      <div id="mktCardArea" style="text-align:center;padding:16px 0;font-size:12px;color:var(--muted)">Select an image source above, then tap Generate to build a share card.</div>
     </div>
     <div id="mktCopySection" style="margin-bottom:14px">
       ${hasPkg ? buildPackageHTML(p) : '<div style="font-size:13px;color:var(--muted);padding:4px 0">No marketing copy yet — tap Generate below.</div>'}
     </div>
     <div style="padding-top:12px;border-top:1px solid var(--border)">
-      <button class="btn btn-gold" id="mktGenBtn" onclick="generateMarketingPackage()" style="width:100%">
+      <button class="btn btn-gold" id="mktGenBtn" onclick="_mktGenerateCard()" style="width:100%">
+        <i class="ti ti-photo"></i> Generate Share Card
+      </button>
+      <button class="btn btn-gold" id="mktCopyGenBtn" onclick="generateMarketingPackage()" style="width:100%;margin-top:8px">
         <i class="ti ti-package"></i> ${pkgBtnLabel}
       </button>
       <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.5">
@@ -7278,17 +7838,83 @@ async function openMktShareWorkspace() {
       </div>
     </div>`;
 
-  // Build share card (uses already-loaded DOM image — fast and reliable)
+  // If AI source selected, auto-build the card immediately
+  if (currentMarketingImageChoice.source === 'model') {
+    _mktBuildAndShowCard(p, null);
+  }
+}
+
+function _setMktImgSource(source) {
+  currentMarketingImageChoice.source = source;
+  currentMarketingImageChoice.blurFace = false;
+  currentMarketingImageChoice.blurredDataUrl = null;
+  const aiBtn = document.getElementById('mktSrcAiBtn');
+  const origBtn = document.getElementById('mktSrcOrigBtn');
+  if (aiBtn) { aiBtn.className = 'mkt-img-src-btn' + (source === 'model' ? ' active' : ''); }
+  if (origBtn) { origBtn.className = 'mkt-img-src-btn' + (source === 'original' ? ' active' : ''); }
+  // Auto-build if switching to AI (no privacy question needed)
+  const cardArea = document.getElementById('mktCardArea');
+  if (source === 'model') {
+    if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Building share card…</div>';
+    const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
+    _mktBuildAndShowCard(p, null);
+  } else {
+    if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Tap Generate Share Card to continue.</div>';
+  }
+}
+
+async function _mktGenerateCard() {
+  const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
+  if (!p) return;
+  if (currentMarketingImageChoice.source === 'model') {
+    _mktBuildAndShowCard(p, null);
+    return;
+  }
+  // Original selected — ask about privacy
+  if (!p.photo) { showToast('No original photo saved for this product'); return; }
+  openSheet('mktPhotoPrivacySheet');
+}
+
+// Called from mktPhotoPrivacySheet buttons
+async function _mktPrivacyChoice(choice) {
+  closeSheet('mktPhotoPrivacySheet');
+  const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
+  if (!p) return;
+  if (choice === 'as-is') {
+    currentMarketingImageChoice.blurFace = false;
+    currentMarketingImageChoice.blurredDataUrl = null;
+    _mktBuildAndShowCard(p, p.photo);
+  } else if (choice === 'blur') {
+    if (!p.photo) { showToast('No original photo'); return; }
+    const cardArea = document.getElementById('mktCardArea');
+    if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Preparing blur editor…</div>';
+    try {
+      const blurred = await _openBlurEditor(p.photo);
+      currentMarketingImageChoice.blurFace = true;
+      currentMarketingImageChoice.blurredDataUrl = blurred;
+      _mktBuildAndShowCard(p, blurred);
+    } catch(e) {
+      if (e !== 'cancelled') {
+        if (cardArea) cardArea.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">${e.message || 'Could not prepare the blurred photo. Try again or use the AI model photo.'}</div>`;
+      } else {
+        if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Blur cancelled. Tap Generate Share Card to retry.</div>';
+      }
+    }
+  }
+}
+
+async function _mktBuildAndShowCard(p, imageSrc) {
+  const cardArea = document.getElementById('mktCardArea');
+  if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Generating marketing image…</div>';
   try {
-    const cardUrl = await _buildItemShareCard(p);
+    const cardUrl = await _buildItemShareCard(p, imageSrc ? { imageSrc } : undefined);
     window._currentShareCardUrl = cardUrl;
-    // Use WhatsApp message as default share caption, fall back to English caption
+    window._shareTexts = window._shareTexts || [];
     window._shareTexts[0] = p.whatsapp_listing || p.caption_en || '';
     const canWebShare = typeof navigator.share === 'function';
     const safeName = (p.name || 'piece').replace(/[^a-z0-9]/gi, '-');
     const safeNameOnclick = (p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const cardEl = document.getElementById('mktCardArea');
-    if (cardEl) cardEl.innerHTML =
+    if (cardArea) cardArea.innerHTML =
       `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
         ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
@@ -7301,8 +7927,7 @@ async function openMktShareWorkspace() {
       </div>`;
   } catch(e) {
     console.error('[ProductShare] share card render failed', e);
-    const cardEl = document.getElementById('mktCardArea');
-    if (cardEl) cardEl.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">Could not generate share image: ${e.message}. You can still copy the captions below.</div>`;
+    if (cardArea) cardArea.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">Could not generate share image: ${e.message}. You can still copy the captions below.</div>`;
   }
 }
 
@@ -7310,7 +7935,7 @@ async function generateMarketingPackage() {
   if (!currentProduct) return;
   if (!currentProduct._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
   const p = currentProduct;
-  const btn = document.getElementById('mktGenBtn');
+  const btn = document.getElementById('mktCopyGenBtn');
   const output = document.getElementById('mktCopySection');
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>'; }
   if (output) output.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:12px 0">Generating marketing copy — takes about 15 seconds…</div>';
