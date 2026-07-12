@@ -2443,22 +2443,24 @@ function selectFashnGarmentImage(photos, product) {
 }
 
 // Normalize any displayable image to a JPEG data URL for FASHN compatibility.
-// FASHN accepts only image/jpeg, image/png, and https:// URLs. Browsers display
-// webp/heic/avif natively but FASHN rejects them with "The string did not match
-// the expected pattern". This converts in-memory — never touches the stored photo.
+// FASHN accepts only image/jpeg, image/png, and https:// URLs. This converts
+// any other decodable data URL in-memory — never touches the stored photo.
 //
-// Safari on iPhone caps canvas area at ~16 MP before silently producing a blank
-// result, so very large images are downscaled to stay safely under that limit.
-const _FASHN_MAX_PX = 3000; // cap longest edge to avoid Safari canvas OOM
+// Longest-edge cap: 2048 px. At 2048×2048 RGBA the canvas backing store is
+// ~16 MB; adding the decoded source image and JPEG export copy stays well under
+// the Safari on iPhone practical canvas limit (~50–60 MB before OS kill).
+// 3000 px would produce ~34 MB backing store alone, leaving little headroom.
+// FASHN does not require full-resolution input — 2048 px is sufficient detail.
+const _FASHN_MAX_PX = 2048;
 
-async function _normalizeFashnGarment(src) {
+async function _normalizeFashnGarment(src, productId) {
   // Extract MIME type from data URL prefix for diagnostics (never logs base64 body).
   const _mimeMatch = typeof src === 'string' ? src.match(/^data:([^;]+);base64,/) : null;
   const _srcMime = _mimeMatch ? _mimeMatch[1] : (src?.startsWith('https://') ? 'url' : 'unknown');
   const _srcLen = src?.length ?? 0;
   const _srcCategory = src?.startsWith('data:') ? 'data-url' : src?.startsWith('https://') ? 'https-url' : 'other';
 
-  console.log('[FASHN normalize] input category:', _srcCategory, '| mime:', _srcMime, '| length:', _srcLen);
+  console.log('[FASHN normalize] product:', productId || 'unknown', '| category:', _srcCategory, '| mime:', _srcMime, '| length:', _srcLen);
 
   if (!src) return src;
   if (src.startsWith('data:image/jpeg;base64,') || src.startsWith('data:image/png;base64,')) {
@@ -2470,13 +2472,14 @@ async function _normalizeFashnGarment(src) {
     return src;
   }
 
-  // Non-jpeg/png data URL: draw on canvas to get a JPEG.
+  // Non-jpeg/png data URL: draw on canvas to produce JPEG.
   try {
     const img = await loadImg(src);
     let w = img.naturalWidth, h = img.naturalHeight;
     console.log('[FASHN normalize] source dimensions:', w, 'x', h);
 
-    // Downscale if longest edge exceeds cap to avoid Safari canvas memory limit.
+    // Downscale preserving aspect ratio to stay under Safari canvas memory limit.
+    // Never upscale images smaller than the cap.
     if (Math.max(w, h) > _FASHN_MAX_PX) {
       const scale = _FASHN_MAX_PX / Math.max(w, h);
       w = Math.round(w * scale);
@@ -2488,17 +2491,17 @@ async function _normalizeFashnGarment(src) {
     canvas.width = w;
     canvas.height = h;
     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-    const jpeg = canvas.toDataURL('image/jpeg', 0.92);
+    const jpeg = canvas.toDataURL('image/jpeg', 0.90);
 
-    // Verify output prefix before returning — guards against blank canvas on Safari.
+    // Verify output prefix before returning — guards against blank canvas on Safari OOM.
     if (!jpeg.startsWith('data:image/jpeg;base64,')) {
-      throw new Error('Canvas export did not produce a valid JPEG data URL (prefix: ' + jpeg.slice(0, 40) + ')');
+      throw new Error('Canvas export did not produce a valid JPEG (prefix: ' + jpeg.slice(0, 40) + ')');
     }
 
     console.log('[FASHN normalize] converted', _srcMime, '→ image/jpeg | output length:', jpeg.length);
     return jpeg;
   } catch (e) {
-    console.warn('[FASHN normalize] conversion failed:', e.message, '| source mime:', _srcMime, '| source length:', _srcLen);
+    console.warn('[FASHN normalize] conversion failed:', e.message, '| mime:', _srcMime, '| length:', _srcLen);
     throw new Error('This garment photo could not be prepared for AI generation. Please replace the original photo and try again.');
   }
 }
@@ -2521,9 +2524,9 @@ registerImageGenProvider('fashn', {
       throw new Error('No garment photo available for FASHN.');
     }
 
-    // Normalize to jpeg/png — FASHN rejects webp, heic, and other formats even if the
-    // browser can display them. Never modifies the stored products.photo.
-    const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw);
+    // Normalize to jpeg/png — FASHN rejects unsupported formats even if the browser
+    // can display them. Never modifies the stored products.photo.
+    const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw, currentProduct?.id);
 
     // Confirm the value about to be sent is in a FASHN-accepted format.
     const _fashnGarmentPrefix = fashnGarment?.slice(0, 30) ?? 'null';
