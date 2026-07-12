@@ -6166,15 +6166,15 @@ async function _applyBlurEditor() {
     const octx = offscreen.getContext('2d');
     octx.drawImage(srcImg, 0, 0);
 
-    // ── Bounding box of the ellipse (exact, no padding — mosaic covers full oval) ─
-    const bx = Math.max(0, Math.round(imgCx - imgRx));
-    const by = Math.max(0, Math.round(imgCy - imgRy));
-    const bw = Math.min(_blurEditorNatW - bx, Math.round(imgRx * 2));
-    const bh = Math.min(_blurEditorNatH - by, Math.round(imgRy * 2));
+    // ── Bounding box: ellipse + 9% padding so face edges are fully obscured ─────
+    const padX = Math.round(imgRx * 0.09), padY = Math.round(imgRy * 0.09);
+    const bx = Math.max(0, Math.round(imgCx - imgRx) - padX);
+    const by = Math.max(0, Math.round(imgCy - imgRy) - padY);
+    const bw = Math.min(_blurEditorNatW - bx, Math.round(imgRx * 2) + padX * 2);
+    const bh = Math.min(_blurEditorNatH - by, Math.round(imgRy * 2) + padY * 2);
 
-    // ── Hard mosaic: downscale to ~20 blocks, upscale with smoothing OFF ──────
-    // imageSmoothingEnabled=false on upscale produces hard pixel squares — unmistakable.
-    const BLOCK = Math.max(4, Math.round(Math.min(bw, bh) / 20));
+    // ── Hard mosaic: ~8 blocks across, upscale with smoothing OFF ─────────────
+    const BLOCK = Math.max(4, Math.round(Math.min(bw, bh) / 8));
     const small = document.createElement('canvas');
     small.width = Math.max(1, Math.round(bw / BLOCK));
     small.height = Math.max(1, Math.round(bh / BLOCK));
