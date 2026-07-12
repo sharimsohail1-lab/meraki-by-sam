@@ -7911,7 +7911,9 @@ async function openMktShareWorkspace() {
   currentMarketingImageChoice = {
     source: hasModel ? 'model' : (hasOrig ? 'original' : 'none'),
     blurFace: false,
-    blurredDataUrl: null
+    blurredDataUrl: null,
+    blurRevision: 0,
+    prepared: false
   };
 
   const hasPkg = !!(p.caption_en || p.whatsapp_listing || p.story_text);
@@ -7927,7 +7929,7 @@ async function openMktShareWorkspace() {
         </button>
         <button id="mktSrcOrigBtn" class="mkt-img-src-btn${!hasModel && hasOrig ? ' active' : ''}" onclick="_setMktImgSource('original')" ${hasOrig ? '' : 'disabled'}>
           <div><i class="ti ti-photo"></i> Original</div>
-          <div style="font-size:10px;margin-top:2px;opacity:.8">${hasOrig ? 'Available' : 'Missing'}</div>
+          <div id="mktOrigStatus" style="font-size:10px;margin-top:2px;opacity:.8">${hasOrig ? 'Available' : 'Missing'}</div>
         </button>
       </div>
       ${!hasModel && !hasOrig ? '<div style="font-size:12px;color:#c0392b;padding:6px 0">No image available — generate an AI model photo first.</div>' : ''}
@@ -7961,11 +7963,13 @@ function _setMktImgSource(source) {
   currentMarketingImageChoice.source = source;
   currentMarketingImageChoice.blurFace = false;
   currentMarketingImageChoice.blurredDataUrl = null;
+  currentMarketingImageChoice.blurRevision = 0;
+  currentMarketingImageChoice.prepared = false;
   const aiBtn = document.getElementById('mktSrcAiBtn');
   const origBtn = document.getElementById('mktSrcOrigBtn');
   if (aiBtn) { aiBtn.className = 'mkt-img-src-btn' + (source === 'model' ? ' active' : ''); }
   if (origBtn) { origBtn.className = 'mkt-img-src-btn' + (source === 'original' ? ' active' : ''); }
-  // Auto-build if switching to AI (no privacy question needed)
+  _refreshMktBlurStatus();
   const cardArea = document.getElementById('mktCardArea');
   if (source === 'model') {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Building share card…</div>';
@@ -7976,6 +7980,31 @@ function _setMktImgSource(source) {
   }
 }
 
+function _refreshMktBlurStatus() {
+  const el = document.getElementById('mktOrigStatus');
+  const btn = document.getElementById('mktGenBtn');
+  if (el) {
+    if (currentMarketingImageChoice.prepared && currentMarketingImageChoice.blurFace) {
+      el.textContent = 'Blurred ✓';
+      el.style.color = '#2e7d32';
+      el.style.opacity = '1';
+      el.style.fontWeight = '700';
+    } else {
+      el.textContent = 'Available';
+      el.style.color = '';
+      el.style.opacity = '.8';
+      el.style.fontWeight = '';
+    }
+  }
+  if (btn) {
+    if (currentMarketingImageChoice.prepared && currentMarketingImageChoice.blurFace && currentMarketingImageChoice.source === 'original') {
+      btn.innerHTML = '<i class="ti ti-photo"></i> Generate with blurred original';
+    } else {
+      btn.innerHTML = '<i class="ti ti-photo"></i> Generate Share Card';
+    }
+  }
+}
+
 async function _mktGenerateCard() {
   const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
   if (!p) return;
@@ -7983,7 +8012,13 @@ async function _mktGenerateCard() {
     _mktBuildAndShowCard(p, { imageSrc: p.model_photo, sourceType: 'model' });
     return;
   }
-  // Original selected — ask about privacy
+  // Original selected — if blur is already prepared, use it directly without re-asking
+  if (currentMarketingImageChoice.prepared && currentMarketingImageChoice.blurFace && currentMarketingImageChoice.blurredDataUrl) {
+    const rev = currentMarketingImageChoice.blurRevision;
+    _mktBuildAndShowCard(p, { imageSrc: currentMarketingImageChoice.blurredDataUrl, sourceType: 'blurred-original', blurRevision: rev });
+    return;
+  }
+  // First time — ask about privacy
   if (!p.photo) { showToast('No original photo saved for this product'); return; }
   openSheet('mktPhotoPrivacySheet');
 }
@@ -7999,22 +8034,35 @@ async function _mktPrivacyChoice(choice) {
     currentMarketingImageChoice.blurRevision = 0;
     _mktBuildAndShowCard(p, { imageSrc: p.photo, sourceType: 'original' });
   } else if (choice === 'blur') {
-    if (!p.photo) { showToast('No original photo'); return; }
-    const cardArea = document.getElementById('mktCardArea');
-    if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Preparing blur editor…</div>';
-    try {
-      const blurred = await _openBlurEditor(p.photo);
-      const rev = ++_blurRevisionCounter;
-      currentMarketingImageChoice.blurFace = true;
-      currentMarketingImageChoice.blurredDataUrl = blurred;
-      currentMarketingImageChoice.blurRevision = rev;
-      console.log('[mkt] blur ready rev=' + rev + ' length=' + blurred.length + ' source=' + currentMarketingImageChoice.source);
-      _mktBuildAndShowCard(p, { imageSrc: blurred, sourceType: 'blurred-original', blurRevision: rev });
-    } catch(e) {
-      if (e !== 'cancelled') {
-        if (cardArea) cardArea.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">${e.message || 'Could not prepare the blurred photo. Try again or use the AI model photo.'}</div>`;
-      } else {
-        if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Blur cancelled. Tap Generate Share Card to retry.</div>';
+    await _mktRePrepareBlur(p);
+  }
+}
+
+async function _mktRePrepareBlur(p) {
+  p = p || inventory.find(x => x.id === currentProduct?.id) || currentProduct;
+  if (!p?.photo) { showToast('No original photo'); return; }
+  const cardArea = document.getElementById('mktCardArea');
+  if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Preparing blur editor…</div>';
+  try {
+    const blurred = await _openBlurEditor(p.photo);
+    const rev = ++_blurRevisionCounter;
+    currentMarketingImageChoice.source = 'original';
+    currentMarketingImageChoice.blurFace = true;
+    currentMarketingImageChoice.blurredDataUrl = blurred;
+    currentMarketingImageChoice.blurRevision = rev;
+    currentMarketingImageChoice.prepared = true;
+    const aiBtn = document.getElementById('mktSrcAiBtn');
+    const origBtn = document.getElementById('mktSrcOrigBtn');
+    if (aiBtn) aiBtn.className = 'mkt-img-src-btn';
+    if (origBtn) origBtn.className = 'mkt-img-src-btn active';
+    _refreshMktBlurStatus();
+    _mktBuildAndShowCard(p, { imageSrc: blurred, sourceType: 'blurred-original', blurRevision: rev });
+  } catch(e) {
+    if (e !== 'cancelled') {
+      if (cardArea) cardArea.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">${e.message || 'Could not prepare the blurred photo. Try again or use the AI model photo.'}</div>`;
+    } else {
+      if (cardArea && !currentMarketingImageChoice.prepared) {
+        cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Blur cancelled. Tap Generate Share Card to retry.</div>';
       }
     }
   }
@@ -8044,8 +8092,17 @@ async function _mktBuildAndShowCard(p, opts) {
     const canWebShare = typeof navigator.share === 'function';
     const safeName = (p.name || 'piece').replace(/[^a-z0-9]/gi, '-');
     const safeNameOnclick = (p.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const blurBanner = sourceType === 'blurred-original'
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;background:#e8f5e9;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:11px">
+          <span style="color:#2e7d32;font-weight:700"><i class="ti ti-shield-check"></i> Blurred original ready</span>
+          <div style="display:flex;gap:6px">
+            <button onclick="_mktRePrepareBlur()" style="background:none;border:1px solid #2e7d32;border-radius:14px;font-size:11px;color:#2e7d32;cursor:pointer;padding:3px 10px">Edit blur</button>
+            <button onclick="_mktPrivacyChoice('as-is')" style="background:none;border:1px solid var(--muted);border-radius:14px;font-size:11px;color:var(--muted);cursor:pointer;padding:3px 10px">Use original as is</button>
+          </div>
+        </div>`
+      : '';
     if (cardArea) cardArea.innerHTML =
-      `<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
+      `${blurBanner}<img src="${cardUrl}" style="width:100%;max-width:320px;border-radius:10px;display:block;margin:0 auto 10px" alt="Share card">
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:6px">
         ${canWebShare ? `<button onclick="_shareItemCard(window._currentShareCardUrl,window._shareTexts[0]||'','${safeNameOnclick}')" style="background:var(--burgundy);color:#fff;border:none;border-radius:20px;font-size:12px;cursor:pointer;padding:6px 16px"><i class="ti ti-share"></i> Share Image + Caption</button>` : ''}
         <button id="shareCardDownloadBtn" onclick="_downloadShareCard('Meraki-${safeName}.jpg',this)" style="background:none;border:1px solid var(--burgundy);border-radius:20px;font-size:12px;color:var(--burgundy);cursor:pointer;padding:6px 16px"><i class="ti ti-download"></i> Download Image</button>
