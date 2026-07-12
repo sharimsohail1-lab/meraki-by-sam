@@ -942,6 +942,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div id="detailCollapsedBar" style="display:none;background:var(--sand-light);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--muted);text-align:center;cursor:pointer;margin-top:4px" onclick="_setPhotoViewPref('ai-only')">Photo hidden — tap to show</div>
     <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
+    <div id="detailHydrateBanner" style="display:none;font-size:12px;color:var(--burgundy);background:#fdf3f3;padding:8px 12px;border-radius:6px;margin-bottom:8px;text-align:center"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
     <div style="display:flex;align-items:baseline;gap:8px">
@@ -1782,6 +1783,23 @@ let exhibitions = [];
 let leads = [];
 let _leadsFilter = 'all'; // 'all' | 'appna26'
 
+// Columns fetched at boot for all list/summary views — excludes all base64 image fields.
+// Full product row (select *) is fetched on-demand when a product is opened.
+const PRODUCT_SUMMARY_COLS = [
+  'id','sku','name','name_ur','status','sold_at','price','cost',
+  'category','garment_type','season','colors','occasion','buyer_type',
+  'neckline','has_placket','has_dupatta','motifs',
+  'size_inventory','collection_name','collection_names',
+  'description_en','description_ur',
+  'caption_en','share_blurb','hashtags',
+  'reserved_for','customer_id','exhibition_id','notes',
+  'is_archived','created_at','updated_at'
+].join(',');
+
+// Session image cache — keyed by product id, value = { model_photo, photo } or null
+const _cardImageCache = {};
+let _cardImagePending = new Set();
+
 // ─── SIZE INVENTORY HELPERS ───────────────────────────────────────────────────
 // Single source of truth for all availability logic.
 // Products WITHOUT size_inventory fall back to the status field so old data never breaks.
@@ -2020,11 +2038,12 @@ const T = {
 };
 
 // ─── CORE UTILITIES ───────────────────────────────────────────────────────────
-async function db(action, table, { id, data, filter } = {}) {
+async function db(action, table, { id, data, filter, columns } = {}) {
   const body = { action, table };
   if (id) body.id = id;
   if (data) body.data = data;
   if (filter) body.filter = JSON.stringify(filter);
+  if (columns) body.columns = columns;
   const r = await fetch('/api/db', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2034,6 +2053,85 @@ async function db(action, table, { id, data, filter } = {}) {
   if (json.error) throw new Error(json.error);
   return json.data;
 }
+
+// ─── LAZY CARD IMAGE LOADING ──────────────────────────────────────────────────
+// Loads product thumbnail images on-demand as cards enter the viewport.
+// Max 3 concurrent fetches; each fetch gets only id+model_photo+photo for that one product.
+// Results cached in _cardImageCache for the session.
+let _lazyImgObserver = null;
+const _LAZY_MAX_CONCURRENT = 3;
+
+function _setupLazyCardImages() {
+  if (_lazyImgObserver) _lazyImgObserver.disconnect();
+  _lazyImgObserver = new IntersectionObserver(entries => {
+    entries.filter(e => e.isIntersecting).forEach(entry => {
+      const el = entry.target;
+      const id = el.dataset.lazyImg || el.dataset.lazyThumb;
+      if (!id) return;
+      _lazyImgObserver.unobserve(el);
+      _loadCardImage(id, el);
+    });
+  }, { rootMargin: '200px' });
+  document.querySelectorAll('[data-lazy-img],[data-lazy-thumb]').forEach(el => {
+    const id = el.dataset.lazyImg || el.dataset.lazyThumb;
+    if (id && !_cardImageCache[id]) _lazyImgObserver.observe(el);
+  });
+}
+
+async function _loadCardImage(id, el) {
+  if (_cardImageCache[id]) { _applyLazyImage(id, el, _cardImageCache[id]); return; }
+  if (_cardImagePending.has(id)) return;
+  if (_cardImagePending.size >= _LAZY_MAX_CONCURRENT) {
+    // Retry after current batch drains — re-observe so IntersectionObserver handles it
+    setTimeout(() => { if (_lazyImgObserver && el.isConnected) _lazyImgObserver.observe(el); }, 600);
+    return;
+  }
+  _cardImagePending.add(id);
+  try {
+    const rows = await db('select', 'products', { filter: { id }, columns: 'id,model_photo,photo' });
+    const row = rows?.[0];
+    const imgData = row ? { model_photo: row.model_photo || null, photo: row.photo || null } : null;
+    _cardImageCache[id] = imgData;
+    // Merge photos into inventory entry so product detail has them after lazy load
+    const invIdx = inventory.findIndex(x => x.id === id);
+    if (invIdx >= 0 && row) {
+      inventory[invIdx].model_photo = row.model_photo;
+      inventory[invIdx].photo = row.photo;
+    }
+    _applyLazyImage(id, el, imgData);
+  } catch(_) {
+    // silent failure — placeholder stays
+    _cardImageCache[id] = null;
+  } finally {
+    _cardImagePending.delete(id);
+  }
+}
+
+function _applyLazyImage(id, el, imgData) {
+  if (!imgData) return;
+  const src = imgData.model_photo || imgData.photo;
+  if (!src || !el.isConnected) return;
+  // Stock card thumb — data-lazy-img on .product-thumb div
+  if (el.dataset.lazyImg !== undefined && el.classList.contains('product-thumb')) {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+    el.insertBefore(img, el.firstChild);
+    const icon = el.querySelector('.ti-hanger');
+    if (icon) icon.style.display = 'none';
+  }
+  // Collection thumbnail — data-lazy-thumb on placeholder div
+  if (el.dataset.lazyThumb !== undefined) {
+    const img = document.createElement('img');
+    img.src = src;
+    img.className = el.className.includes('collection-thumb') || el.closest('.collection-thumb-row')
+      ? 'collection-thumb' : 'catalog-item-photo';
+    img.alt = '';
+    el.replaceWith(img);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function callClaude(messages, system = '', maxTokens = 1024) {
   const r = await fetch('/api/claude', {
@@ -2486,10 +2584,11 @@ function buildSmartRecommendations() {
   }
 
   if (boot.error) {
+    const _isTimeout = /too long|timed out/i.test(boot.error);
     container.innerHTML = `<div class="rec-all-good" style="padding:40px 20px;text-align:center">
-      <i class="ti ti-wifi-off" style="font-size:40px;color:var(--muted);display:block;margin-bottom:12px"></i>
-      <p style="font-weight:600;color:var(--ink);margin-bottom:6px">Could not load inventory</p>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Check your connection and try again.</p>
+      <i class="ti ti-${_isTimeout ? 'clock-off' : 'wifi-off'}" style="font-size:40px;color:var(--muted);display:block;margin-bottom:12px"></i>
+      <p style="font-weight:600;color:var(--ink);margin-bottom:6px">${_isTimeout ? 'Inventory is taking too long to load' : 'Could not load inventory'}</p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px">${_isTimeout ? 'Tap Retry — the database is warming up.' : 'Check your connection and try again.'}</p>
       <button onclick="retryAppBoot()" style="padding:11px 28px;background:var(--burgundy);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation">Retry</button>
     </div>`;
     return;
@@ -4083,22 +4182,27 @@ function requireAppDataLoaded(actionName) {
   return true;
 }
 
+let _bootInFlight = false;
 async function _bootLoadData() {
+  if (_bootInFlight) return; // prevent concurrent duplicate boot calls
+  _bootInFlight = true;
   window._appBootState = { loading: true, loaded: false, error: null };
   renderHome();
 
   let productsOk = false;
   try {
-    console.log('[BOOT] loading products');
-    const prods = await db('select', 'products');
-    inventory = prods || [];
+    console.log('[BOOT] loading products (summary only)');
+    const prods = await db('select', 'products', { columns: PRODUCT_SUMMARY_COLS });
+    inventory = (prods || []).map(p => ({ ...p, _hydrated: false }));
     productsOk = true;
     console.log('[BOOT] products loaded', inventory.length);
   } catch(e) {
     console.warn('[BOOT] products failed', e?.message || e);
     inventory = [];
-    window._appBootState = { loading: false, loaded: false, error: e?.message || 'Failed to load inventory' };
+    const isTimeout = /timeout|57014/i.test(e?.message || '');
+    window._appBootState = { loading: false, loaded: false, error: isTimeout ? 'Inventory is taking too long to load. Tap Retry.' : (e?.message || 'Failed to load inventory') };
     renderHome();
+    _bootInFlight = false;
     return; // stop — customers/exhibitions are useless without products context
   }
 
@@ -4132,6 +4236,7 @@ async function _bootLoadData() {
   }
 
   window._appBootState = { loading: false, loaded: true, error: null };
+  _bootInFlight = false;
   renderHome();
   renderProviderPills();
   loadAppSettings();
@@ -4176,6 +4281,7 @@ async function init() {
 }
 
 async function retryAppBoot() {
+  _bootInFlight = false; // allow retry even if a previous call is stuck
   await _bootLoadData();
 }
 
@@ -4348,9 +4454,11 @@ function renderCollections() {
       const items = inventory.filter(p => productBelongsToCollection(p, name));
       const collIdx = window._collActions.length;
       window._collActions.push(name);
-      const thumbs = items.slice(0, 3).map(p =>
-        (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
-      ).join('');
+      const thumbs = items.slice(0, 3).map(p => {
+        const cached = _cardImageCache[p.id];
+        const src = cached ? (cached.model_photo || cached.photo) : (p.model_photo || p.photo || null);
+        return src ? `<img class="collection-thumb" src="${src}" alt="">` : `<div class="collection-thumb-placeholder" data-lazy-thumb="${p.id}">👗</div>`;
+      }).join('');
       html += `<div class="collection-card" onclick="openCollectionDetail(window._collActions[${collIdx}])" style="opacity:0.75">
         <div class="collection-thumb-row">${thumbs || '<div class="collection-thumb-placeholder">📦</div>'}</div>
         <div class="collection-info">
@@ -4492,10 +4600,11 @@ function _renderCollDetailItems(items) {
   window._collItemActions = [];
   itemsEl.innerHTML = items.map((p, i) => {
     window._collItemActions[i] = p.id;
-    const _dPhoto = p.model_photo || p.photo;
+    const _cached = _cardImageCache[p.id];
+    const _dPhoto = _cached ? (_cached.model_photo || _cached.photo) : (p.model_photo || p.photo || null);
     const photoHTML = _dPhoto
       ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
-      : `<div class="catalog-item-photo" style="display:flex;align-items:center;justify-content:center;font-size:24px">👗</div>`;
+      : `<div class="catalog-item-photo" style="display:flex;align-items:center;justify-content:center;font-size:24px" data-lazy-thumb="${p.id}">👗</div>`;
     const meta = [p.garment_type, p.season].filter(Boolean).join(' · ');
     const sizeSummary = getAvailableSizeSummary(p);
     const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
@@ -5547,9 +5656,14 @@ function renderInventory() {
       if (isProductAvailable(p)) return '<div class="size-summary" style="color:#C08000">No sizes added</div>';
       return '';
     })();
+    const cached = _cardImageCache[p.id];
+    const thumbSrc = cached ? (cached.model_photo || cached.photo) : (p.model_photo || p.photo || null);
+    const thumbHTML = thumbSrc
+      ? `<img src="${thumbSrc}" alt="${p.name}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`
+      : '<i class="ti ti-hanger"></i>';
     return `<div class="product-card" onclick="openProductDetail(window._stockActions[${_si}])">
-      <div class="product-thumb">
-        ${(p.model_photo||p.photo) ? `<img src="${p.model_photo||p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
+      <div class="product-thumb" data-lazy-img="${thumbSrc ? '' : p.id}" style="position:relative">
+        ${thumbHTML}
         <div class="product-sku">${p.sku}</div>
       </div>
       <div class="product-info">
@@ -5566,6 +5680,7 @@ function renderInventory() {
     </div>`;
   }).join('');
   window._stockActions = _stockActions;
+  _setupLazyCardImages();
 }
 
 function openAndMarket(id) {
@@ -5579,6 +5694,7 @@ function openAndMarket(id) {
 let _productDetailReturnSheet = null;
 
 function closeProductDetail() {
+  _showDetailHydrating(false);
   closeSheet('productDetailSheet');
   if (_productDetailReturnSheet) {
     openSheet(_productDetailReturnSheet);
@@ -5654,6 +5770,23 @@ function _applyPhotoView(view, p) {
   }
 }
 
+function _showDetailHydrating(on) {
+  const hb = document.getElementById('detailHydrateBanner');
+  if (!hb) return;
+  if (on) {
+    hb.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border:2px solid var(--burgundy);border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:6px"></span>Loading full product details…';
+    hb.style.display = 'block';
+    hb.style.color = 'var(--muted)';
+    hb.style.background = 'var(--sand-light)';
+  } else {
+    hb.style.display = 'none';
+    hb.textContent = '';
+  }
+}
+
+// Track whether a full-hydration fetch is already in progress for a given product id
+let _hydratingProductId = null;
+
 function openProductDetail(id, opts) {
   const p = inventory.find(x => x.id === id);
   if (!p) { showToast('Product not found'); return; }
@@ -5663,6 +5796,38 @@ function openProductDetail(id, opts) {
     currentProduct = null;
     showToast('Could not open product: ' + e.message);
     console.error('[ProductDetail]', e);
+    return;
+  }
+  // If this product hasn't been fully loaded yet, fetch the full row in the background
+  if (!p._hydrated && _hydratingProductId !== id) {
+    _hydratingProductId = id;
+    _showDetailHydrating(true);
+    db('select', 'products', { filter: { id } })
+      .then(rows => {
+        const full = rows?.[0];
+        if (!full) return;
+        const idx = inventory.findIndex(x => x.id === id);
+        if (idx >= 0) {
+          inventory[idx] = { ...inventory[idx], ...full, _hydrated: true };
+          // Update card image cache with freshly loaded photos
+          _cardImageCache[id] = { model_photo: full.model_photo || null, photo: full.photo || null };
+        }
+        // Only update UI if this product is still open
+        if (currentProduct?.id === id) {
+          currentProduct = inventory.find(x => x.id === id) || currentProduct;
+          _showDetailHydrating(false);
+          _openProductDetailUI(currentProduct);
+        }
+      })
+      .catch(e => {
+        console.warn('[ProductDetail] hydration failed:', e.message);
+        if (currentProduct?.id === id) {
+          _showDetailHydrating(false);
+          const hb = document.getElementById('detailHydrateBanner');
+          if (hb) { hb.textContent = 'Could not load full product details. Some fields may be missing.'; hb.style.display = 'block'; }
+        }
+      })
+      .finally(() => { if (_hydratingProductId === id) _hydratingProductId = null; });
   }
 }
 
@@ -6985,6 +7150,7 @@ async function _shareItemCard(dataUrl, caption, productName) {
 
 async function openMktShareWorkspace() {
   if (!currentProduct) return;
+  if (!currentProduct._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
   // Always use the freshest saved state — avoid stale captured reference
   const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
   currentProduct = p;
@@ -7045,6 +7211,7 @@ async function openMktShareWorkspace() {
 
 async function generateMarketingPackage() {
   if (!currentProduct) return;
+  if (!currentProduct._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
   const p = currentProduct;
   const btn = document.getElementById('mktGenBtn');
   const output = document.getElementById('mktCopySection');
@@ -7137,6 +7304,10 @@ let _amendNameReplaceOn = false;
 let _amendInProgress = false;
 
 function openAmendAnalysisSheet(ctx) {
+  if (ctx === 'detail' && currentProduct && !currentProduct._hydrated) {
+    showToast('Still loading product details — please wait a moment');
+    return;
+  }
   window._amendContext = ctx;
   const input = document.getElementById('amendFeedbackInput');
   if (input) input.value = '';
@@ -7691,6 +7862,7 @@ document.addEventListener('click', function(e) {
 });
 
 async function generateDetailModelPhoto() {
+  if (!currentProduct?._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
   if (!currentProduct?.ideogram_prompt) { showToast('No prompt available for this item'); return; }
 
   // Guard: prevent double-tap and duplicate picker
