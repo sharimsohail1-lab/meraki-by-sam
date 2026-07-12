@@ -3657,12 +3657,15 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
 }
 
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
+  const _rid = Math.random().toString(36).slice(2, 10);
+  let _lastPhase = 'init';
   if (btnId === 'genModelBtn') _isGeneratingModelPhoto = true;
   setLoading(btnId, true, '');
   const _genStatusEl = document.getElementById('detailModelStatus');
   if (btnId === 'detailModelBtn' && _genStatusEl) {
     _genStatusEl.textContent = 'Generating model photo… This may take up to 2 minutes.';
   }
+  console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, btnId, targetImgId, outputDivId, productId: currentProduct?.id });
   try {
     // Product Detail uses currentProduct as the stable source of truth for prompt and source
     // photo. currentAnalysis is unreliable here: generateDetailModelPhoto() restores it to
@@ -3705,21 +3708,60 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     const provider = IMAGE_GEN_PROVIDERS[productTryOnProvider] || IMAGE_GEN_PROVIDERS['fashn'];
     if (!provider) throw new Error('No provider available');
     console.log('[Meraki] Using provider:', provider.id, '(product try-on)');
+
+    _lastPhase = 'provider-generate';
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
     const url = await provider.generate(_ideogramPrompt, singleRef, imageWeight);
-    const watermarked = await applyWatermark(url);
+    _lastPhase = 'provider-generate-done';
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, urlType: typeof url, urlPrefix: typeof url === 'string' ? url.slice(0, 60) : String(url), urlLen: url?.length ?? 0 });
+
+    _lastPhase = 'watermark-start';
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
+    const watermarked = await applyWatermark(url, _rid);
+    _lastPhase = 'watermark-done';
+    const _wmType = typeof watermarked;
+    const _wmPrefix = typeof watermarked === 'string' ? watermarked.slice(0, 60) : String(watermarked);
+    const _wmLen = watermarked?.length ?? 0;
+    const _wmIsJpeg = typeof watermarked === 'string' && watermarked.startsWith('data:image/jpeg;base64,');
+    const _wmIsPng = typeof watermarked === 'string' && watermarked.startsWith('data:image/png;base64,');
+    const _wmIsHttps = typeof watermarked === 'string' && watermarked.startsWith('https://');
+    const _wmEqualsUrl = watermarked === url;
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, type: _wmType, prefix: _wmPrefix, len: _wmLen, isJpeg: _wmIsJpeg, isPng: _wmIsPng, isHttps: _wmIsHttps, isOriginalUrl: _wmEqualsUrl });
+
+    _lastPhase = 'img-src-assign';
     const img = document.getElementById(targetImgId);
-    img.src = watermarked;
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, targetImgId, imgExists: !!img, valueType: _wmType, valuePrefix: _wmPrefix, valueLen: _wmLen });
+    try {
+      img.src = watermarked;
+      _lastPhase = 'img-src-assigned';
+      console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
+    } catch (_imgSrcErr) {
+      console.error('[genModelPhoto]', { rid: _rid, phase: 'img-src-assignment-failed', errorName: _imgSrcErr?.name, errorMessage: _imgSrcErr?.message, stack: _imgSrcErr?.stack });
+      throw _imgSrcErr;
+    }
+
+    _lastPhase = 'output-div-show';
     document.getElementById(outputDivId).style.display = 'block';
     if (currentAnalysis) currentAnalysis._modelPhotoUrl = watermarked;
 
     if (btnId === 'detailModelBtn' && currentProduct) {
       try {
+        _lastPhase = 'db-save-start';
+        const _savePrefix = typeof watermarked === 'string' ? watermarked.slice(0, 40) : String(watermarked);
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, productId: currentProduct.id, updateKeys: ['model_photo'], modelPhotoType: _wmType, modelPhotoPrefix: _savePrefix, modelPhotoLen: _wmLen, isHttps: _wmIsHttps, isDataUrl: _wmIsJpeg || _wmIsPng });
         await db('update', 'products', { id: currentProduct.id, data: { model_photo: watermarked } });
+        _lastPhase = 'db-save-done';
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
+
+        _lastPhase = 'state-inventory-update';
         const idx = inventory.findIndex(p => p.id === currentProduct.id);
         if (idx >= 0) {
           inventory[idx] = { ...inventory[idx], model_photo: watermarked };
           currentProduct = inventory[idx];
         }
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, inventoryUpdated: idx >= 0 });
+
+        _lastPhase = 'dom-null-state';
         const _nullState = document.getElementById('detailModelNullState');
         if (_nullState) _nullState.style.display = 'none';
         // Show original photo replace button now that AI exists
@@ -3730,18 +3772,33 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
         const _ptch = document.getElementById('detailPhotoToolsChevron');
         if (_ptc) _ptc.style.display = 'none';
         if (_ptch) _ptch.style.transform = '';
+
+        _lastPhase = 'dom-photo-tools-summary';
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
         _updatePhotoToolsSummary(currentProduct);
+
+        _lastPhase = 'dom-apply-photo-view';
         // Set default view to ai-only on first-time generation, then apply to hero
         if (!_getPhotoViewPref()) localStorage.setItem('meraki_product_photo_view', 'ai-only');
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, pref: _getPhotoViewPref() });
         _applyPhotoView(_getPhotoViewPref(), currentProduct);
+
+        _lastPhase = 'dom-invalidate-mkt-preview';
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
         _invalidateMktPreview();
+
+        _lastPhase = 'success-toast';
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
         showToast('Model photo ready ✓');
       } catch(_saveErr) {
+        console.error('[genModelPhoto] inner-catch', { rid: _rid, phase: _lastPhase, errorName: _saveErr?.name, errorMessage: _saveErr?.message, stack: _saveErr?.stack });
         showToast('Photo generated — tap Save to product to keep it');
       }
     }
 
+    _lastPhase = 'post-save-complete';
     console.log('[Meraki] Generation complete. model_photo and photo will be saved separately on Save.');
+    console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
 
     // Show indicator that stock will use this photo
     const note = document.getElementById('modelPhotoStockNote');
@@ -3763,6 +3820,15 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
       b.title = uploadCount > 1 ? 'Shows all uploaded zones. Ideogram only receives the front photo.' : 'The garment photo sent to Ideogram.';
     });
   } catch(e) {
+    console.error('[genModelPhoto] OUTER-CATCH', {
+      rid: _rid,
+      lastPhase: _lastPhase,
+      productId: currentProduct?.id,
+      errorName: e?.name,
+      errorMessage: e?.message,
+      stack: e?.stack,
+      userAgent: navigator?.userAgent
+    });
     showToast('Photo generation failed: ' + e.message);
   }
   if (btnId === 'genModelBtn') _isGeneratingModelPhoto = false;
@@ -4186,26 +4252,65 @@ async function _lbDeletePhoto() {
   await deleteDetailPhoto(idx);
 }
 
-async function applyWatermark(imageUrl) {
+async function applyWatermark(imageUrl, _rid) {
   if (!MERAKI_LOGO_SRC) { return imageUrl; }
+  let watermarkPhase = 'validate-input';
   try {
+    const _inputType = typeof imageUrl;
+    const _inputPrefix = typeof imageUrl === 'string' ? imageUrl.slice(0, 60) : String(imageUrl);
+    const _inputLen = imageUrl?.length ?? 0;
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, inputType: _inputType, inputPrefix: _inputPrefix, inputLen: _inputLen, logoSrc: MERAKI_LOGO_SRC });
+
+    watermarkPhase = 'build-proxy-url';
     // If provider returns a dataUrl directly, skip the CORS proxy; otherwise proxy via Ideogram endpoint.
     const proxied = imageUrl.startsWith('data:') ? imageUrl : '/api/ideogram?url=' + encodeURIComponent(imageUrl);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, proxiedPrefix: proxied.slice(0, 80) });
+
+    watermarkPhase = 'create-canvas';
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, canvasOk: !!canvas, ctxOk: !!ctx });
+
+    watermarkPhase = 'load-proxied-image';
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, loading: proxied.slice(0, 80) });
     const img = await loadImg(proxied);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase + '-done', naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+
+    watermarkPhase = 'draw-generated-image';
     canvas.width = img.width;
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, canvasW: canvas.width, canvasH: canvas.height });
+
+    watermarkPhase = 'load-logo';
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, logoSrc: MERAKI_LOGO_SRC });
     const logo = await loadImg(MERAKI_LOGO_SRC);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase + '-done', logoW: logo.naturalWidth, logoH: logo.naturalHeight });
+
+    watermarkPhase = 'draw-logo';
     const logoW = canvas.width * 0.20;
     const logoH = (logo.height / logo.width) * logoW;
     const margin = canvas.width * 0.12; // 12% keeps logo inside any CSS object-fit crop
     ctx.globalAlpha = 0.80;
     ctx.drawImage(logo, canvas.width - logoW - margin, canvas.height - logoH - margin, logoW, logoH);
     ctx.globalAlpha = 1;
-    return canvas.toDataURL('image/jpeg', 0.92);
-  } catch { return imageUrl; }
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase });
+
+    watermarkPhase = 'export-canvas';
+    const result = canvas.toDataURL('image/jpeg', 0.92);
+    const _resultPrefix = typeof result === 'string' ? result.slice(0, 40) : String(result);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, resultPrefix: _resultPrefix, resultLen: result?.length });
+    return result;
+  } catch (e) {
+    console.warn('[watermark] FAILED — falling back to original URL', {
+      rid: _rid,
+      phase: watermarkPhase,
+      errorName: e?.name,
+      errorMessage: e?.message,
+      stack: e?.stack
+    });
+    return imageUrl;
+  }
 }
 
 function loadImg(src) {
