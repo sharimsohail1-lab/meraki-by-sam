@@ -6687,6 +6687,9 @@ function openCatalogBuilder(collectionName) {
 
 function closeCatalogBuilder() {
   document.getElementById('catalogBuilderOverlay').classList.add('hidden');
+  Object.values(catalogImageChoices).forEach(ch => { if (ch) ch.blurredDataUrl = null; });
+  catalogImageChoices = {};
+  _blurEditorImgSrc = null;
   _clearCatalogRenderCache();
 }
 
@@ -6702,7 +6705,9 @@ function _catalogRenderSig() {
     coll: catalogCollection,
     sel: selected.map(p => {
       const ch = catalogImageChoices[p.id] || {};
-      return [p.id, p.name, p.price, p.status, p.size_inventory, ch.source || '', ch.blurFace || false, !!ch.blurredDataUrl];
+      const blurb = (p.description_en || p.catalog_blurb || p.share_blurb || '').slice(0, 60);
+      const hasInsets = !!(p.detail_photos);
+      return [p.id, p.name, p.price, p.status, p.size_inventory, blurb, hasInsets, ch.source || '', ch.blurFace || false, ch.blurredDataUrl ? ch.blurredDataUrl.length : 0];
     })
   });
 }
