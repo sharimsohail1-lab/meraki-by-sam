@@ -24,14 +24,45 @@ export default async function handler(req, res) {
 
   // ── GET: poll prediction status ──────────────────────────────────────────────
   if (req.method === 'GET') {
-    const { id } = req.query;
+    const { id, _rid } = req.query; // _rid = optional frontend correlation id
     if (!id) return res.status(400).json({ error: 'Missing prediction id' });
     try {
       const r = await fetch(`${FASHN_BASE}/status/${id}`, {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
+
+      const upstreamContentType   = r.headers.get('content-type') || 'unknown';
+      const upstreamContentLength = r.headers.get('content-length') || 'unknown';
+      console.log('[fashn poll] rid:', _rid || 'none', '| id:', id, '| upstream status:', r.status,
+        '| content-type:', upstreamContentType, '| content-length:', upstreamContentLength);
+
       const data = await r.json();
-      return res.status(r.ok ? 200 : r.status).json(data);
+
+      // Log response shape and size without exposing image data.
+      const _outputType = Array.isArray(data.output)
+        ? (data.output[0]?.startsWith?.('data:') ? 'base64-data-url' : 'url-array')
+        : (typeof data.output === 'string' ? (data.output.startsWith('data:') ? 'base64-data-url' : 'url-string') : typeof data.output);
+      const _outputSample = Array.isArray(data.output) ? data.output[0] : data.output;
+      console.log('[fashn poll] status:', data.status, '| output type:', _outputType,
+        '| output[0] length:', _outputSample?.length ?? 'n/a',
+        '| output[0] prefix:', typeof _outputSample === 'string' ? _outputSample.slice(0, 60) : 'n/a',
+        '| error:', data.error ?? 'none', '| response keys:', Object.keys(data).join(','));
+
+      if (!r.ok) {
+        return res.status(r.status).json({ error: data?.error || data?.detail || `FASHN status ${r.status}`, _upstream: data });
+      }
+
+      if (data.status === 'completed') {
+        // Extract only the output URL — never proxy raw image bytes or large base64 back through Vercel.
+        // FASHN returns CDN URLs; if output is unexpectedly base64 that is logged above for diagnosis.
+        const _raw = Array.isArray(data.output) ? data.output[0] : data.output;
+        console.log('[fashn poll] completed — output_url length:', _raw?.length ?? 0,
+          '| is data url:', typeof _raw === 'string' && _raw.startsWith('data:'));
+        return res.status(200).json({ id: data.id, status: 'completed', output_url: _raw });
+      }
+
+      // In-progress or failed — return status/error only, no large fields.
+      return res.status(200).json({ id: data.id, status: data.status, error: data.error ?? null });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

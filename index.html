@@ -2594,7 +2594,9 @@ registerImageGenProvider('fashn', {
     }
 
     const predId = runData.id;
-    console.log('Prediction ID:', predId);
+    // Correlation ID for matching frontend and server logs.
+    const _rid = Math.random().toString(36).slice(2, 8);
+    console.log('Prediction ID:', predId, '| rid:', _rid);
 
     // Poll status — max 2 minutes, 3-second interval
     const maxWaitMs = 120000;
@@ -2603,25 +2605,41 @@ registerImageGenProvider('fashn', {
 
     while (Date.now() - started < maxWaitMs) {
       await new Promise(r => setTimeout(r, pollIntervalMs));
-      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId));
+      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId) + '&_rid=' + _rid);
+
+      // Guard: check HTTP status before attempting JSON parse.
+      // A non-JSON error body (Vercel 413 HTML, etc.) would throw a SyntaxError whose
+      // WebKit message is "The string did not match the expected pattern" — that is the
+      // source of the misleading browser error message. Handle it explicitly here.
+      if (!statusRes.ok) {
+        const _pollStatus = statusRes.status;
+        console.error('[FASHN poll] non-200 response:', _pollStatus, '| rid:', _rid);
+        if (_pollStatus === 413) {
+          console.groupEnd();
+          throw new Error('The generated image was too large to retrieve. Please try again.');
+        }
+        console.groupEnd();
+        throw new Error('FASHN status check failed (' + _pollStatus + '). Please try again.');
+      }
+
       const statusData = await statusRes.json();
-      console.log('FASHN status:', statusData.status);
+      console.log('[FASHN poll] status:', statusData.status, '| rid:', _rid);
 
       if (statusData.status === 'completed') {
-        const output = statusData.output;
-        const imageUrl = Array.isArray(output) ? output[0] : output;
+        // API now returns output_url (single string) instead of the full upstream output field.
+        const imageUrl = statusData.output_url;
         if (!imageUrl) {
           console.groupEnd();
           throw new Error('FASHN completed but returned no image');
         }
-        console.log('FASHN output URL:', imageUrl.slice(0, 80) + '...');
+        console.log('[FASHN poll] output_url prefix:', imageUrl.slice(0, 80), '| length:', imageUrl.length);
         console.groupEnd();
         return imageUrl;
       }
 
       if (statusData.status === 'failed') {
         const errMsg = statusData.error?.message || statusData.error || 'Unknown FASHN error';
-        console.error('FASHN failed:', errMsg);
+        console.error('[FASHN poll] failed:', errMsg);
         console.groupEnd();
         throw new Error('FASHN generation failed: ' + errMsg);
       }
