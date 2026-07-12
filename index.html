@@ -925,9 +925,22 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeProductDetail()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
     <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
+    <div id="detailPhotoViewRow" style="display:none;margin:6px 0 2px">
+      <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px">
+        <button id="pvBtn-ai-original" onclick="_setPhotoViewPref('ai-original')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);white-space:nowrap">AI + Original</button>
+        <button id="pvBtn-ai-only" onclick="_setPhotoViewPref('ai-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">AI only</button>
+        <button id="pvBtn-original-only" onclick="_setPhotoViewPref('original-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Original only</button>
+        <button id="pvBtn-collapsed" onclick="_setPhotoViewPref('collapsed')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Collapsed</button>
+      </div>
+    </div>
     <div id="detailReplacePhotoRow" style="display:none;text-align:right;margin-top:4px">
       <button onclick="openReplaceOriginalPhotoOptions()" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline;padding:0"><i class="ti ti-replace" style="font-size:11px"></i> Replace photo</button>
     </div>
+    <div id="detailOriginalHeroSection" style="display:none;margin-top:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">Original Garment</div>
+      <img id="detailOriginalHeroImg" src="" alt="Original garment photo" style="width:100%;max-height:280px;object-fit:contain;border-radius:10px">
+    </div>
+    <div id="detailCollapsedBar" style="display:none;background:var(--sand-light);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--muted);text-align:center;cursor:pointer;margin-top:4px" onclick="_setPhotoViewPref('ai-only')">Photo hidden — tap to show</div>
     <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
@@ -997,7 +1010,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div id="detailOriginalPhotoSection" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="field-label" style="margin-bottom:4px">Original Garment Photo</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4">Used for reference and future AI generations.</div>
-        <img id="detailOriginalPhoto" src="" alt="Original garment photo" style="display:none;width:100%;max-height:240px;object-fit:contain;border-radius:10px;margin-bottom:8px">
         <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="openReplaceOriginalPhotoOptions()">
           <i class="ti ti-replace"></i> Replace original photo
         </button>
@@ -3339,20 +3351,14 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
           inventory[idx] = { ...inventory[idx], model_photo: watermarked };
           currentProduct = inventory[idx];
         }
-        const _dph = document.getElementById('detailPhoto');
-        if (_dph) { _dph.src = watermarked; _dph.style.display = 'block'; }
         const _nullState = document.getElementById('detailModelNullState');
         if (_nullState) _nullState.style.display = 'none';
-        // Reveal original garment photo section now that both photos exist
+        // Show original photo replace button in management block now that AI exists
         const _dop2 = document.getElementById('detailOriginalPhotoSection');
-        const _doi2 = document.getElementById('detailOriginalPhoto');
-        if (_dop2 && currentProduct?.photo) {
-          _dop2.style.display = 'block';
-          if (_doi2) { _doi2.src = currentProduct.photo; _doi2.style.display = 'block'; }
-        }
-        // Hide the hero "Replace photo" row — model photo is now the hero
-        const _drr2 = document.getElementById('detailReplacePhotoRow');
-        if (_drr2) _drr2.style.display = 'none';
+        if (_dop2) _dop2.style.display = 'block';
+        // Set default view to ai-only on first-time generation, then apply to hero
+        if (!_getPhotoViewPref()) localStorage.setItem('meraki_product_photo_view', 'ai-only');
+        _applyPhotoView(_getPhotoViewPref(), currentProduct);
         _invalidateMktPreview();
         showToast('Model photo ready ✓');
       } catch(_saveErr) {
@@ -5580,6 +5586,74 @@ function closeProductDetail() {
   }
 }
 
+function _getPhotoViewPref() {
+  return localStorage.getItem('meraki_product_photo_view') || null;
+}
+function _setPhotoViewPref(v) {
+  if (v) localStorage.setItem('meraki_product_photo_view', v);
+  else localStorage.removeItem('meraki_product_photo_view');
+  if (currentProduct) _applyPhotoView(v, currentProduct);
+}
+function _applyPhotoView(view, p) {
+  const hasAI = !!p.model_photo;
+  const hasOrig = !!p.photo;
+  const effective = view || (hasAI ? 'ai-only' : null);
+
+  // Photo-view row: only show when AI photo exists (otherwise no choice to make)
+  const pvRow = document.getElementById('detailPhotoViewRow');
+  if (pvRow) pvRow.style.display = hasAI ? 'block' : 'none';
+
+  // Highlight active button
+  ['ai-original','ai-only','original-only','collapsed'].forEach(k => {
+    const btn = document.getElementById('pvBtn-' + k);
+    if (!btn) return;
+    const active = effective === k;
+    btn.style.background = active ? 'var(--burgundy)' : 'none';
+    btn.style.color = active ? '#fff' : 'var(--muted)';
+    btn.style.fontWeight = active ? '600' : 'normal';
+  });
+
+  const heroEl = document.getElementById('detailPhoto');
+  const origHeroSection = document.getElementById('detailOriginalHeroSection');
+  const origHeroImg = document.getElementById('detailOriginalHeroImg');
+  const collapsedBar = document.getElementById('detailCollapsedBar');
+  const replaceRow = document.getElementById('detailReplacePhotoRow');
+
+  if (!hasAI) {
+    // No AI photo — simple mode: show original as hero, no view switcher
+    if (heroEl) { heroEl.src = p.photo || ''; heroEl.style.display = p.photo ? 'block' : 'none'; }
+    if (origHeroSection) origHeroSection.style.display = 'none';
+    if (collapsedBar) collapsedBar.style.display = 'none';
+    if (replaceRow) replaceRow.style.display = (hasOrig ? 'block' : 'none');
+    return;
+  }
+
+  // AI photo exists — apply selected view
+  if (replaceRow) replaceRow.style.display = 'none'; // replace button lives in management block
+
+  if (effective === 'ai-original') {
+    if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
+    if (origHeroSection) {
+      origHeroSection.style.display = hasOrig ? 'block' : 'none';
+      if (origHeroImg && hasOrig) origHeroImg.src = p.photo;
+    }
+    if (collapsedBar) collapsedBar.style.display = 'none';
+  } else if (effective === 'original-only') {
+    if (heroEl) { heroEl.src = p.photo || ''; heroEl.style.display = hasOrig ? 'block' : 'none'; }
+    if (origHeroSection) origHeroSection.style.display = 'none';
+    if (collapsedBar) collapsedBar.style.display = 'none';
+  } else if (effective === 'collapsed') {
+    if (heroEl) { heroEl.src = ''; heroEl.style.display = 'none'; }
+    if (origHeroSection) origHeroSection.style.display = 'none';
+    if (collapsedBar) collapsedBar.style.display = 'block';
+  } else {
+    // 'ai-only' or default
+    if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
+    if (origHeroSection) origHeroSection.style.display = 'none';
+    if (collapsedBar) collapsedBar.style.display = 'none';
+  }
+}
+
 function openProductDetail(id, opts) {
   const p = inventory.find(x => x.id === id);
   if (!p) { showToast('Product not found'); return; }
@@ -5593,12 +5667,10 @@ function openProductDetail(id, opts) {
 }
 
 function _openProductDetailUI(p) {
-  const detailDisplayPhoto = p.model_photo || p.photo;
-  document.getElementById('detailPhoto').src = detailDisplayPhoto || '';
-  document.getElementById('detailPhoto').style.display = detailDisplayPhoto ? 'block' : 'none';
-  // "Replace photo" row under hero — only when no model_photo (the original IS the hero)
-  const _drr = document.getElementById('detailReplacePhotoRow');
-  if (_drr) _drr.style.display = (p.photo && !p.model_photo) ? 'block' : 'none';
+  // Photo view: determine effective preference and apply
+  let _pvPref = _getPhotoViewPref();
+  if (!_pvPref) _pvPref = p.model_photo ? 'ai-only' : null;
+  _applyPhotoView(_pvPref, p);
 
   // Detail photo insets — always render with add button
   const _dpRaw = p.detail_photos;
@@ -5630,34 +5702,21 @@ function _openProductDetailUI(p) {
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = getProductCollections(p).join(', ');
-  // Model photo section: show existing model photo if present, else show null-state description
+  // Model photo section: hide output div (fresh generation state) on open; show null-state if no model photo
   const _dmo = document.getElementById('detailModelOutput');
   const _dmi = document.getElementById('detailModelImg');
   const _dms = document.getElementById('detailModelStatus');
   const _dmn = document.getElementById('detailModelNullState');
   const _dfr = document.getElementById('detailFashnRetryRow');
   if (_dms) _dms.textContent = '';
-  if (p.model_photo && _dmi && _dmo) {
-    _dmi.src = p.model_photo;
-    _dmo.style.display = 'block';
-    if (_dfr) _dfr.style.display = productTryOnProvider === 'fashn' ? 'block' : 'none';
-    if (_dmn) _dmn.style.display = 'none';
-  } else {
-    if (_dmo) _dmo.style.display = 'none';
-    if (_dmi) _dmi.src = '';
-    if (_dfr) _dfr.style.display = 'none';
-    if (_dmn) _dmn.style.display = 'block';
-  }
-  // Original garment photo section — only shown when model_photo also exists (avoids duplication)
+  // Never show the management-block image on open — hero already shows model_photo via _applyPhotoView
+  if (_dmo) _dmo.style.display = 'none';
+  if (_dmi) _dmi.src = '';
+  if (_dfr) _dfr.style.display = 'none';
+  if (_dmn) _dmn.style.display = p.model_photo ? 'none' : 'block';
+  // Original photo section in management block: show replace button when model_photo exists
   const _dop = document.getElementById('detailOriginalPhotoSection');
-  const _doi = document.getElementById('detailOriginalPhoto');
-  if (p.model_photo && p.photo && _dop) {
-    _dop.style.display = 'block';
-    if (_doi) { _doi.src = p.photo; _doi.style.display = 'block'; }
-  } else {
-    if (_dop) _dop.style.display = 'none';
-    if (_doi) { _doi.src = ''; _doi.style.display = 'none'; }
-  }
+  if (_dop) _dop.style.display = p.model_photo ? 'block' : 'none';
   const _mso = document.getElementById('mktShareOutput');
   if (_mso) { _mso.style.display = 'none'; _mso.innerHTML = ''; }
   window._currentShareCardUrl = null;
@@ -9960,14 +10019,8 @@ async function confirmReplaceOriginalPhoto() {
       inventory[idx] = { ...inventory[idx], photo: _replaceOrigPhotoPreview };
       currentProduct = inventory[idx];
     }
-    // Update hero photo only when no model_photo (original is the hero in that case)
-    if (!currentProduct.model_photo) {
-      const hero = document.getElementById('detailPhoto');
-      if (hero) { hero.src = _replaceOrigPhotoPreview; hero.style.display = 'block'; }
-    }
-    // Update original photo section if visible
-    const _doi = document.getElementById('detailOriginalPhoto');
-    if (_doi && _doi.src) { _doi.src = _replaceOrigPhotoPreview; }
+    // Refresh photo view after original photo replacement
+    _applyPhotoView(_getPhotoViewPref(), currentProduct);
     closeSheet('replaceOrigPhotoConfirmSheet');
     _replaceOrigPhotoPreview = null;
     _invalidateMktPreview();
