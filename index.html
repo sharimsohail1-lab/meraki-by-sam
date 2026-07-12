@@ -597,7 +597,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button class="tab-pill" onclick="setGarmentType('other',this)" id="t-gtOther">Other</button>
         </div>
         <div style="font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.5">
-          <i class="ti ti-camera" style="color:var(--burgundy)"></i> <strong>Best results:</strong> Take one clean full-front photo on a flat surface for the AI model. Neckline, sleeve, and hem close-ups are saved as detail shots for the catalog.
+          <i class="ti ti-camera" style="color:var(--burgundy)"></i> <strong>Best results:</strong> Add one clear full-front photo. Back, neckline, sleeve, border, trouser, or dupatta photos are optional and help with catalog details.
         </div>
         <div class="slot-grid" id="photoSlotGrid"></div>
         <div class="extras-section">
@@ -2814,8 +2814,8 @@ function buildSmartRecommendations() {
 const PHOTO_SLOTS = {
   'full-suit': [
     { id: 'front',    label: 'Front (Kameez)',      required: true,  role: 'structural', priority: 100 },
-    { id: 'back',     label: 'Back View',            required: true,  role: 'structural', priority: 90  },
-    { id: 'bottom',   label: 'Shalwar / Trouser',   required: true,  role: 'structural', priority: 85  },
+    { id: 'back',     label: 'Back View',            required: false, role: 'structural', priority: 90  },
+    { id: 'bottom',   label: 'Shalwar / Trouser',   required: false, role: 'structural', priority: 85  },
     { id: 'dupatta',  label: 'Dupatta',              required: false, role: 'structural', priority: 80  },
     { id: 'neckline', label: 'Neckline Detail',      required: false, role: 'detail',     priority: 60  },
     { id: 'sleeves',  label: 'Sleeves Detail',       required: false, role: 'detail',     priority: 60  },
@@ -2823,13 +2823,13 @@ const PHOTO_SLOTS = {
   ],
   'kameez': [
     { id: 'front',    label: 'Front',                required: true,  role: 'structural', priority: 100 },
-    { id: 'back',     label: 'Back',                 required: true,  role: 'structural', priority: 90  },
+    { id: 'back',     label: 'Back',                 required: false, role: 'structural', priority: 90  },
     { id: 'neckline', label: 'Neckline',             required: false, role: 'detail',     priority: 60  },
     { id: 'sleeves',  label: 'Sleeves',              required: false, role: 'detail',     priority: 60  },
   ],
   'lehenga': [
     { id: 'skirt-front',  label: 'Skirt Front',              required: true,  role: 'structural', priority: 100 },
-    { id: 'blouse',       label: 'Blouse / Choli',           required: true,  role: 'structural', priority: 95  },
+    { id: 'blouse',       label: 'Blouse / Choli',           required: false, role: 'structural', priority: 95  },
     { id: 'dupatta',      label: 'Dupatta',                  required: false, role: 'structural', priority: 80  },
     { id: 'sleeves',      label: 'Sleeves Detail',           required: false, role: 'detail',     priority: 60  },
     { id: 'skirt-detail', label: 'Skirt Detail / Embroidery',required: false, role: 'detail',     priority: 50  },
