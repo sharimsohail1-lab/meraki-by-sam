@@ -1868,9 +1868,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="font-size:11px;color:#aaa;padding:8px 16px;background:#111;flex-shrink:0;line-height:1.4">Drag to position · Use slider to resize · Only the selected area will be blurred</div>
     <div class="blur-editor-canvas-wrap" id="blurEditorWrap">
       <canvas id="blurEditorCanvas"></canvas>
-      <!-- drag handle overlay rendered by JS -->
+      <!-- live CSS blur preview clipped to the oval — purely visual, no canvas -->
+      <div id="blurLivePreview" style="display:none;position:absolute;border-radius:50%;overflow:hidden;pointer-events:none;z-index:1"><img id="blurPreviewImg" style="position:absolute;filter:blur(14px);transform-origin:top left;max-width:none;max-height:none;display:block"></div>
       <div id="blurOverlayDiv" style="position:absolute;inset:0;pointer-events:none"></div>
-      <div id="blurDragHandle" class="blur-handle" style="display:none;pointer-events:auto"></div>
+      <div id="blurDragHandle" class="blur-handle" style="display:none;pointer-events:auto;z-index:2"></div>
     </div>
     <div class="blur-editor-controls">
       <div class="blur-size-row">
@@ -5946,47 +5947,57 @@ function _openBlurEditor(imgSrc) {
     if (status) status.textContent = '';
     const applyBtn = document.getElementById('blurApplyBtn');
     if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Use blurred photo'; }
+    // Hide any stale preview from a prior session
+    const lp = document.getElementById('blurLivePreview');
+    if (lp) lp.style.display = 'none';
 
     const img = new Image();
     img.onload = () => {
       _blurEditorNatW = img.naturalWidth;
       _blurEditorNatH = img.naturalHeight;
-      const wrap = document.getElementById('blurEditorWrap');
-      const canvas = document.getElementById('blurEditorCanvas');
-      if (!wrap || !canvas) { reject(new Error('Blur editor not available')); return; }
-
-      // Size the display canvas to fit the wrap
-      const wrapW = wrap.clientWidth || 320;
-      const wrapH = wrap.clientHeight || 400;
-      const scale = Math.min(wrapW / img.naturalWidth, wrapH / img.naturalHeight, 1);
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.style.width = Math.round(img.naturalWidth * scale) + 'px';
-      canvas.style.height = Math.round(img.naturalHeight * scale) + 'px';
-      _blurEditorDisplayW = img.naturalWidth * scale;
-      _blurEditorDisplayH = img.naturalHeight * scale;
-      // Center offsets within the wrap
-      _blurEditorOffsetX = (wrapW - _blurEditorDisplayW) / 2;
-      _blurEditorOffsetY = (wrapH - _blurEditorDisplayH) / 2;
-
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-
-      // Initial position: upper-center, 20% down
-      _blurEditorCx = wrapW / 2;
-      _blurEditorCy = _blurEditorOffsetY + _blurEditorDisplayH * 0.20;
-
-      // Reset slider
-      const slider = document.getElementById('blurSizeSlider');
-      if (slider) { slider.value = 130; document.getElementById('blurSizeLabel').textContent = '130'; }
-
-      _updateBlurOverlay();
-      _attachBlurDragHandlers();
+      // Open the sheet FIRST so the wrap has real layout dimensions
       openSheet('blurEditorSheet');
+      // Two rAF passes: first lets the browser apply display:flex, second lets flex layout settle
+      requestAnimationFrame(() => requestAnimationFrame(() => _blurEditorInit(img)));
     };
     img.onerror = () => reject(new Error('Could not load image for blur editor'));
     img.src = imgSrc;
   });
+}
+
+function _blurEditorInit(img) {
+  const wrap = document.getElementById('blurEditorWrap');
+  const canvas = document.getElementById('blurEditorCanvas');
+  if (!wrap || !canvas) {
+    if (_blurEditorReject) { _blurEditorReject(new Error('Blur editor not available')); _blurEditorReject = null; _blurEditorResolve = null; }
+    return;
+  }
+  const wrapW = wrap.clientWidth || 320;
+  const wrapH = wrap.clientHeight || 400;
+  const scale = Math.min(wrapW / _blurEditorNatW, wrapH / _blurEditorNatH, 1);
+  _blurEditorDisplayW = Math.round(_blurEditorNatW * scale);
+  _blurEditorDisplayH = Math.round(_blurEditorNatH * scale);
+  _blurEditorOffsetX = Math.round((wrapW - _blurEditorDisplayW) / 2);
+  _blurEditorOffsetY = Math.round((wrapH - _blurEditorDisplayH) / 2);
+
+  console.log('[BlurEditor] natural:', _blurEditorNatW, 'x', _blurEditorNatH, 'wrap:', wrapW, 'x', wrapH, 'display:', _blurEditorDisplayW, 'x', _blurEditorDisplayH, 'offset:', _blurEditorOffsetX, _blurEditorOffsetY);
+
+  canvas.width = _blurEditorNatW;
+  canvas.height = _blurEditorNatH;
+  canvas.style.width = _blurEditorDisplayW + 'px';
+  canvas.style.height = _blurEditorDisplayH + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  // Initial oval: centred horizontally, 20 % down the image area
+  _blurEditorCx = _blurEditorOffsetX + _blurEditorDisplayW / 2;
+  _blurEditorCy = _blurEditorOffsetY + _blurEditorDisplayH * 0.20;
+
+  const slider = document.getElementById('blurSizeSlider');
+  if (slider) { slider.value = 130; document.getElementById('blurSizeLabel').textContent = '130'; }
+
+  _updateBlurOverlay();
+  _attachBlurDragHandlers();
 }
 
 function _updateBlurOverlay() {
@@ -5998,7 +6009,7 @@ function _updateBlurOverlay() {
   const r = parseInt(slider.value);
   if (sizeLabel) sizeLabel.textContent = r;
 
-  // Position the drag handle circle
+  // Dashed oval drag handle
   handle.style.display = 'block';
   handle.style.left = (_blurEditorCx - r / 2 - 11) + 'px';
   handle.style.top = (_blurEditorCy - r / 2 - 11) + 'px';
@@ -6008,6 +6019,30 @@ function _updateBlurOverlay() {
   handle.style.background = 'transparent';
   handle.style.border = '2px dashed rgba(255,255,255,0.7)';
   handle.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,.35)';
+
+  // Live CSS blur preview clipped to the oval — shows real blurred pixels without any canvas work
+  const preview = document.getElementById('blurLivePreview');
+  const previewImg = document.getElementById('blurPreviewImg');
+  if (preview && previewImg && _blurEditorImgSrc && _blurEditorDisplayW > 0) {
+    if (previewImg.getAttribute('data-src') !== _blurEditorImgSrc) {
+      previewImg.src = _blurEditorImgSrc;
+      previewImg.setAttribute('data-src', _blurEditorImgSrc);
+    }
+    const ovalW = r;
+    const ovalH = Math.round(r * 1.25); // slightly taller for a face-shaped oval
+    preview.style.display = 'block';
+    preview.style.width = ovalW + 'px';
+    preview.style.height = ovalH + 'px';
+    preview.style.left = (_blurEditorCx - ovalW / 2) + 'px';
+    preview.style.top = (_blurEditorCy - ovalH / 2) + 'px';
+    // Inside the clipped div the img must be positioned so the correct region shows through:
+    // image top-left is at (_blurEditorOffsetX, _blurEditorOffsetY) in wrap-space
+    // preview div top-left is at (_blurEditorCx - ovalW/2, _blurEditorCy - ovalH/2) in wrap-space
+    previewImg.style.width = _blurEditorDisplayW + 'px';
+    previewImg.style.height = _blurEditorDisplayH + 'px';
+    previewImg.style.left = (_blurEditorOffsetX - (_blurEditorCx - ovalW / 2)) + 'px';
+    previewImg.style.top = (_blurEditorOffsetY - (_blurEditorCy - ovalH / 2)) + 'px';
+  }
 }
 
 function _attachBlurDragHandlers() {
@@ -6047,9 +6082,7 @@ function _attachBlurDragHandlers() {
 }
 
 function _resetBlurEditor() {
-  const wrap = document.getElementById('blurEditorWrap');
-  const wrapW = wrap?.clientWidth || 320;
-  _blurEditorCx = wrapW / 2;
+  _blurEditorCx = _blurEditorOffsetX + _blurEditorDisplayW / 2;
   _blurEditorCy = _blurEditorOffsetY + _blurEditorDisplayH * 0.20;
   const slider = document.getElementById('blurSizeSlider');
   if (slider) { slider.value = 130; document.getElementById('blurSizeLabel').textContent = '130'; }
@@ -6058,6 +6091,8 @@ function _resetBlurEditor() {
 
 function _cancelBlurEditor() {
   closeSheet('blurEditorSheet');
+  const lp = document.getElementById('blurLivePreview');
+  if (lp) lp.style.display = 'none';
   if (_blurEditorReject) { _blurEditorReject('cancelled'); _blurEditorReject = null; _blurEditorResolve = null; }
 }
 
@@ -6069,53 +6104,84 @@ async function _applyBlurEditor() {
   try {
     const slider = document.getElementById('blurSizeSlider');
     const r = parseInt(slider?.value || 130);
-    const wrap = document.getElementById('blurEditorWrap');
-    const wrapRect = wrap?.getBoundingClientRect() || { width: 320, height: 400 };
 
-    // Convert display-space centre to image-space centre
+    // Convert display-space centre to image-space centre.
+    // _blurEditorCx/Cy are in wrap-space; subtract the letterbox offsets to get display-image-space,
+    // then scale up to natural image pixels.
+    if (!_blurEditorDisplayW || !_blurEditorDisplayH) throw new Error('Layout not initialised — reopen the editor');
     const scaleX = _blurEditorNatW / _blurEditorDisplayW;
     const scaleY = _blurEditorNatH / _blurEditorDisplayH;
     const imgCx = (_blurEditorCx - _blurEditorOffsetX) * scaleX;
     const imgCy = (_blurEditorCy - _blurEditorOffsetY) * scaleY;
-    const imgR = r * Math.max(scaleX, scaleY); // scale the radius too
+    // Oval radii in image pixels: match the 0.55/0.65 ratio used in the live preview
+    const imgRx = r * 0.55 * scaleX;
+    const imgRy = r * 0.65 * scaleY;
 
-    // Draw original image
+    console.log('[BlurEditor] apply — imgCx:', Math.round(imgCx), 'imgCy:', Math.round(imgCy), 'imgRx:', Math.round(imgRx), 'imgRy:', Math.round(imgRy), 'nat:', _blurEditorNatW, 'x', _blurEditorNatH);
+
+    const srcImg = new Image();
+    await new Promise((res, rej) => { srcImg.onload = res; srcImg.onerror = rej; srcImg.src = _blurEditorImgSrc; });
+
+    // Output canvas: full original image
     const offscreen = document.createElement('canvas');
     offscreen.width = _blurEditorNatW;
     offscreen.height = _blurEditorNatH;
     const octx = offscreen.getContext('2d');
-
-    const srcImg = new Image();
-    await new Promise((res, rej) => {
-      srcImg.onload = res; srcImg.onerror = rej;
-      srcImg.src = _blurEditorImgSrc;
-    });
     octx.drawImage(srcImg, 0, 0);
 
-    // Blur the face region using a stack-blur approximation via CSS filter on a temp canvas
-    const blurRadius = Math.max(8, Math.round(imgR * 0.18));
-    const tempC = document.createElement('canvas');
-    tempC.width = _blurEditorNatW;
-    tempC.height = _blurEditorNatH;
-    const tempCtx = tempC.getContext('2d');
-    tempCtx.filter = `blur(${blurRadius}px)`;
-    tempCtx.drawImage(srcImg, 0, 0);
-    tempCtx.filter = 'none';
+    // Bounding box of the ellipse with generous padding so blur doesn't get cut at edges
+    const pad = Math.round(Math.max(imgRx, imgRy) * 0.6);
+    const bx = Math.max(0, Math.round(imgCx - imgRx - pad));
+    const by = Math.max(0, Math.round(imgCy - imgRy - pad));
+    const bw = Math.min(_blurEditorNatW - bx, Math.round(imgRx * 2 + pad * 2));
+    const bh = Math.min(_blurEditorNatH - by, Math.round(imgRy * 2 + pad * 2));
 
-    // Composite: use blurred version only inside the ellipse
+    // Downscale/upscale blur — works on every browser without ctx.filter.
+    // Three passes of 8× downscale produce strong pixelation that clearly hides a face.
+    const PASSES = 3, DOWNSCALE = 8;
+    let blurCanvas = null;
+    for (let pass = 0; pass < PASSES; pass++) {
+      const small = document.createElement('canvas');
+      small.width = Math.max(1, Math.round(bw / DOWNSCALE));
+      small.height = Math.max(1, Math.round(bh / DOWNSCALE));
+      const sCtx = small.getContext('2d');
+      sCtx.imageSmoothingEnabled = true;
+      sCtx.imageSmoothingQuality = 'high';
+      if (pass === 0) {
+        sCtx.drawImage(srcImg, bx, by, bw, bh, 0, 0, small.width, small.height);
+      } else {
+        sCtx.drawImage(blurCanvas, 0, 0, blurCanvas.width, blurCanvas.height, 0, 0, small.width, small.height);
+      }
+      blurCanvas = document.createElement('canvas');
+      blurCanvas.width = bw; blurCanvas.height = bh;
+      const bCtx = blurCanvas.getContext('2d');
+      bCtx.imageSmoothingEnabled = true;
+      bCtx.imageSmoothingQuality = 'high';
+      bCtx.drawImage(small, 0, 0, bw, bh);
+    }
+
+    // Composite: clip to the ellipse, paint the blurred region
     octx.save();
     octx.beginPath();
-    octx.ellipse(imgCx, imgCy, imgR * 0.55, imgR * 0.65, 0, 0, Math.PI * 2);
+    octx.ellipse(imgCx, imgCy, imgRx, imgRy, 0, 0, Math.PI * 2);
     octx.clip();
-    octx.drawImage(tempC, 0, 0);
+    octx.drawImage(blurCanvas, bx, by, bw, bh);
     octx.restore();
 
     const result = offscreen.toDataURL('image/jpeg', 0.90);
+
+    // Sanity-check: the result must decode successfully with nonzero dimensions
+    const check = new Image();
+    await new Promise((res, rej) => { check.onload = res; check.onerror = rej; check.src = result; });
+    if (!check.naturalWidth || !check.naturalHeight) throw new Error('Generated image has no dimensions');
+
     closeSheet('blurEditorSheet');
+    const lp = document.getElementById('blurLivePreview');
+    if (lp) lp.style.display = 'none';
     if (_blurEditorResolve) { _blurEditorResolve(result); _blurEditorResolve = null; _blurEditorReject = null; }
   } catch(e) {
     console.error('[BlurEditor] apply failed', e);
-    if (status) status.textContent = 'Could not prepare the blurred photo. Try again or use the AI model photo.';
+    if (status) status.textContent = 'The face blur could not be applied. Adjust the area and try again.';
     if (btn) { btn.disabled = false; btn.textContent = 'Use blurred photo'; }
   }
 }
