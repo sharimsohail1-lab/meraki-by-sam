@@ -7665,7 +7665,7 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   return lines.length;
 }
 
-// opts.imageSrc: explicit image data URL or URL to use; if omitted falls back to p.model_photo || p.photo
+/// opts.imageSrc: required — the exact image to use (model_photo, photo, or blurred data URL). No DOM hero fallback.
 async function _buildItemShareCard(p, opts) {
   // Always use the latest saved state for metadata (name, description, price, etc.)
   if (p && p.id) {
@@ -7715,28 +7715,28 @@ async function _buildItemShareCard(p, opts) {
   ctx.fillStyle = '#f5f0ea';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  // Load product photo — use explicit imageSrc if provided, otherwise model_photo || photo
+  // Load product photo — opts.imageSrc must be supplied for Marketing & Share; no DOM hero fallback.
+  // For data: URLs (blurred result, model_photo, original photo) skip crossOrigin to avoid Safari issues.
   let imgEl = null;
   const explicitSrc = opts?.imageSrc || null;
-  if (explicitSrc) {
-    try {
-      const proxied = explicitSrc.startsWith('data:') ? explicitSrc : '/api/ideogram?url=' + encodeURIComponent(explicitSrc);
-      imgEl = await _loadImgWithTimeout(proxied, 8000);
-    } catch(_) {}
+  if (!explicitSrc) {
+    console.warn('[ShareCard] no imageSrc provided — card will have no photo');
   } else {
-    // Fallback: try the already-displayed DOM hero, then model_photo || photo
+    console.log('[ShareCard] loading imageSrc type:', explicitSrc.startsWith('data:') ? 'data-url' : 'url', 'length:', explicitSrc.length);
     try {
-      const domEl = document.getElementById('detailPhoto');
-      if (domEl && domEl.naturalWidth > 0 && domEl.src && !domEl.src.endsWith('#')) imgEl = domEl;
-    } catch(_) {}
-    if (!imgEl) {
-      const imgSrc = p.model_photo || p.photo;
-      if (imgSrc) {
-        try {
-          const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
-          imgEl = await _loadImgWithTimeout(proxied, 8000);
-        } catch(_) {}
+      if (explicitSrc.startsWith('data:')) {
+        // Data URLs are same-origin — do not set crossOrigin, which causes SecurityError on Safari
+        imgEl = await new Promise((res, rej) => {
+          const img = new Image();
+          img.onload = () => { console.log('[ShareCard] loaded', img.naturalWidth, 'x', img.naturalHeight); res(img); };
+          img.onerror = rej;
+          img.src = explicitSrc;
+        });
+      } else {
+        imgEl = await _loadImgWithTimeout('/api/ideogram?url=' + encodeURIComponent(explicitSrc), 8000);
       }
+    } catch(e) {
+      console.error('[ShareCard] image load failed', e.message);
     }
   }
   if (imgEl) {
@@ -7909,9 +7909,9 @@ async function openMktShareWorkspace() {
       </div>
     </div>`;
 
-  // If AI source selected, auto-build the card immediately
+  // If AI source selected, auto-build the card immediately — pass model_photo explicitly
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, null);
+    _mktBuildAndShowCard(p, p.model_photo);
   }
 }
 
@@ -7923,12 +7923,12 @@ function _setMktImgSource(source) {
   const origBtn = document.getElementById('mktSrcOrigBtn');
   if (aiBtn) { aiBtn.className = 'mkt-img-src-btn' + (source === 'model' ? ' active' : ''); }
   if (origBtn) { origBtn.className = 'mkt-img-src-btn' + (source === 'original' ? ' active' : ''); }
-  // Auto-build if switching to AI (no privacy question needed)
+  // Auto-build if switching to AI (no privacy question needed) — pass model_photo explicitly
   const cardArea = document.getElementById('mktCardArea');
   if (source === 'model') {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Building share card…</div>';
     const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
-    _mktBuildAndShowCard(p, null);
+    _mktBuildAndShowCard(p, p?.model_photo);
   } else {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Tap Generate Share Card to continue.</div>';
   }
@@ -7938,7 +7938,7 @@ async function _mktGenerateCard() {
   const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
   if (!p) return;
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, null);
+    _mktBuildAndShowCard(p, p.model_photo);
     return;
   }
   // Original selected — ask about privacy
@@ -7963,6 +7963,10 @@ async function _mktPrivacyChoice(choice) {
       const blurred = await _openBlurEditor(p.photo);
       currentMarketingImageChoice.blurFace = true;
       currentMarketingImageChoice.blurredDataUrl = blurred;
+      console.log('[Mkt] blur ready, dataUrl length:', blurred?.length, 'source:', currentMarketingImageChoice.source);
+      if (currentMarketingImageChoice.source === 'original' && currentMarketingImageChoice.blurFace && blurred !== currentMarketingImageChoice.blurredDataUrl) {
+        throw new Error('Blurred marketing image was not assigned');
+      }
       _mktBuildAndShowCard(p, blurred);
     } catch(e) {
       if (e !== 'cancelled') {
