@@ -1087,9 +1087,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
-      <div class="field-label">Collection</div>
-      <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'single',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
-        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">Choose a collection</span>
+      <div class="field-label">Collections</div>
+      <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'multi',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
+        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">Choose collections</span>
         <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
       </div>
       <input type="hidden" id="detailCollectionInput">
@@ -5595,6 +5595,12 @@ function applyCollSuggestion(el, name) {
   closeSheet('collectionPickerSheet');
 }
 
+function _collectionsSummaryLabel(arr) {
+  if (!arr || !arr.length) return 'Choose collections';
+  if (arr.length === 1) return arr[0];
+  return arr[0] + ' +' + (arr.length - 1) + ' more';
+}
+
 function openCollectionPicker(opts) {
   const ctx = opts?.context || 'intake';
   const mode = opts?.mode || 'single';
@@ -5689,10 +5695,6 @@ function _toggleCollPickerByName(name) {
     if (existing) { sel.delete(existing); } else { sel.add(name); }
     window._collPickerSelected = sel;
     _renderCollPickerChips();
-  } else if (ctx.targetId === 'detailCollectionInput') {
-    // Populate text box only — do not commit yet
-    const input = document.getElementById('collPickerNewInput');
-    if (input) input.value = name;
   } else {
     _collPickerSingleSelect(name, ctx);
   }
@@ -5734,8 +5736,9 @@ function _applyCollPickerDone() {
     const joined = [...(window._collPickerSelected || new Set())].join(', ');
     const targetEl = document.getElementById(ctx.targetId);
     if (targetEl) targetEl.value = joined;
+    const selArr = [...(window._collPickerSelected || new Set())];
     const label = document.getElementById('detailCollectionLabel');
-    if (label) { label.textContent = joined || 'No collection selected'; label.style.color = joined ? 'var(--ink)' : 'var(--muted)'; }
+    if (label) { label.textContent = _collectionsSummaryLabel(selArr); label.style.color = selArr.length ? 'var(--ink)' : 'var(--muted)'; }
   }
   closeSheet('collectionPickerSheet');
 }
@@ -5752,13 +5755,7 @@ function clearCollectionPicker() {
     const targetEl = document.getElementById(ctx.targetId);
     if (targetEl) targetEl.value = '';
     const label = document.getElementById('detailCollectionLabel');
-    if (label) { label.textContent = 'No collection selected'; label.style.color = 'var(--muted)'; }
-    closeSheet('collectionPickerSheet');
-  } else if (ctx.targetId === 'detailCollectionInput') {
-    document.getElementById('detailCollectionInput').value = '';
-    document.getElementById('collPickerNewInput').value = '';
-    const label = document.getElementById('detailCollectionLabel');
-    if (label) { label.textContent = 'Choose a collection'; label.style.color = 'var(--muted)'; }
+    if (label) { label.textContent = 'Choose collections'; label.style.color = 'var(--muted)'; }
     closeSheet('collectionPickerSheet');
   } else {
     document.getElementById('collectionNameInput').value = '';
@@ -6471,12 +6468,12 @@ function _openProductDetailUI(p) {
   document.getElementById('detailDesc').textContent = p.description_en || '';
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
-  const _detailCollVal = getProductCollections(p).join(', ');
-  document.getElementById('detailCollectionInput').value = _detailCollVal;
+  const _detailCollArr = getProductCollections(p);
+  document.getElementById('detailCollectionInput').value = _detailCollArr.join(', ');
   const _detailCollLabel = document.getElementById('detailCollectionLabel');
   if (_detailCollLabel) {
-    _detailCollLabel.textContent = _detailCollVal || 'Choose a collection';
-    _detailCollLabel.style.color = _detailCollVal ? 'var(--ink)' : 'var(--muted)';
+    _detailCollLabel.textContent = _collectionsSummaryLabel(_detailCollArr);
+    _detailCollLabel.style.color = _detailCollArr.length ? 'var(--ink)' : 'var(--muted)';
   }
   // Photo tools disclosure: default collapsed when AI exists, expanded when not
   const _ptContent = document.getElementById('detailPhotoToolsContent');
