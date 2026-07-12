@@ -53,11 +53,33 @@ export default async function handler(req, res) {
       }
 
       if (data.status === 'completed') {
-        // Extract only the output URL — never proxy raw image bytes or large base64 back through Vercel.
-        // FASHN returns CDN URLs; if output is unexpectedly base64 that is logged above for diagnosis.
         const _raw = Array.isArray(data.output) ? data.output[0] : data.output;
+        const _isDataUrl = typeof _raw === 'string' && _raw.startsWith('data:');
+        const _isHttpsUrl = typeof _raw === 'string' && _raw.startsWith('https://');
         console.log('[fashn poll] completed — output_url length:', _raw?.length ?? 0,
-          '| is data url:', typeof _raw === 'string' && _raw.startsWith('data:'));
+          '| is data url:', _isDataUrl, '| is https url:', _isHttpsUrl);
+
+        if (_isDataUrl) {
+          // FASHN returned base64 image data instead of a CDN URL.
+          // Sending it through the status response would recreate the 413 under a different field name.
+          // Architecture limitation: base64 output requires a separate upload step not implemented here.
+          // Log the MIME type and length for diagnosis; return an error the frontend can surface clearly.
+          const _mime = (_raw.match(/^data:([^;]+);base64,/) || [])[1] ?? 'unknown';
+          console.error('[fashn poll] base64 output — mime:', _mime, '| length:', _raw.length,
+            '| cannot proxy through status response — response size limit would be exceeded');
+          return res.status(200).json({
+            id: data.id,
+            status: 'failed',
+            error: 'Generated image was returned as base64 data (' + _mime + ', ' + _raw.length + ' chars) and cannot be delivered through the status response. Please contact support.'
+          });
+        }
+
+        if (!_isHttpsUrl) {
+          console.error('[fashn poll] unexpected output format — prefix:', typeof _raw === 'string' ? _raw.slice(0, 60) : typeof _raw);
+          return res.status(200).json({ id: data.id, status: 'failed', error: 'Unexpected output format from FASHN (not a URL or base64 data URL). prefix: ' + (typeof _raw === 'string' ? _raw.slice(0, 40) : typeof _raw) });
+        }
+
+        // Output is a normal HTTPS CDN URL — return only the URL, not the full upstream response.
         return res.status(200).json({ id: data.id, status: 'completed', output_url: _raw });
       }
 
