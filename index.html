@@ -1089,7 +1089,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
       <div class="field-label">Collection</div>
       <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'single',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
-        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">No collection selected</span>
+        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">Choose a collection</span>
         <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
       </div>
       <input type="hidden" id="detailCollectionInput">
@@ -5650,6 +5650,28 @@ function _renderCollPickerChips() {
 // Toggle a collection name in _collPickerSelected by name (not index).
 // In multi mode: toggle Set membership and re-render chips.
 // In single mode: write to intake input and close (same as applyCollSuggestion).
+// Resolve val to canonical name if it matches an existing collection case-insensitively.
+function _collCanonical(val) {
+  const lower = val.toLowerCase();
+  return allCollectionNames().find(n => n.toLowerCase() === lower) || val;
+}
+
+// Commit a single collection choice and close the picker.
+function _collPickerSingleSelect(name, ctx) {
+  ctx = ctx || window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  const targetEl = document.getElementById(ctx.targetId);
+  if (targetEl) targetEl.value = name;
+  if (ctx.targetId === 'collectionNameInput') {
+    updateCollectionPickerDisplay();
+  } else {
+    const label = document.getElementById('detailCollectionLabel');
+    if (label) { label.textContent = name || 'Choose a collection'; label.style.color = name ? 'var(--ink)' : 'var(--muted)'; }
+  }
+  closeSheet('collectionPickerSheet');
+}
+
+// Called by suggestion chips. In detail context: populate the text box, stay open.
+// In intake context: select immediately and close (original behaviour).
 function _toggleCollPickerByName(name) {
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
   if (ctx.mode === 'multi') {
@@ -5659,25 +5681,16 @@ function _toggleCollPickerByName(name) {
     if (existing) { sel.delete(existing); } else { sel.add(name); }
     window._collPickerSelected = sel;
     _renderCollPickerChips();
+  } else if (ctx.targetId === 'detailCollectionInput') {
+    // Populate text box only — do not commit yet
+    const input = document.getElementById('collPickerNewInput');
+    if (input) input.value = name;
   } else {
     _collPickerSingleSelect(name, ctx);
   }
 }
 
-function _collPickerSingleSelect(name, ctx) {
-  ctx = ctx || window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
-  const targetEl = document.getElementById(ctx.targetId);
-  if (targetEl) targetEl.value = name;
-  if (ctx.targetId === 'collectionNameInput') {
-    updateCollectionPickerDisplay();
-  } else {
-    // detail context — update the display label directly
-    const label = document.getElementById('detailCollectionLabel');
-    if (label) { label.textContent = name || 'No collection'; label.style.color = name ? 'var(--ink)' : 'var(--muted)'; }
-  }
-  closeSheet('collectionPickerSheet');
-}
-
+// Called by existing-collection chips (not suggestions).
 function toggleCollPickerChip(i) {
   const name = window._collPickerNames[i];
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
@@ -5688,37 +5701,33 @@ function toggleCollPickerChip(i) {
   }
 }
 
+// "Use" button handler.
 function applyCollPickerNew() {
-  const val = document.getElementById('collPickerNewInput').value.trim();
+  const val = (document.getElementById('collPickerNewInput').value || '').trim();
   if (!val) return;
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
   if (ctx.mode === 'multi') {
-    // Case-insensitive duplicate check — preserve existing capitalization
     const valLower = val.toLowerCase();
     const alreadySelected = [...(window._collPickerSelected || new Set())].some(n => n.toLowerCase() === valLower);
     if (!alreadySelected) {
-      window._collPickerSelected.add(val);
-      _renderCollPickerChips(); // show new name as a selected chip immediately
+      window._collPickerSelected.add(_collCanonical(val));
+      _renderCollPickerChips();
     }
     document.getElementById('collPickerNewInput').value = '';
-    // Stay open so user can review before Done
   } else {
-    _collPickerSingleSelect(val, ctx);
+    // Use canonical name if it matches an existing collection
+    _collPickerSingleSelect(_collCanonical(val), ctx);
   }
 }
 
 function _applyCollPickerDone() {
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
   if (ctx.mode === 'multi') {
-    // Read only from the confirmed selected Set — do not pick up uncommitted input text
     const joined = [...(window._collPickerSelected || new Set())].join(', ');
     const targetEl = document.getElementById(ctx.targetId);
     if (targetEl) targetEl.value = joined;
     const label = document.getElementById('detailCollectionLabel');
-    if (label) {
-      label.textContent = joined || 'No collections selected';
-      label.style.color = joined ? 'var(--ink)' : 'var(--muted)';
-    }
+    if (label) { label.textContent = joined || 'No collection selected'; label.style.color = joined ? 'var(--ink)' : 'var(--muted)'; }
   }
   closeSheet('collectionPickerSheet');
 }
@@ -5735,7 +5744,13 @@ function clearCollectionPicker() {
     const targetEl = document.getElementById(ctx.targetId);
     if (targetEl) targetEl.value = '';
     const label = document.getElementById('detailCollectionLabel');
-    if (label) { label.textContent = 'No collections selected'; label.style.color = 'var(--muted)'; }
+    if (label) { label.textContent = 'No collection selected'; label.style.color = 'var(--muted)'; }
+    closeSheet('collectionPickerSheet');
+  } else if (ctx.targetId === 'detailCollectionInput') {
+    document.getElementById('detailCollectionInput').value = '';
+    document.getElementById('collPickerNewInput').value = '';
+    const label = document.getElementById('detailCollectionLabel');
+    if (label) { label.textContent = 'Choose a collection'; label.style.color = 'var(--muted)'; }
     closeSheet('collectionPickerSheet');
   } else {
     document.getElementById('collectionNameInput').value = '';
@@ -5804,10 +5819,15 @@ Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki
     try { names = JSON.parse(resp); }
     catch { names = JSON.parse(resp.replace(/```json|```/g, '').trim()); }
 
-    window._collSuggNames = names;
-    sugDiv.innerHTML = names.map((n, i) =>
-      `<div class="coll-suggestion" onclick="_toggleCollPickerByName(window._collSuggNames[${i}])">${n}</div>`
-    ).join('');
+    // Filter out names that already exist as collections (case-insensitive)
+    const existingLower = new Set(allCollectionNames().map(n => n.toLowerCase()));
+    const filtered = names.filter(n => !existingLower.has(n.toLowerCase()));
+    window._collSuggNames = filtered;
+    sugDiv.innerHTML = filtered.length
+      ? filtered.map((n, i) =>
+          `<div class="coll-suggestion" onclick="_toggleCollPickerByName(window._collSuggNames[${i}])">${n}</div>`
+        ).join('')
+      : '<span style="font-size:11px;color:var(--muted)">All suggestions already exist</span>';
   } catch(e) {
     sugDiv.innerHTML = '<span style="font-size:11px;color:var(--burgundy)">Could not generate suggestions</span>';
   }
@@ -6447,7 +6467,7 @@ function _openProductDetailUI(p) {
   document.getElementById('detailCollectionInput').value = _detailCollVal;
   const _detailCollLabel = document.getElementById('detailCollectionLabel');
   if (_detailCollLabel) {
-    _detailCollLabel.textContent = _detailCollVal || 'No collections selected';
+    _detailCollLabel.textContent = _detailCollVal || 'Choose a collection';
     _detailCollLabel.style.color = _detailCollVal ? 'var(--ink)' : 'var(--muted)';
   }
   // Photo tools disclosure: default collapsed when AI exists, expanded when not
@@ -6752,6 +6772,7 @@ async function saveProductEdits(opts) {
     const _masr2 = document.getElementById('markAllSoldRow');
     if (_masr2) _masr2.style.display = size_inventory ? 'block' : 'none';
     _invalidateMktPreview();
+    renderCollections();
     // Refresh snapshot so subsequent checks start clean
     window._detailOrigSnapshot = {
       size_inventory: JSON.stringify(normalizeSizeInventory(getSizeInventory(currentProduct) || {})),
