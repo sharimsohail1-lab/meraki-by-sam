@@ -293,7 +293,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .empty p { font-size: 13px; margin-top: 10px; line-height: 1.6; }
 
 /* Product detail sheet */
-.detail-photo { width: 100%; max-height: 220px; object-fit: cover; border-radius: 10px; margin-bottom: 14px; }
+.detail-photo { width: 100%; height: auto; object-fit: contain; border-radius: 10px; margin-bottom: 6px; background: var(--sand-light); display: block; cursor: pointer; }
 .detail-sku { font-size: 11px; color: var(--gold); font-weight: 600; letter-spacing: 1px; margin-bottom: 4px; }
 .detail-name { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--burgundy); margin-bottom: 8px; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
@@ -389,7 +389,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 }
 
 /* Model photo */
-.preview-img { width: 100%; max-height: 280px; object-fit: cover; border-radius: 10px; margin-bottom: 12px; }
+.preview-img { width: 100%; height: auto; object-fit: contain; border-radius: 10px; margin-bottom: 12px; background: var(--sand-light); }
 
 /* Feedback panel */
 .feedback-panel { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 14px; }
@@ -924,24 +924,101 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
       <button onclick="closeProductDetail()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>
-    <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none">
-    <div id="detailPhotoViewRow" style="display:none;margin:6px 0 2px">
-      <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px">
-        <button id="pvBtn-ai-original" onclick="_setPhotoViewPref('ai-original')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);white-space:nowrap">AI + Original</button>
-        <button id="pvBtn-ai-only" onclick="_setPhotoViewPref('ai-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">AI only</button>
-        <button id="pvBtn-original-only" onclick="_setPhotoViewPref('original-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Original only</button>
-        <button id="pvBtn-collapsed" onclick="_setPhotoViewPref('collapsed')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Collapsed</button>
+
+    <!-- ── PHOTO AREA ─────────────────────────────────────── -->
+    <div id="detailPhotoArea">
+      <!-- Hero image (AI model or original depending on view) -->
+      <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none" onclick="_openHeroLightbox('ai')" title="Tap to view full image">
+      <div id="detailOriginalHeroSection" style="display:none;margin-top:8px">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">Original Garment</div>
+        <img id="detailOriginalHeroImg" src="" alt="Original garment photo" style="width:100%;height:auto;object-fit:contain;border-radius:10px;background:var(--sand-light);cursor:pointer" onclick="_openHeroLightbox('original')" title="Tap to view full image">
       </div>
-    </div>
-    <div id="detailReplacePhotoRow" style="display:none;text-align:right;margin-top:4px">
-      <button onclick="openReplaceOriginalPhotoOptions()" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline;padding:0"><i class="ti ti-replace" style="font-size:11px"></i> Replace photo</button>
-    </div>
-    <div id="detailOriginalHeroSection" style="display:none;margin-top:8px">
-      <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">Original Garment</div>
-      <img id="detailOriginalHeroImg" src="" alt="Original garment photo" style="width:100%;max-height:280px;object-fit:contain;border-radius:10px">
-    </div>
-    <div id="detailCollapsedBar" style="display:none;background:var(--sand-light);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--muted);text-align:center;cursor:pointer;margin-top:4px" onclick="_setPhotoViewPref('ai-only')">Photo hidden — tap to show</div>
-    <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:flex-end"></div>
+      <div id="detailCollapsedBar" style="display:none;background:var(--sand-light);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted);margin-top:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span id="detailCollapsedSummary">Photos collapsed</span>
+          <button onclick="_setPhotoViewPref('ai-only')" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0;font-weight:600">Show photos</button>
+        </div>
+      </div>
+
+      <!-- Photo view control (only when AI photo exists) -->
+      <div id="detailPhotoViewRow" style="display:none;margin:8px 0 0">
+        <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px">
+          <button id="pvBtn-ai-original" onclick="_setPhotoViewPref('ai-original')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);white-space:nowrap">AI + Original</button>
+          <button id="pvBtn-ai-only" onclick="_setPhotoViewPref('ai-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">AI only</button>
+          <button id="pvBtn-original-only" onclick="_setPhotoViewPref('original-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Original only</button>
+          <button id="pvBtn-collapsed" onclick="_setPhotoViewPref('collapsed')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Collapsed</button>
+        </div>
+      </div>
+
+      <!-- Photo tools disclosure -->
+      <div id="detailPhotoToolsRow" style="margin:8px 0 0;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <button id="detailPhotoToolsToggle" onclick="_togglePhotoTools()" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--sand-light);border:none;cursor:pointer;text-align:left">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="ti ti-camera" style="font-size:14px;color:var(--burgundy)"></i>
+            <span style="font-size:12px;font-weight:600;color:var(--ink)">Photo tools</span>
+            <span id="detailPhotoToolsSummary" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <i id="detailPhotoToolsChevron" class="ti ti-chevron-down" style="font-size:14px;color:var(--muted);transition:transform .2s"></i>
+        </button>
+        <div id="detailPhotoToolsContent" style="display:none;padding:12px;border-top:1px solid var(--border)">
+          <!-- AI model photo null-state (shown when no model photo) -->
+          <div id="detailModelNullState" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">Create an optional model image for marketing and sharing.</div>
+          <!-- Generation block -->
+          <div id="detailModelGenerationBlock">
+            <div id="detailProviderPills" style="display:none"></div>
+            <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
+              <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
+            </div>
+            <div id="detailWeightRow" style="display:none">
+              <div style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+                  <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
+                </div>
+                <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
+              <i class="ti ti-user"></i> Generate AI Model Photo
+            </button>
+            <div id="detailModelStatus" style="font-size:12px;color:var(--muted);margin:4px 0 6px;text-align:center;min-height:1.2em;line-height:1.5"></div>
+            <div style="text-align:right;margin-bottom:4px">
+              <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
+            </div>
+            <!-- freshly generated output — save/download/retry (hidden at open, shown after generation) -->
+            <div id="detailModelOutput" style="display:none;margin-bottom:10px">
+              <img id="detailModelImg" class="preview-img" src="" alt="">
+              <div id="detailFashnRetryRow" style="display:none;margin-bottom:6px">
+                <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('detailModelImg','detailModelOutput','detailModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-primary" style="flex:1" id="saveDetailModelBtn" onclick="saveDetailModelPhoto(this)"><i class="ti ti-device-floppy"></i> Save to product</button>
+                <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
+              </div>
+            </div>
+          </div><!-- end detailModelGenerationBlock -->
+
+          <!-- View full-screen shortcuts (only when photos exist) -->
+          <div id="detailViewFullRow" style="display:none;display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <button id="detailViewAiBtn" onclick="_openHeroLightbox('ai')" style="display:none;flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:12px;color:var(--ink);cursor:pointer"><i class="ti ti-eye"></i> View AI photo</button>
+            <button id="detailViewOrigBtn" onclick="_openHeroLightbox('original')" style="display:none;flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:12px;color:var(--ink);cursor:pointer"><i class="ti ti-eye"></i> View original</button>
+          </div>
+
+          <!-- Original garment photo management -->
+          <div id="detailOriginalPhotoSection" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4">Original photo · used for reference and AI generation.</div>
+            <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="openReplaceOriginalPhotoOptions()">
+              <i class="ti ti-replace"></i> Replace original photo
+            </button>
+          </div>
+        </div>
+      </div><!-- end detailPhotoToolsRow -->
+
+      <!-- Detail photo insets -->
+      <div id="detailPhotoInsets" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px;align-items:flex-end"></div>
+    </div><!-- end detailPhotoArea -->
+
+    <!-- ── PRODUCT INFORMATION ───────────────────────────── -->
     <div id="detailHydrateBanner" style="display:none;font-size:12px;color:var(--burgundy);background:#fdf3f3;padding:8px 12px;border-radius:6px;margin-bottom:8px;text-align:center"></div>
     <div id="detailNudgeBanner"></div>
     <div class="detail-sku" id="detailSKU"></div>
@@ -974,47 +1051,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="openMarkAllSoldConfirm()" style="background:none;border:none;font-size:11px;color:var(--muted);cursor:pointer;padding:0;text-decoration:underline">Mark entire product sold</button>
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
-      <div class="field-label" style="margin-bottom:4px">AI Model Photo</div>
-      <div id="detailModelNullState" style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">Create an optional model image for marketing and sharing.</div>
-      <div id="detailModelGenerationBlock">
-        <div id="detailProviderPills" style="display:none"></div>
-        <div id="detailFashnNote" style="display:none;font-size:11px;color:var(--ink-light);padding:6px 10px;background:var(--sand-light);border-radius:6px;margin-bottom:8px">
-          <i class="ti ti-wand"></i> FASHN uses virtual try-on — may preserve garment details better.
-        </div>
-        <div id="detailWeightRow" style="display:none">
-          <div style="margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-              <span>Garment accuracy</span><span id="detailWeightLabel">60%</span>
-            </div>
-            <input type="range" id="detailWeightSlider" min="20" max="95" value="60" step="5" style="width:100%;accent-color:var(--burgundy)" oninput="document.getElementById('detailWeightLabel').textContent=this.value+'%'">
-            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:1px"><span>More model</span><span>More accurate</span></div>
-          </div>
-        </div>
-        <button class="btn btn-secondary btn-sm" id="detailModelBtn" onclick="generateDetailModelPhoto()" style="width:100%;margin-bottom:4px">
-          <i class="ti ti-user"></i> Generate AI Model Photo
-        </button>
-        <div id="detailModelStatus" style="font-size:12px;color:var(--muted);margin:4px 0 6px;text-align:center;min-height:1.2em;line-height:1.5"></div>
-        <div style="text-align:right;margin-bottom:4px">
-          <button class="js-view-ref-btn" onclick="viewReferenceImage()" style="display:none;background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;text-decoration:underline">View reference</button>
-        </div>
-        <div id="detailModelOutput" style="display:none;margin-bottom:10px">
-          <img id="detailModelImg" class="preview-img" src="" alt="">
-          <div id="detailFashnRetryRow" style="display:none;margin-bottom:6px">
-            <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="_openFashnPicker('detailModelImg','detailModelOutput','detailModelBtn')"><i class="ti ti-refresh"></i> Try different model</button>
-          </div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-primary" style="flex:1" id="saveDetailModelBtn" onclick="saveDetailModelPhoto(this)"><i class="ti ti-device-floppy"></i> Save to product</button>
-            <button class="copy-btn" style="flex:0 0 auto" onclick="downloadDetailModel()"><i class="ti ti-download" style="font-size:15px"></i></button>
-          </div>
-        </div>
-      </div><!-- end detailModelGenerationBlock -->
-      <div id="detailOriginalPhotoSection" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div class="field-label" style="margin-bottom:4px">Original Garment Photo</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4">Used for reference and future AI generations.</div>
-        <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="openReplaceOriginalPhotoOptions()">
-          <i class="ti ti-replace"></i> Replace original photo
-        </button>
-      </div>
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
@@ -1398,6 +1434,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <textarea id="custNotesInput" class="field-input" placeholder="e.g. daughter getting married, likes modest cuts" style="margin-bottom:12px"></textarea>
     <button class="btn btn-primary" onclick="saveCustomer()"><i class="ti ti-device-floppy"></i> Save Customer</button>
   </div>
+</div>
+
+<!-- HERO LIGHTBOX -->
+<div id="detailHeroLightbox" onclick="_closeHeroLightbox()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.92);align-items:center;justify-content:center;padding:16px">
+  <button onclick="event.stopPropagation();_closeHeroLightbox()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;width:36px;height:36px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="ti ti-x"></i></button>
+  <img id="detailHeroLightboxImg" src="" alt="" onclick="event.stopPropagation()" style="max-width:100%;max-height:90vh;object-fit:contain;border-radius:10px">
 </div>
 
 <!-- CUSTOMER DETAIL SHEET -->
@@ -3452,9 +3494,15 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
         }
         const _nullState = document.getElementById('detailModelNullState');
         if (_nullState) _nullState.style.display = 'none';
-        // Show original photo replace button in management block now that AI exists
+        // Show original photo replace button now that AI exists
         const _dop2 = document.getElementById('detailOriginalPhotoSection');
         if (_dop2) _dop2.style.display = 'block';
+        // Collapse photo tools disclosure — AI is now visible in the hero
+        const _ptc = document.getElementById('detailPhotoToolsContent');
+        const _ptch = document.getElementById('detailPhotoToolsChevron');
+        if (_ptc) _ptc.style.display = 'none';
+        if (_ptch) _ptch.style.transform = '';
+        _updatePhotoToolsSummary(currentProduct);
         // Set default view to ai-only on first-time generation, then apply to hero
         if (!_getPhotoViewPref()) localStorage.setItem('meraki_product_photo_view', 'ai-only');
         _applyPhotoView(_getPhotoViewPref(), currentProduct);
@@ -5733,19 +5781,23 @@ function _applyPhotoView(view, p) {
   const origHeroSection = document.getElementById('detailOriginalHeroSection');
   const origHeroImg = document.getElementById('detailOriginalHeroImg');
   const collapsedBar = document.getElementById('detailCollapsedBar');
-  const replaceRow = document.getElementById('detailReplacePhotoRow');
+  const collapsedSummary = document.getElementById('detailCollapsedSummary');
+  const viewAiBtn = document.getElementById('detailViewAiBtn');
+  const viewOrigBtn = document.getElementById('detailViewOrigBtn');
 
   if (!hasAI) {
     // No AI photo — simple mode: show original as hero, no view switcher
     if (heroEl) { heroEl.src = p.photo || ''; heroEl.style.display = p.photo ? 'block' : 'none'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'none';
-    if (replaceRow) replaceRow.style.display = (hasOrig ? 'block' : 'none');
+    if (viewAiBtn) viewAiBtn.style.display = 'none';
+    if (viewOrigBtn) viewOrigBtn.style.display = hasOrig ? 'flex' : 'none';
     return;
   }
 
   // AI photo exists — apply selected view
-  if (replaceRow) replaceRow.style.display = 'none'; // replace button lives in management block
+  if (viewAiBtn) viewAiBtn.style.display = 'flex';
+  if (viewOrigBtn) viewOrigBtn.style.display = hasOrig ? 'flex' : 'none';
 
   if (effective === 'ai-original') {
     if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
@@ -5762,12 +5814,50 @@ function _applyPhotoView(view, p) {
     if (heroEl) { heroEl.src = ''; heroEl.style.display = 'none'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'block';
+    if (collapsedSummary) collapsedSummary.textContent = [hasAI && 'AI', hasOrig && 'Original'].filter(Boolean).join(' + ') + ' available';
   } else {
     // 'ai-only' or default
     if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'none';
   }
+}
+
+function _togglePhotoTools() {
+  const content = document.getElementById('detailPhotoToolsContent');
+  const chevron = document.getElementById('detailPhotoToolsChevron');
+  if (!content) return;
+  const open = content.style.display !== 'none';
+  content.style.display = open ? 'none' : 'block';
+  if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+function _updatePhotoToolsSummary(p) {
+  const el = document.getElementById('detailPhotoToolsSummary');
+  if (!el) return;
+  const parts = [];
+  if (p.model_photo) parts.push('AI: Generated');
+  else parts.push('AI: None');
+  if (p.photo) parts.push('Original: Saved');
+  el.textContent = parts.join(' · ');
+}
+
+function _openHeroLightbox(type) {
+  const p = currentProduct;
+  if (!p) return;
+  const src = type === 'original' ? p.photo : p.model_photo;
+  if (!src) return;
+  const lb = document.getElementById('detailHeroLightbox');
+  const img = document.getElementById('detailHeroLightboxImg');
+  if (!lb || !img) return;
+  img.src = src;
+  lb.style.display = 'flex';
+}
+function _closeHeroLightbox() {
+  const lb = document.getElementById('detailHeroLightbox');
+  if (lb) lb.style.display = 'none';
+  const img = document.getElementById('detailHeroLightboxImg');
+  if (img) img.src = '';
 }
 
 function _showDetailHydrating(on) {
@@ -5867,6 +5957,13 @@ function _openProductDetailUI(p) {
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   document.getElementById('detailCollectionInput').value = getProductCollections(p).join(', ');
+  // Photo tools disclosure: default collapsed when AI exists, expanded when not
+  const _ptContent = document.getElementById('detailPhotoToolsContent');
+  const _ptChevron = document.getElementById('detailPhotoToolsChevron');
+  if (_ptContent) _ptContent.style.display = p.model_photo ? 'none' : 'block';
+  if (_ptChevron) _ptChevron.style.transform = p.model_photo ? '' : 'rotate(180deg)';
+  _updatePhotoToolsSummary(p);
+
   // Model photo section: hide output div (fresh generation state) on open; show null-state if no model photo
   const _dmo = document.getElementById('detailModelOutput');
   const _dmi = document.getElementById('detailModelImg');
