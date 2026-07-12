@@ -2443,26 +2443,62 @@ function selectFashnGarmentImage(photos, product) {
 }
 
 // Normalize any displayable image to a JPEG data URL for FASHN compatibility.
-// FASHN accepts only image/jpeg and image/png. Safari and Chrome can display
-// webp/heic/avif natively, but FASHN rejects them with "The string did not match
+// FASHN accepts only image/jpeg, image/png, and https:// URLs. Browsers display
+// webp/heic/avif natively but FASHN rejects them with "The string did not match
 // the expected pattern". This converts in-memory — never touches the stored photo.
+//
+// Safari on iPhone caps canvas area at ~16 MP before silently producing a blank
+// result, so very large images are downscaled to stay safely under that limit.
+const _FASHN_MAX_PX = 3000; // cap longest edge to avoid Safari canvas OOM
+
 async function _normalizeFashnGarment(src) {
+  // Extract MIME type from data URL prefix for diagnostics (never logs base64 body).
+  const _mimeMatch = typeof src === 'string' ? src.match(/^data:([^;]+);base64,/) : null;
+  const _srcMime = _mimeMatch ? _mimeMatch[1] : (src?.startsWith('https://') ? 'url' : 'unknown');
+  const _srcLen = src?.length ?? 0;
+  const _srcCategory = src?.startsWith('data:') ? 'data-url' : src?.startsWith('https://') ? 'https-url' : 'other';
+
+  console.log('[FASHN normalize] input category:', _srcCategory, '| mime:', _srcMime, '| length:', _srcLen);
+
   if (!src) return src;
-  if (src.startsWith('data:image/jpeg;base64,') || src.startsWith('data:image/png;base64,')) return src;
-  // If it's an https:// URL, FASHN accepts it directly — no normalization needed.
-  if (src.startsWith('https://')) return src;
+  if (src.startsWith('data:image/jpeg;base64,') || src.startsWith('data:image/png;base64,')) {
+    console.log('[FASHN normalize] no conversion needed — already jpeg/png');
+    return src;
+  }
+  if (src.startsWith('https://')) {
+    console.log('[FASHN normalize] no conversion needed — https url');
+    return src;
+  }
+
   // Non-jpeg/png data URL: draw on canvas to get a JPEG.
   try {
     const img = await loadImg(src);
+    let w = img.naturalWidth, h = img.naturalHeight;
+    console.log('[FASHN normalize] source dimensions:', w, 'x', h);
+
+    // Downscale if longest edge exceeds cap to avoid Safari canvas memory limit.
+    if (Math.max(w, h) > _FASHN_MAX_PX) {
+      const scale = _FASHN_MAX_PX / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      console.log('[FASHN normalize] downscaled to:', w, 'x', h);
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    canvas.getContext('2d').drawImage(img, 0, 0);
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
     const jpeg = canvas.toDataURL('image/jpeg', 0.92);
-    console.log('[FASHN] Normalized garment from', src.slice(0, 30), '→ image/jpeg', Math.round(jpeg.length / 1024) + 'KB');
+
+    // Verify output prefix before returning — guards against blank canvas on Safari.
+    if (!jpeg.startsWith('data:image/jpeg;base64,')) {
+      throw new Error('Canvas export did not produce a valid JPEG data URL (prefix: ' + jpeg.slice(0, 40) + ')');
+    }
+
+    console.log('[FASHN normalize] converted', _srcMime, '→ image/jpeg | output length:', jpeg.length);
     return jpeg;
   } catch (e) {
-    console.warn('[FASHN] Could not normalize garment image:', e.message);
+    console.warn('[FASHN normalize] conversion failed:', e.message, '| source mime:', _srcMime, '| source length:', _srcLen);
     throw new Error('This garment photo could not be prepared for AI generation. Please replace the original photo and try again.');
   }
 }
@@ -2488,6 +2524,16 @@ registerImageGenProvider('fashn', {
     // Normalize to jpeg/png — FASHN rejects webp, heic, and other formats even if the
     // browser can display them. Never modifies the stored products.photo.
     const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw);
+
+    // Confirm the value about to be sent is in a FASHN-accepted format.
+    const _fashnGarmentPrefix = fashnGarment?.slice(0, 30) ?? 'null';
+    const _fashnGarmentAccepted = fashnGarment?.startsWith('data:image/jpeg;base64,')
+      || fashnGarment?.startsWith('data:image/png;base64,')
+      || fashnGarment?.startsWith('https://');
+    console.log('[FASHN] garment ready — prefix:', _fashnGarmentPrefix, '| accepted format:', _fashnGarmentAccepted, '| length:', fashnGarment?.length);
+    if (!_fashnGarmentAccepted) {
+      throw new Error('Garment photo is in an unsupported format after normalization (' + _fashnGarmentPrefix + '). Please replace the original photo and try again.');
+    }
 
     console.group('[Meraki] FASHN virtual try-on');
     console.log('Garment base64 length:', fashnGarment.length);
