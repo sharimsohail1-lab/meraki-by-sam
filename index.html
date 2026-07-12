@@ -1088,7 +1088,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
       <div class="field-label">Collection(s)</div>
-      <input type="text" id="detailCollectionInput" class="field-input" placeholder="e.g. Eid 2026, Summer Shadi" style="margin-bottom:10px">
+      <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'multi',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
+        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">No collections selected</span>
+        <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+      </div>
+      <input type="hidden" id="detailCollectionInput">
       <div class="field-label">Notes</div>
       <textarea id="detailNotesInput" class="field-input" placeholder="Any notes..."></textarea>
       <button class="btn btn-primary" id="saveProductEditsBtn" style="margin-top:10px" onclick="saveProductEdits()"><i class="ti ti-device-floppy"></i> Save Changes</button>
@@ -1417,7 +1421,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="collectionSuggestions" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-secondary" style="flex:1;margin-bottom:0" onclick="clearCollectionPicker()">Clear</button>
-      <button class="btn btn-primary" style="flex:1;margin-bottom:0" onclick="closeSheet('collectionPickerSheet')">Done</button>
+      <button class="btn btn-primary" style="flex:1;margin-bottom:0" onclick="_applyCollPickerDone()">Done</button>
     </div>
   </div>
 </div>
@@ -2066,6 +2070,7 @@ let extraSlots = [];
 let garmentType = 'full-suit';
 let intakeSeason = '';
 let currentProduct = null;   // product open in detail sheet
+let _saveInProgress = false; // guard against concurrent saves
 let currentAnalysis = null;  // { sku, name, description, ideogramPrompt }
 let currentExhibition = null;
 let exhItems = [];           // exh_items rows for currentExhibition
@@ -5582,62 +5587,134 @@ function applyCollSuggestion(el, name) {
   closeSheet('collectionPickerSheet');
 }
 
-function openCollectionPicker() {
+function openCollectionPicker(opts) {
+  const ctx = opts?.context || 'intake';
+  const mode = opts?.mode || 'single';
+  const targetId = opts?.targetId || 'collectionNameInput';
+  window._collPickerCtx = { ctx, mode, targetId };
+
   const names = allCollectionNames();
-  const current = (document.getElementById('collectionNameInput').value || '').trim();
   window._collPickerNames = names;
+
+  // Pre-select based on current value of targetId element
+  const currentVal = (document.getElementById(targetId)?.value || '').trim();
+  if (mode === 'multi') {
+    const currentArr = currentVal ? currentVal.split(',').map(s => s.trim()).filter(Boolean) : [];
+    window._collPickerSelected = new Set(currentArr);
+  } else {
+    window._collPickerSelected = new Set(currentVal ? [currentVal] : []);
+  }
+
   const container = document.getElementById('collPickerExisting');
   if (names.length) {
     container.innerHTML = `
       <div class="field-label" style="margin-bottom:6px">Existing Collections</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${
         names.map((n, i) => {
-          const active = current === n;
+          const active = window._collPickerSelected.has(n);
           return `<div class="coll-suggestion" id="collPickerChip-${i}" style="${active ? 'background:#F5D78A;border-color:var(--gold)' : ''}" onclick="toggleCollPickerChip(${i})">${n}</div>`;
         }).join('')
       }</div>`;
   } else {
     container.innerHTML = '';
   }
-  // Pre-fill new input only if current value isn't an existing collection
-  const isExisting = names.includes(current);
-  document.getElementById('collPickerNewInput').value = (!isExisting && current) ? current : '';
+  // Pre-fill new input only if single mode and current value isn't an existing collection
+  const isExisting = names.includes(currentVal);
+  document.getElementById('collPickerNewInput').value = (mode === 'single' && !isExisting && currentVal) ? currentVal : '';
   openSheet('collectionPickerSheet');
 }
 
 function toggleCollPickerChip(i) {
   const name = window._collPickerNames[i];
-  const input = document.getElementById('collectionNameInput');
-  const isSelected = input.value.trim() === name;
-  // Single-select: tap selects only this chip; tap again deselects
-  input.value = isSelected ? '' : name;
-  // Clear any typed new name since a chip was chosen
-  const newInput = document.getElementById('collPickerNewInput');
-  if (newInput) newInput.value = '';
-  updateCollectionPickerDisplay();
-  // Update all chip highlights
-  (window._collPickerNames || []).forEach((_, j) => {
-    const chip = document.getElementById('collPickerChip-' + j);
-    const active = !isSelected && j === i;
-    if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
-  });
+  const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+
+  if (ctx.mode === 'multi') {
+    if (window._collPickerSelected.has(name)) {
+      window._collPickerSelected.delete(name);
+    } else {
+      window._collPickerSelected.add(name);
+    }
+    // Update all chip highlights
+    (window._collPickerNames || []).forEach((n, j) => {
+      const chip = document.getElementById('collPickerChip-' + j);
+      const active = window._collPickerSelected.has(n);
+      if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
+    });
+  } else {
+    // Single-select: tap selects only this chip; tap again deselects
+    const input = document.getElementById('collectionNameInput');
+    const isSelected = input.value.trim() === name;
+    input.value = isSelected ? '' : name;
+    const newInput = document.getElementById('collPickerNewInput');
+    if (newInput) newInput.value = '';
+    updateCollectionPickerDisplay();
+    (window._collPickerNames || []).forEach((_, j) => {
+      const chip = document.getElementById('collPickerChip-' + j);
+      const active = !isSelected && j === i;
+      if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
+    });
+  }
 }
 
 function applyCollPickerNew() {
   const val = document.getElementById('collPickerNewInput').value.trim();
   if (!val) return;
-  // Clear any chip selection since a new name is being used
-  document.getElementById('collectionNameInput').value = val;
-  document.querySelectorAll('#collPickerExisting .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
-  updateCollectionPickerDisplay();
+  const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  if (ctx.mode === 'multi') {
+    window._collPickerSelected.add(val);
+    document.getElementById('collPickerNewInput').value = '';
+    // Highlight chip if it now appears in the existing list
+    const idx = (window._collPickerNames || []).indexOf(val);
+    if (idx >= 0) {
+      const chip = document.getElementById('collPickerChip-' + idx);
+      if (chip) { chip.style.background = '#F5D78A'; chip.style.borderColor = 'var(--gold)'; }
+    }
+    // Stay open so user can review before Done
+  } else {
+    document.getElementById('collectionNameInput').value = val;
+    document.querySelectorAll('#collPickerExisting .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
+    updateCollectionPickerDisplay();
+    closeSheet('collectionPickerSheet');
+  }
+}
+
+function _applyCollPickerDone() {
+  const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  if (ctx.mode === 'multi') {
+    const newVal = document.getElementById('collPickerNewInput').value.trim();
+    if (newVal) window._collPickerSelected.add(newVal);
+    const joined = [...window._collPickerSelected].join(', ');
+    const targetEl = document.getElementById(ctx.targetId);
+    if (targetEl) targetEl.value = joined;
+    const label = document.getElementById('detailCollectionLabel');
+    if (label) {
+      label.textContent = joined || 'No collections selected';
+      label.style.color = joined ? 'var(--ink)' : 'var(--muted)';
+    }
+  }
   closeSheet('collectionPickerSheet');
 }
 
 function clearCollectionPicker() {
-  document.getElementById('collectionNameInput').value = '';
-  document.getElementById('collPickerNewInput').value = '';
-  updateCollectionPickerDisplay();
-  closeSheet('collectionPickerSheet');
+  const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  if (ctx.mode === 'multi') {
+    window._collPickerSelected = new Set();
+    (window._collPickerNames || []).forEach((_, j) => {
+      const chip = document.getElementById('collPickerChip-' + j);
+      if (chip) { chip.style.background = ''; chip.style.borderColor = ''; }
+    });
+    document.getElementById('collPickerNewInput').value = '';
+    const targetEl = document.getElementById(ctx.targetId);
+    if (targetEl) targetEl.value = '';
+    const label = document.getElementById('detailCollectionLabel');
+    if (label) { label.textContent = 'No collections selected'; label.style.color = 'var(--muted)'; }
+    closeSheet('collectionPickerSheet');
+  } else {
+    document.getElementById('collectionNameInput').value = '';
+    document.getElementById('collPickerNewInput').value = '';
+    updateCollectionPickerDisplay();
+    closeSheet('collectionPickerSheet');
+  }
 }
 
 function updateCollectionPickerDisplay() {
@@ -6338,7 +6415,13 @@ function _openProductDetailUI(p) {
   document.getElementById('detailDesc').textContent = p.description_en || '';
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
-  document.getElementById('detailCollectionInput').value = getProductCollections(p).join(', ');
+  const _detailCollVal = getProductCollections(p).join(', ');
+  document.getElementById('detailCollectionInput').value = _detailCollVal;
+  const _detailCollLabel = document.getElementById('detailCollectionLabel');
+  if (_detailCollLabel) {
+    _detailCollLabel.textContent = _detailCollVal || 'No collections selected';
+    _detailCollLabel.style.color = _detailCollVal ? 'var(--ink)' : 'var(--muted)';
+  }
   // Photo tools disclosure: default collapsed when AI exists, expanded when not
   const _ptContent = document.getElementById('detailPhotoToolsContent');
   const _ptChevron = document.getElementById('detailPhotoToolsChevron');
@@ -6383,6 +6466,13 @@ function _openProductDetailUI(p) {
   const restBtn = document.getElementById('restoreProductBtn');
   if (archBtn) { archBtn.style.display = p.is_archived ? 'none' : 'block'; archBtn.disabled = false; archBtn.innerHTML = '<i class="ti ti-archive"></i> Archive Product'; }
   if (restBtn) { restBtn.style.display = p.is_archived ? 'block' : 'none'; restBtn.disabled = false; restBtn.innerHTML = '<i class="ti ti-archive-off"></i> Restore Product'; }
+  // Capture snapshot for pending-change detection
+  window._detailOrigSnapshot = {
+    size_inventory: JSON.stringify(normalizeSizeInventory(getSizeInventory(p) || {})),
+    price: String(p.price || ''),
+    notes: (p.notes || '').trim(),
+    collection_names: JSON.stringify(getProductCollections(p).sort())
+  };
   openSheet('productDetailSheet');
 }
 
@@ -6415,8 +6505,21 @@ async function updateProductStatus(status) {
 }
 
 // Sold button handler — routes to size sheet (tracked inventory) or simple confirm (untracked).
-function markSoldWithSizePicker() {
+async function markSoldWithSizePicker() {
   if (!currentProduct) return;
+  if (_hasPendingProductDetailChanges()) {
+    const soldBtn = document.getElementById('soldBtn') || document.querySelector('[onclick="markSoldWithSizePicker()"]');
+    if (soldBtn) { soldBtn.disabled = true; }
+    showToast('Saving inventory changes…');
+    try {
+      await saveProductEdits({ silent: true, reason: 'before-sale' });
+    } catch(e) {
+      showToast('Could not save changes. Please try again.');
+      if (soldBtn) { soldBtn.disabled = false; }
+      return;
+    }
+    if (soldBtn) { soldBtn.disabled = false; }
+  }
   const inv = getSizeInventory(currentProduct);
   if (!inv) {
     // No size tracking — show simple whole-product confirmation
@@ -6516,8 +6619,17 @@ async function _confirmSoldNoInventory(btn) {
   await updateProductStatus('sold');
 }
 
-function openMarkAllSoldConfirm() {
+async function openMarkAllSoldConfirm() {
   if (!currentProduct) return;
+  if (_hasPendingProductDetailChanges()) {
+    showToast('Saving inventory changes…');
+    try {
+      await saveProductEdits({ silent: true, reason: 'before-mark-all-sold' });
+    } catch(e) {
+      showToast('Could not save changes. Please try again.');
+      return;
+    }
+  }
   const btn = document.getElementById('markAllSoldConfirmBtn');
   if (btn) { btn.disabled = false; btn.innerHTML = 'Mark sold and clear remaining inventory'; }
   openSheet('markAllSoldSheet');
@@ -6553,24 +6665,44 @@ async function _confirmMarkAllSold(btn) {
   }
 }
 
-async function saveProductEdits() {
-  if (!currentProduct) return;
-  const btn = document.getElementById('saveProductEditsBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
-
+function _collectProductDetailDraft() {
   const price = parseInt(document.getElementById('detailPriceInput').value) || null;
-  const notes = document.getElementById('detailNotesInput').value || null;
-  // Parse comma-separated collection names — this is Sam explicitly setting all memberships
+  const notes = (document.getElementById('detailNotesInput').value || '').trim() || null;
   const _collRaw = document.getElementById('detailCollectionInput').value.trim();
   const _collArr = _collRaw ? _collRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
   const collection_name = _collArr[0] || null;
   const collection_names = JSON.stringify(_collArr);
-
   const rawSizeState = window._sizeStates['detailSizeGrid'] || {};
   const detailSizeState = normalizeSizeInventory(rawSizeState);
   const hasSizes = SIZE_ORDER.some(s => detailSizeState[s] > 0);
   const hadSizesBefore = !!getSizeInventory(currentProduct);
   const size_inventory = (hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null;
+  return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState };
+}
+
+function _hasPendingProductDetailChanges() {
+  const snap = window._detailOrigSnapshot;
+  if (!snap || !currentProduct) return false;
+  const draft = _collectProductDetailDraft();
+  if (String(draft.price || '') !== snap.price) return true;
+  if ((draft.notes || '') !== snap.notes) return true;
+  if (JSON.stringify(draft._collArr.slice().sort()) !== snap.collection_names) return true;
+  const draftSizeKey = JSON.stringify(normalizeSizeInventory(draft.size_inventory ? JSON.parse(draft.size_inventory) : {}));
+  if (draftSizeKey !== snap.size_inventory) return true;
+  return false;
+}
+
+async function saveProductEdits(opts) {
+  if (!currentProduct) return;
+  if (_saveInProgress) return Promise.reject(new Error('Save already in progress'));
+  _saveInProgress = true;
+
+  const silent = opts?.silent === true;
+  const btn = document.getElementById('saveProductEditsBtn');
+  if (!silent && btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
+
+  const draft = _collectProductDetailDraft();
+  const { price, notes, collection_name, collection_names, size_inventory, detailSizeState } = draft;
 
   let status = currentProduct.status;
   let sold_at = currentProduct.sold_at;
@@ -6592,14 +6724,32 @@ async function saveProductEdits() {
     const _masr2 = document.getElementById('markAllSoldRow');
     if (_masr2) _masr2.style.display = size_inventory ? 'block' : 'none';
     _invalidateMktPreview();
-    if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓'; }
-    showToast('Changes saved');
-    setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 1600);
+    // Refresh snapshot so subsequent checks start clean
+    window._detailOrigSnapshot = {
+      size_inventory: JSON.stringify(normalizeSizeInventory(getSizeInventory(currentProduct) || {})),
+      price: String(currentProduct.price || ''),
+      notes: (currentProduct.notes || '').trim(),
+      collection_names: JSON.stringify(getProductCollections(currentProduct).sort())
+    };
+    if (!silent) {
+      if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓'; }
+      showToast('Changes saved');
+      setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 1600);
+    } else {
+      if (btn) { btn.disabled = false; }
+    }
   } catch(e) {
     console.error('[SaveEdits]', e.message);
-    if (btn) { btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save'; }
-    showToast('Could not save changes. Please try again.');
-    setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 2200);
+    if (!silent) {
+      if (btn) { btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save'; }
+      showToast('Could not save changes. Please try again.');
+      setTimeout(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; } }, 2200);
+    } else {
+      if (btn) { btn.disabled = false; }
+    }
+    throw e;
+  } finally {
+    _saveInProgress = false;
   }
 }
 
@@ -7938,6 +8088,18 @@ async function _shareItemCard(dataUrl, caption, productName) {
 async function openMktShareWorkspace() {
   if (!currentProduct) return;
   if (!currentProduct._hydrated) { showToast('Still loading product details — please wait a moment'); return; }
+  if (_hasPendingProductDetailChanges()) {
+    const mktBtn = document.getElementById('mktShareBtn');
+    if (mktBtn) { mktBtn.disabled = true; mktBtn.innerHTML = '…Saving latest product details…'; }
+    try {
+      await saveProductEdits({ silent: true, reason: 'before-marketing' });
+    } catch(e) {
+      showToast('Could not save the latest product changes. Please try again.');
+      if (mktBtn) { mktBtn.disabled = false; mktBtn.innerHTML = '<i class="ti ti-package"></i> Marketing &amp; Share'; }
+      return;
+    }
+    if (mktBtn) { mktBtn.disabled = false; mktBtn.innerHTML = '<i class="ti ti-package"></i> Marketing &amp; Share'; }
+  }
   const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
   currentProduct = p;
   const output = document.getElementById('mktShareOutput');
