@@ -2442,6 +2442,31 @@ function selectFashnGarmentImage(photos, product) {
   return null;
 }
 
+// Normalize any displayable image to a JPEG data URL for FASHN compatibility.
+// FASHN accepts only image/jpeg and image/png. Safari and Chrome can display
+// webp/heic/avif natively, but FASHN rejects them with "The string did not match
+// the expected pattern". This converts in-memory — never touches the stored photo.
+async function _normalizeFashnGarment(src) {
+  if (!src) return src;
+  if (src.startsWith('data:image/jpeg;base64,') || src.startsWith('data:image/png;base64,')) return src;
+  // If it's an https:// URL, FASHN accepts it directly — no normalization needed.
+  if (src.startsWith('https://')) return src;
+  // Non-jpeg/png data URL: draw on canvas to get a JPEG.
+  try {
+    const img = await loadImg(src);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    const jpeg = canvas.toDataURL('image/jpeg', 0.92);
+    console.log('[FASHN] Normalized garment from', src.slice(0, 30), '→ image/jpeg', Math.round(jpeg.length / 1024) + 'KB');
+    return jpeg;
+  } catch (e) {
+    console.warn('[FASHN] Could not normalize garment image:', e.message);
+    throw new Error('This garment photo could not be prepared for AI generation. Please replace the original photo and try again.');
+  }
+}
+
 registerImageGenProvider('fashn', {
   id: 'fashn',
   label: 'FASHN Virtual Try-On',
@@ -2453,12 +2478,16 @@ registerImageGenProvider('fashn', {
 
     // Always use a single clean structural image — not a composite, not a detail shot
     const selected = selectFashnGarmentImage(uploadedPhotos, currentProduct);
-    const fashnGarment = selected?.src || garmentB64;
+    const fashnGarmentRaw = selected?.src || garmentB64;
     console.log('FASHN_INPUT_IMAGE:', selected ? `slot="${selected.slot}"` : 'fallback from caller');
 
-    if (!fashnGarment) {
+    if (!fashnGarmentRaw) {
       throw new Error('No garment photo available for FASHN.');
     }
+
+    // Normalize to jpeg/png — FASHN rejects webp, heic, and other formats even if the
+    // browser can display them. Never modifies the stored products.photo.
+    const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw);
 
     console.group('[Meraki] FASHN virtual try-on');
     console.log('Garment base64 length:', fashnGarment.length);
