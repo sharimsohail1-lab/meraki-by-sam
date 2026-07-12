@@ -47,6 +47,16 @@ export default async function handler(req, res) {
 
     const resolvedCategory = (category === 'auto' || !category) ? 'tops' : category;
 
+    // Redacted diagnostics — never logs base64 content.
+    const _mimeOf = v => (typeof v === 'string' ? (v.match(/^data:([^;]+);base64,/) || [])[1] ?? (v.startsWith('https://') ? 'https-url' : v.startsWith('blob:') ? 'blob-url' : 'unknown') : typeof v);
+    console.log('[fashn] received payload fields:', {
+      model_image:    { type: typeof model_image,   mime: _mimeOf(model_image),   prefix: model_image?.slice(0,32),   length: model_image?.length,   hasWhitespace: typeof model_image === 'string' && /\s/.test(model_image.slice(32)) },
+      garment_image:  { type: typeof garment_image, mime: _mimeOf(garment_image), prefix: garment_image?.slice(0,32), length: garment_image?.length, hasWhitespace: typeof garment_image === 'string' && /\s/.test(garment_image.slice(32)) },
+      category:       resolvedCategory,
+      garment_photo_type: garment_photo_type || 'flat-lay',
+      mode:           mode || 'balanced',
+    });
+
     try {
       const payload = {
         model_name: 'tryon-v1.6',
@@ -61,7 +71,17 @@ export default async function handler(req, res) {
         }
       };
 
-      console.log('[fashn] Starting prediction — category:', resolvedCategory, 'mode:', mode || 'balanced');
+      console.log('[fashn] upstream payload fields:', {
+        model_name: payload.model_name,
+        inputs: {
+          model_image:    { mime: _mimeOf(payload.inputs.model_image),   length: payload.inputs.model_image?.length },
+          garment_image:  { mime: _mimeOf(payload.inputs.garment_image), length: payload.inputs.garment_image?.length },
+          category:       payload.inputs.category,
+          garment_photo_type: payload.inputs.garment_photo_type,
+          mode:           payload.inputs.mode,
+        }
+      });
+
       const r = await fetch(`${FASHN_BASE}/run`, {
         method: 'POST',
         headers: authHeaders,
@@ -69,8 +89,9 @@ export default async function handler(req, res) {
       });
       const data = await r.json();
       if (!r.ok) {
-        console.error('[fashn] run failed:', r.status, JSON.stringify(data));
-        return res.status(r.status).json({ error: data?.error || data?.detail || 'FASHN run failed' });
+        // Return the complete FASHN error response so the client can log all fields.
+        console.error('[fashn] run failed:', r.status, 'keys:', Object.keys(data), JSON.stringify(data));
+        return res.status(r.status).json(data);
       }
       console.log('[fashn] Prediction started:', data.id);
       return res.status(200).json({ id: data.id });

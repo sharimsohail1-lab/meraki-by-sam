@@ -2528,38 +2528,69 @@ registerImageGenProvider('fashn', {
     // can display them. Never modifies the stored products.photo.
     const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw, currentProduct?.id);
 
-    // Confirm the value about to be sent is in a FASHN-accepted format.
-    const _fashnGarmentPrefix = fashnGarment?.slice(0, 30) ?? 'null';
-    const _fashnGarmentAccepted = fashnGarment?.startsWith('data:image/jpeg;base64,')
+    // ── Redacted pre-flight diagnostic — never logs base64 content ──────────────
+    const _diag = {
+      productId:                currentProduct?.id ?? 'unknown',
+      productName:              currentProduct?.name ?? 'unknown',
+      hydrated:                 currentProduct?._hydrated ?? 'unknown',
+      garmentSourceSlot:        selected?.slot ?? 'fallback-from-garmentB64',
+      garmentRawMime:           (fashnGarmentRaw?.match(/^data:([^;]+);base64,/) || [])[1] ?? (fashnGarmentRaw?.startsWith('https://') ? 'https-url' : 'unknown'),
+      garmentRawPrefix:         typeof fashnGarmentRaw === 'string' ? fashnGarmentRaw.slice(0, 32) : String(fashnGarmentRaw),
+      garmentRawLength:         fashnGarmentRaw?.length ?? 0,
+      garmentRawHasWhitespace:  typeof fashnGarmentRaw === 'string' && /[\s]/.test(fashnGarmentRaw.slice(32)),
+      normalizedPrefix:         typeof fashnGarment === 'string' ? fashnGarment.slice(0, 32) : String(fashnGarment),
+      normalizedLength:         fashnGarment?.length ?? 0,
+      normalizedHasWhitespace:  typeof fashnGarment === 'string' && /[\s]/.test(fashnGarment.slice(32)),
+      normalizedSameAsRaw:      fashnGarment === fashnGarmentRaw,
+      modelPhotoPrefix:         typeof modelPhoto === 'string' ? modelPhoto.slice(0, 32) : String(modelPhoto),
+      modelPhotoLength:         modelPhoto?.length ?? 0,
+      modelPhotoHasWhitespace:  typeof modelPhoto === 'string' && /[\s]/.test(modelPhoto.slice(32)),
+      fashnCategory:            _fashnCategory || 'tops',
+      garmentType:              garmentType,
+      endpoint:                 '/api/fashn',
+      payloadKeys:              ['model_image','garment_image','category','garment_photo_type','mode'],
+    };
+    console.log('[FASHN preflight]', JSON.stringify(_diag, null, 2));
+
+    const _garmentAccepted = fashnGarment?.startsWith('data:image/jpeg;base64,')
       || fashnGarment?.startsWith('data:image/png;base64,')
       || fashnGarment?.startsWith('https://');
-    console.log('[FASHN] garment ready — prefix:', _fashnGarmentPrefix, '| accepted format:', _fashnGarmentAccepted, '| length:', fashnGarment?.length);
-    if (!_fashnGarmentAccepted) {
-      throw new Error('Garment photo is in an unsupported format after normalization (' + _fashnGarmentPrefix + '). Please replace the original photo and try again.');
+    if (!_garmentAccepted) {
+      throw new Error('Garment photo is in an unsupported format after normalization (' + _diag.normalizedPrefix + '). Please replace the original photo and try again.');
     }
 
+    // Build payload once so the logged version matches exactly what is sent.
+    const _fashnPayload = {
+      model_image: modelPhoto,
+      garment_image: fashnGarment,
+      category: _fashnCategory || 'tops',
+      garment_photo_type: 'flat-lay',
+      mode: 'balanced'
+    };
+    console.log('[FASHN payload redacted]', JSON.stringify({
+      model_image:       { type: typeof _fashnPayload.model_image,   prefix: _fashnPayload.model_image?.slice(0,32),   length: _fashnPayload.model_image?.length,   empty: !_fashnPayload.model_image },
+      garment_image:     { type: typeof _fashnPayload.garment_image, prefix: _fashnPayload.garment_image?.slice(0,32), length: _fashnPayload.garment_image?.length, empty: !_fashnPayload.garment_image },
+      category:          _fashnPayload.category,
+      garment_photo_type:_fashnPayload.garment_photo_type,
+      mode:              _fashnPayload.mode,
+    }));
+
     console.group('[Meraki] FASHN virtual try-on');
-    console.log('Garment base64 length:', fashnGarment.length);
-    console.log('Model base64 length:', modelPhoto.length);
     console.log('PAID API CALL: starting FASHN prediction');
 
     const runRes = await fetch('/api/fashn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model_image: modelPhoto,
-        garment_image: fashnGarment,
-        category: _fashnCategory || 'tops',
-        garment_photo_type: 'flat-lay',
-        mode: 'balanced'
-      })
+      body: JSON.stringify(_fashnPayload)
     });
     const runData = await runRes.json();
     if (!runRes.ok || runData.error) {
-      console.error('[FASHN] run failed — HTTP', runRes.status, JSON.stringify(runData));
-      console.error('[FASHN] model_image length:', modelPhoto.length, '| garment_image length:', fashnGarment.length);
+      // Log the full FASHN error shape — every key — so we can see exactly which field is rejected.
+      console.error('[FASHN] run failed — HTTP', runRes.status);
+      console.error('[FASHN] full error response keys:', Object.keys(runData));
+      console.error('[FASHN] error response (safe):', JSON.stringify(runData));
       console.groupEnd();
-      throw new Error(runData.error || 'FASHN prediction failed to start');
+      throw new Error(runData.error || runData.detail || runData.message || 'FASHN prediction failed to start');
     }
 
     const predId = runData.id;
