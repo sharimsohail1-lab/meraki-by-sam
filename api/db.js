@@ -3,15 +3,34 @@ import { createClient } from '@supabase/supabase-js';
 // Columns added in later migrations that may not exist if schema cache is stale
 const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names'];
 
-// All known product columns — used to validate the columns parameter
-const KNOWN_PRODUCT_COLS = new Set([
-  'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
-  'description_en','description_ur','price','cost','status','reserved_for','customer_id',
-  'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
-  'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory','detail_photos',
-  'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
-  'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb'
-]);
+// Table-aware column allowlists — prevents arbitrary SQL injection via columns param
+const ALLOWED_COLUMNS_BY_TABLE = {
+  products: new Set([
+    'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
+    'description_en','description_ur','price','cost','status','reserved_for','customer_id',
+    'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
+    'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory','detail_photos',
+    'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
+    'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb'
+  ]),
+  exh_items: new Set([
+    'id','exhibition_id','name','photo','price_usd','cost_pkr',
+    'size_inventory','notes','status','created_at','updated_at'
+  ]),
+  exh_sales: new Set([
+    'id','exhibition_id','item_id','size','quantity',
+    'sold_price_usd','payment_method','notes','voided','created_at'
+  ]),
+  exhibition_items: new Set([
+    'id','exhibition_id','product_id','created_at'
+  ]),
+  exhibitions: new Set([
+    'id','name','location','date','status','notes','created_at','updated_at'
+  ]),
+};
+
+// Backwards-compat alias — used by products boot
+const KNOWN_PRODUCT_COLS = ALLOWED_COLUMNS_BY_TABLE.products;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
@@ -32,12 +51,20 @@ function stripOptionalCols(data) {
   return Object.fromEntries(Object.entries(data).filter(([k]) => !OPTIONAL_COLS.includes(k)));
 }
 
-function safeColumns(raw) {
+function safeColumns(raw, table) {
   if (!raw || raw === '*') return '*';
-  // Accept comma-separated list; strip unknown columns to prevent injection
+  const allowlist = ALLOWED_COLUMNS_BY_TABLE[table] || KNOWN_PRODUCT_COLS;
   const requested = raw.split(',').map(c => c.trim()).filter(Boolean);
-  const valid = requested.filter(c => KNOWN_PRODUCT_COLS.has(c));
-  return valid.length ? valid.join(',') : '*';
+  const rejected = requested.filter(c => !allowlist.has(c));
+  if (rejected.length) console.warn('[db] rejected unknown columns for', table, ':', rejected.join(','));
+  const valid = requested.filter(c => allowlist.has(c));
+  // If caller supplied an explicit list but every column was invalid, fall back to * rather
+  // than silently changing the semantics — log a clear warning so it's caught in dev.
+  if (!valid.length) {
+    console.warn('[db] all requested columns invalid for table', table, '— falling back to *');
+    return '*';
+  }
+  return valid.join(',');
 }
 
 export default async function handler(req, res) {
@@ -89,7 +116,7 @@ export default async function handler(req, res) {
     let query;
     switch (action) {
       case 'select': {
-        const cols = safeColumns(columns);
+        const cols = safeColumns(columns, table);
         query = supabase.from(table).select(cols).order('created_at', { ascending: false });
         if (filter) {
           Object.entries(JSON.parse(filter)).forEach(([k, v]) => { query = query.eq(k, v); });

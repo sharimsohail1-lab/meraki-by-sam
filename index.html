@@ -2073,8 +2073,16 @@ let currentProduct = null;   // product open in detail sheet
 let _saveInProgress = false; // guard against concurrent saves
 let currentAnalysis = null;  // { sku, name, description, ideogramPrompt }
 let currentExhibition = null;
-let exhItems = [];           // exh_items rows for currentExhibition
+let exhItems = [];           // exh_items rows for currentExhibition (photo stripped)
 let exhSales = [];           // exh_sales rows for currentExhibition (non-voided)
+// Session-scoped photo cache — keyed by exh_items.id. Never reset on tracker reopen.
+const _exhPhotoCache = {};
+// Tracks which exhibition IDs have already been fully loaded (photos fetched) this session.
+const _exhLoadedExhibitions = new Set();
+// Guards against concurrent metadata-refresh requests.
+let _exhRefreshInFlight = false;
+// Guards against concurrent per-item photo fetches. Value = Set of itemIds in flight.
+const _exhPhotoFetchInFlight = new Set();
 let _exhItem = null;         // item currently being acted on (sale / adjust / edit)
 let _exhTrackerTab = 'inventory';
 let _exhListFilter = 'active';   // 'active' | 'archived' on exhibitions list
@@ -9823,14 +9831,17 @@ async function openExhibitionDetail(id) {
   const grid = document.getElementById('exhSelectGrid');
   const assignedIds = new Set(itemProducts.map(i => i.product.id));
   const available = inventory.filter(p => !isProductSoldOut(p));
-  grid.innerHTML = available.map(p => `
-    <div class="product-card ${assignedIds.has(p.id) ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${assignedIds.has(p.id) ? 'border-color:var(--burgundy);border-width:2px' : ''}">
+  grid.innerHTML = available.map(p => {
+    const cached = _cardImageCache[p.id];
+    const thumbSrc = cached ? (cached.model_photo || cached.photo) : null;
+    return `<div class="product-card ${assignedIds.has(p.id) ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${assignedIds.has(p.id) ? 'border-color:var(--burgundy);border-width:2px' : ''}">
       <div class="product-thumb">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
+        ${thumbSrc ? `<img src="${thumbSrc}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
       <div class="product-info"><div class="product-name">${p.name}</div></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   openSheet('exhibitionDetailSheet');
 }
@@ -9887,6 +9898,44 @@ async function setExhStatus(status) {
 const EXH_SIZES = ['38','40','42','44','46','48','50','Free Size'];
 let _exhSelectedPayment = '';
 
+// Explicit column list for first load (includes photo).
+const EXH_ITEM_FULL_COLS = 'id,exhibition_id,name,photo,price_usd,cost_pkr,size_inventory,notes,status,created_at,updated_at';
+// Metadata-only column list for subsequent refreshes (excludes photo to save egress).
+const EXH_ITEM_META_COLS = 'id,exhibition_id,name,price_usd,cost_pkr,size_inventory,notes,status,created_at,updated_at';
+// Column list for fetching only a single item's photo.
+const EXH_ITEM_PHOTO_COLS = 'id,photo';
+
+// Return the cached photo for an item, falling back to item.photo if somehow present.
+function _getExhItemPhoto(item) {
+  return _exhPhotoCache[item.id] || item.photo || null;
+}
+
+// Fetch photo for a single item; cache and re-render its card. No-op if already cached or in flight.
+async function _loadExhItemPhoto(itemId) {
+  if (_exhPhotoCache[itemId] || _exhPhotoFetchInFlight.has(itemId)) return;
+  _exhPhotoFetchInFlight.add(itemId);
+  try {
+    const rows = await db('select', 'exh_items', { filter: { id: itemId }, columns: EXH_ITEM_PHOTO_COLS });
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (row?.photo) {
+      _exhPhotoCache[itemId] = row.photo;
+      // Re-render only the affected card's thumbnail without full re-render
+      const pidx = (window._exhInvItemIds || []).indexOf(itemId);
+      if (pidx !== -1) {
+        const card = document.querySelector(`[data-exh-item-id="${itemId}"]`);
+        if (card) {
+          const thumb = card.querySelector('.exh-item-thumb-wrap');
+          if (thumb) thumb.innerHTML = `<img src="${row.photo}" onclick="openExhPhotoLightbox('${pidx}','inv')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border);cursor:pointer;touch-action:manipulation">`;
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('[EXH PHOTO FETCH]', itemId, e.message);
+  } finally {
+    _exhPhotoFetchInFlight.delete(itemId);
+  }
+}
+
 async function openExhTracker(id) {
   const exh = exhibitions.find(e => e.id === id) || currentExhibition;
   if (!exh) return;
@@ -9897,7 +9946,15 @@ async function openExhTracker(id) {
   document.body.style.overflow = 'hidden';
   _exhTrackerTab = 'inventory';
   _renderExhTabs();
-  await _loadExhData();
+
+  if (_exhLoadedExhibitions.has(exh.id)) {
+    // Render cached data immediately, then refresh metadata in background
+    _renderExhContent();
+    _stampExhLastUpdated();
+    _exhMetadataRefresh(exh.id);
+  } else {
+    await _loadExhData();
+  }
 }
 
 function closeExhTracker() {
@@ -9905,27 +9962,70 @@ function closeExhTracker() {
   document.body.style.overflow = '';
 }
 
-async function _loadExhData(silent = false) {
+// First-ever load — fetches full rows including photos.
+async function _loadExhData() {
   const content = document.getElementById('exhTrackerContent');
-  if (!silent) {
-    content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading…</div></div>';
-  }
+  content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading exhibition…</div></div>';
   try {
     const [items, allSales] = await Promise.all([
-      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id } }),
+      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id }, columns: EXH_ITEM_FULL_COLS }),
       db('select', 'exh_sales', { filter: { exhibition_id: currentExhibition.id } }),
     ]);
-    exhItems = items || [];
+    exhItems = (items || []).map(item => {
+      if (item.photo) { _exhPhotoCache[item.id] = item.photo; delete item.photo; }
+      return item;
+    });
     exhSales = (allSales || []).filter(s => !s.voided);
+    _exhLoadedExhibitions.add(currentExhibition.id);
     await _backfillExhSizes();
     _stampExhLastUpdated();
     _renderExhContent();
   } catch(e) {
-    if (!silent) {
-      content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
-    }
+    content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
     throw e;
   }
+}
+
+// Background metadata-only refresh — no photo column. Called on subsequent opens.
+async function _exhMetadataRefresh(exhibitionId) {
+  if (_exhRefreshInFlight) return;
+  _exhRefreshInFlight = true;
+  try {
+    const [items, allSales] = await Promise.all([
+      db('select', 'exh_items', { filter: { exhibition_id: exhibitionId }, columns: EXH_ITEM_META_COLS }),
+      db('select', 'exh_sales', { filter: { exhibition_id: exhibitionId } }),
+    ]);
+    _mergeExhMetadata(items || [], (allSales || []).filter(s => !s.voided));
+    _stampExhLastUpdated();
+    _renderExhContent();
+  } catch(e) {
+    console.warn('[EXH BG REFRESH]', e.message);
+  } finally {
+    _exhRefreshInFlight = false;
+  }
+}
+
+// Merge fresh metadata into exhItems/exhSales. Photo cache is never touched.
+function _mergeExhMetadata(freshItems, freshSales) {
+  const freshById = Object.fromEntries(freshItems.map(i => [i.id, i]));
+  const existingIds = new Set(exhItems.map(i => i.id));
+  const freshIds = new Set(freshItems.map(i => i.id));
+  // Update existing + remove deleted
+  exhItems = exhItems
+    .filter(i => freshIds.has(i.id))
+    .map(i => ({ ...i, ...freshById[i.id] }));
+  // Add new items; fetch their photos individually in background
+  for (const item of freshItems) {
+    if (!existingIds.has(item.id)) {
+      exhItems.push(item);
+      _loadExhItemPhoto(item.id);
+    }
+  }
+  // Evict photo cache for items removed from server
+  for (const id of existingIds) {
+    if (!freshIds.has(id)) delete _exhPhotoCache[id];
+  }
+  exhSales = freshSales;
 }
 
 async function _backfillExhSizes() {
@@ -9956,18 +10056,27 @@ function _stampExhLastUpdated() {
 }
 
 async function refreshExhTracker() {
-  if (!currentExhibition) return;
+  if (!currentExhibition || _exhRefreshInFlight) return;
+  _exhRefreshInFlight = true;
   const btn = document.getElementById('exhRefreshBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i>'; }
   const el = document.getElementById('exhLastUpdated');
   if (el) el.textContent = 'Refreshing…';
   try {
-    await _loadExhData(true);
+    const [items, allSales] = await Promise.all([
+      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id }, columns: EXH_ITEM_META_COLS }),
+      db('select', 'exh_sales', { filter: { exhibition_id: currentExhibition.id } }),
+    ]);
+    _mergeExhMetadata(items || [], (allSales || []).filter(s => !s.voided));
+    await _backfillExhSizes();
+    _stampExhLastUpdated();
+    _renderExhContent();
     showToast('Updated ✓');
   } catch(e) {
-    showToast('Could not refresh exhibition');
+    showToast('Could not refresh. Showing the last loaded exhibition data.');
     if (el) el.textContent = 'Refresh failed';
   } finally {
+    _exhRefreshInFlight = false;
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i>'; }
   }
 }
@@ -10090,12 +10199,13 @@ function _exhItemCardHTML(item, midx, pidx) {
   const statusCls = remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
   const statusLabel = remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
   const isArchived = item.status === 'archived';
-  return `<div class="exh-item-card" style="position:relative;${isArchived?'opacity:0.65':''}">
+  const _photo = _getExhItemPhoto(item);
+  return `<div class="exh-item-card" data-exh-item-id="${item.id}" style="position:relative;${isArchived?'opacity:0.65':''}">
       <button onclick="showExhItemMenu(window._exhItemMenuIds[${midx}])" style="position:absolute;top:10px;right:10px;background:none;border:none;padding:4px 6px;cursor:pointer;font-size:18px;color:var(--muted);touch-action:manipulation;z-index:1">⋯</button>
       <div style="display:flex;gap:12px;align-items:flex-start">
-        ${item.photo
-          ? `<img src="${item.photo}" onclick="openExhPhotoLightbox('${pidx}','inv')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border);cursor:pointer;touch-action:manipulation">`
-          : `<div style="width:64px;height:64px;border-radius:8px;background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-shirt" style="font-size:26px;color:var(--muted)"></i></div>`}
+        <div class="exh-item-thumb-wrap">${_photo
+          ? `<img src="${_photo}" onclick="openExhPhotoLightbox('${pidx}','inv')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border);cursor:pointer;touch-action:manipulation">`
+          : `<div style="width:64px;height:64px;border-radius:8px;background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-shirt" style="font-size:26px;color:var(--muted)"></i></div>`}</div>
         <div style="flex:1;min-width:0;padding-right:24px">
           <div style="font-weight:600;font-size:15px;margin-bottom:3px">${item.name}${isArchived ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(archived)</span>' : ''}</div>
           <div style="font-size:12px;color:var(--muted)">${item.price_usd ? '$' + item.price_usd : ''}${item.cost_pkr ? ' · PKR ' + Number(item.cost_pkr).toLocaleString() : ''}</div>
@@ -10210,6 +10320,7 @@ async function _confirmDeleteExhItem(id) {
     await db('delete', 'exh_items', { id });
     exhItems = exhItems.filter(i => i.id !== id);
     exhSales = exhSales.filter(s => s.item_id !== id);
+    delete _exhPhotoCache[id];
     _renderExhContent();
     showToast('Item deleted');
   } catch(e) { showToast('Error: ' + e.message); }
@@ -10226,7 +10337,7 @@ function _exhSalesHTML() {
   return [...exhSales].reverse().map(s => {
     const item = exhItems.find(i => i.id === s.item_id);
     const itemName = item?.name || 'Unknown item';
-    const photo = item?.photo || null;
+    const photo = item ? _getExhItemPhoto(item) : null;
     const dt = new Date(s.created_at);
     const timeStr = dt.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
     const thumbIdx = window._exhSaleIds.length;
@@ -10361,7 +10472,7 @@ function openEditExhItem(itemId) {
   if (!item) return;
   _exhItem = item;
   _exhAddSizes = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...item.size_inventory };
-  _exhAddPhoto = item.photo || null;
+  _exhAddPhoto = _getExhItemPhoto(item) || null;
   document.getElementById('addExhItemTitle').textContent = 'Edit Item';
   document.getElementById('exhItemNameInput').value = item.name || '';
   document.getElementById('exhItemPriceInput').value = item.price_usd || '';
@@ -10371,8 +10482,9 @@ function openEditExhItem(itemId) {
   document.getElementById('saveExhItemBtn').innerHTML = '<i class="ti ti-device-floppy"></i> Update Item';
   document.getElementById('exhSuggestedNames').style.display = 'none';
   const preview = document.getElementById('exhItemPhotoPreview');
-  if (item.photo) {
-    preview.innerHTML = `<img src="${item.photo}" style="width:100%;height:100%;object-fit:cover">`;
+  const _editPhoto = _getExhItemPhoto(item);
+  if (_editPhoto) {
+    preview.innerHTML = `<img src="${_editPhoto}" style="width:100%;height:100%;object-fit:cover">`;
   } else {
     preview.innerHTML = '<i class="ti ti-camera" style="font-size:24px;color:var(--muted)"></i>';
   }
@@ -10454,11 +10566,18 @@ async function saveExhItem() {
     const editId = document.getElementById('exhItemEditId').value;
     if (editId) {
       await db('update', 'exh_items', { id: editId, data });
+      // Update photo cache if photo changed; strip from row
+      if (data.photo) { _exhPhotoCache[editId] = data.photo; }
+      const { photo: _p, ...dataWithoutPhoto } = data;
       const idx = exhItems.findIndex(i => i.id === editId);
-      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...data };
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...dataWithoutPhoto };
     } else {
       const rows = await db('insert', 'exh_items', { data });
-      if (rows && rows[0]) exhItems.push(rows[0]);
+      if (rows && rows[0]) {
+        const newItem = rows[0];
+        if (newItem.photo) { _exhPhotoCache[newItem.id] = newItem.photo; delete newItem.photo; }
+        exhItems.push(newItem);
+      }
     }
     closeSheet('addExhItemSheet');
     _exhTrackerTab = 'inventory';
@@ -10486,13 +10605,13 @@ async function openLogExhSale(itemId) {
 
   let item = localItem;
   try {
-    const rows = await db('select', 'exh_items', { filter: { id: itemId } });
+    const rows = await db('select', 'exh_items', { filter: { id: itemId }, columns: EXH_ITEM_META_COLS });
     const fresh = Array.isArray(rows) ? rows[0] : null;
     if (fresh) {
-      // Merge fresh inventory into local state so card also reflects it
+      // Merge fresh metadata into local state; never overwrite photo cache
       const idx = exhItems.findIndex(i => i.id === itemId);
       if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...fresh };
-      item = fresh;
+      item = { ...localItem, ...fresh };
     }
   } catch(e) {
     console.warn('[EXHIBITION SALE] latest inventory check failed', e);
@@ -10588,8 +10707,10 @@ async function saveExhSale() {
     // Update local state from server response
     if (json.sale) exhSales.push(json.sale);
     if (json.item) {
+      // Cache photo if server returned it; then strip from working row
+      if (json.item.photo) { _exhPhotoCache[json.item.id] = json.item.photo; delete json.item.photo; }
       const idx = exhItems.findIndex(i => i.id === json.item.id);
-      if (idx >= 0) exhItems[idx] = json.item;
+      if (idx >= 0) exhItems[idx] = { ...exhItems[idx], ...json.item };
       else exhItems.push(json.item);
     }
     _stampExhLastUpdated();
@@ -10663,7 +10784,7 @@ function openExhPhotoLightbox(idx, source) {
     const itemId = (window._exhInvItemIds || [])[idx];
     const item = exhItems.find(i => i.id === itemId);
     if (!item) return;
-    photo = item.photo;
+    photo = _getExhItemPhoto(item);
     const remaining = _exhItemRemaining(item);
     caption = `${item.name} · ${remaining} remaining`;
   } else if (source === 'sale') {
@@ -10673,7 +10794,7 @@ function openExhPhotoLightbox(idx, source) {
     const sale = visibleSales[idx];
     if (!sale) return;
     const item = exhItems.find(i => i.id === sale.item_id);
-    photo = item?.photo || null;
+    photo = item ? _getExhItemPhoto(item) : null;
     caption = `${item?.name || 'Unknown'} · Size ${sale.size} × ${sale.quantity || 1} · $${sale.sold_price_usd || 0}`;
   }
   if (!photo) return;
