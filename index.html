@@ -7789,6 +7789,21 @@ async function _buildItemShareCard(p, opts) {
     const dx = (W - dw) / 2;
     const dy = Math.max(16, (IMG_H - dh) / 2);
     ctx.drawImage(imgEl, dx, dy, dw, dh);
+
+    // Diagnostic: sample 5×5 pixel block near centre of decoded image to produce a
+    // lightweight checksum, then compare against p.photo dimensions.
+    // Never logs pixel values — only a sum, dimensions, and data length.
+    if (sourceType === 'blurred-original') {
+      try {
+        const sCx = Math.round(dx + dw / 2), sCy = Math.round(dy + dh * 0.2);
+        const sSample = ctx.getImageData(Math.max(0, sCx - 2), Math.max(0, sCy - 2), 5, 5).data;
+        let checksum = 0;
+        for (let i = 0; i < sSample.length; i += 4) checksum += sSample[i] + sSample[i+1] + sSample[i+2];
+        console.log('[ShareCard] blurred-original draw checksum=' + checksum + ' decoded=' + imgEl.naturalWidth + 'x' + imgEl.naturalHeight + ' srcLength=' + explicitSrc.length + ' photoLength=' + (p.photo ? p.photo.length : 0));
+      } catch(diagErr) {
+        console.warn('[ShareCard] checksum skipped (tainted canvas?)', diagErr.message);
+      }
+    }
   }
 
   // ── Sold / Reserved stamp ─────────────────────────────────────────────────
@@ -8074,7 +8089,8 @@ async function _mktBuildAndShowCard(p, opts) {
   const imageSrc = opts?.imageSrc || null;
   const sourceType = opts?.sourceType || 'unknown';
   const blurRevision = opts?.blurRevision || 0;
-  console.log('[mkt] building card token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' imageLength=' + (imageSrc ? imageSrc.length : 0));
+  const _p = inventory.find(x => x.id === p?.id) || p;
+  console.log('[mkt] building card token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' imageLength=' + (imageSrc ? imageSrc.length : 0) + ' isPhoto=' + (imageSrc === _p?.photo) + ' isModel=' + (imageSrc === _p?.model_photo) + ' isBlurred=' + (imageSrc === currentMarketingImageChoice?.blurredDataUrl));
   const cardArea = document.getElementById('mktCardArea');
   if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Generating marketing image…</div>';
   try {
@@ -8086,6 +8102,7 @@ async function _mktBuildAndShowCard(p, opts) {
       return;
     }
     console.log('[mkt] card complete token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' cardLength=' + cardUrl.length);
+    if (sourceType === 'blurred-original') console.log('[mkt] visible card set from blurred-original rev=' + blurRevision);
     window._currentShareCardUrl = cardUrl;
     window._shareTexts = window._shareTexts || [];
     window._shareTexts[0] = p.whatsapp_listing || p.caption_en || '';
