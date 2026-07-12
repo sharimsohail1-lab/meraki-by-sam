@@ -25,15 +25,19 @@ export default async function handler(req, res) {
   // ── GET: poll prediction status ──────────────────────────────────────────────
   if (req.method === 'GET') {
     const { id, _rid } = req.query; // _rid = optional frontend correlation id
+    // Entry-point log — proves the function was invoked. If no 413 is seen here but
+    // the client gets 413, Vercel's edge rejected the request before the function ran.
+    console.log('[fashn poll] ENTRY | rid:', _rid || 'none', '| id:', id || 'missing', '| query keys:', Object.keys(req.query).join(','));
     if (!id) return res.status(400).json({ error: 'Missing prediction id' });
     try {
+      console.log('[fashn poll] fetching upstream | rid:', _rid || 'none', '| id:', id);
       const r = await fetch(`${FASHN_BASE}/status/${id}`, {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
 
       const upstreamContentType   = r.headers.get('content-type') || 'unknown';
       const upstreamContentLength = r.headers.get('content-length') || 'unknown';
-      console.log('[fashn poll] rid:', _rid || 'none', '| id:', id, '| upstream status:', r.status,
+      console.log('[fashn poll] upstream response | rid:', _rid || 'none', '| id:', id, '| upstream status:', r.status,
         '| content-type:', upstreamContentType, '| content-length:', upstreamContentLength);
 
       const data = await r.json();
@@ -49,7 +53,10 @@ export default async function handler(req, res) {
         '| error:', data.error ?? 'none', '| response keys:', Object.keys(data).join(','));
 
       if (!r.ok) {
-        return res.status(r.status).json({ error: data?.error || data?.detail || `FASHN status ${r.status}`, _upstream: data });
+        const _errPayload = { error: data?.error || data?.detail || `FASHN status ${r.status}` };
+        const _errPayloadLen = JSON.stringify(_errPayload).length;
+        console.error('[fashn poll] upstream error | rid:', _rid || 'none', '| forwarding status:', r.status, '| response payload bytes:', _errPayloadLen);
+        return res.status(r.status).json(_errPayload);
       }
 
       if (data.status === 'completed') {
@@ -80,10 +87,12 @@ export default async function handler(req, res) {
         }
 
         // Output is a normal HTTPS CDN URL — return only the URL, not the full upstream response.
+        console.log('[fashn poll] sending completed | rid:', _rid || 'none', '| output_url length:', _raw.length);
         return res.status(200).json({ id: data.id, status: 'completed', output_url: _raw });
       }
 
       // In-progress or failed — return status/error only, no large fields.
+      console.log('[fashn poll] sending status | rid:', _rid || 'none', '| status:', data.status);
       return res.status(200).json({ id: data.id, status: data.status, error: data.error ?? null });
     } catch (err) {
       return res.status(500).json({ error: err.message });
