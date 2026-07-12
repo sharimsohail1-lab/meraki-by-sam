@@ -1087,9 +1087,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
-      <div class="field-label">Collection(s)</div>
-      <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'multi',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
-        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">No collections selected</span>
+      <div class="field-label">Collection</div>
+      <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'single',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
+        <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">No collection selected</span>
         <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
       </div>
       <input type="hidden" id="detailCollectionInput">
@@ -5660,11 +5660,22 @@ function _toggleCollPickerByName(name) {
     window._collPickerSelected = sel;
     _renderCollPickerChips();
   } else {
-    document.getElementById('collectionNameInput').value = name;
-    updateCollectionPickerDisplay();
-    document.querySelectorAll('#collectionSuggestions .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
-    closeSheet('collectionPickerSheet');
+    _collPickerSingleSelect(name, ctx);
   }
+}
+
+function _collPickerSingleSelect(name, ctx) {
+  ctx = ctx || window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  const targetEl = document.getElementById(ctx.targetId);
+  if (targetEl) targetEl.value = name;
+  if (ctx.targetId === 'collectionNameInput') {
+    updateCollectionPickerDisplay();
+  } else {
+    // detail context — update the display label directly
+    const label = document.getElementById('detailCollectionLabel');
+    if (label) { label.textContent = name || 'No collection'; label.style.color = name ? 'var(--ink)' : 'var(--muted)'; }
+  }
+  closeSheet('collectionPickerSheet');
 }
 
 function toggleCollPickerChip(i) {
@@ -5673,18 +5684,7 @@ function toggleCollPickerChip(i) {
   if (ctx.mode === 'multi') {
     _toggleCollPickerByName(name);
   } else {
-    // Single-select: tap selects only this chip; tap again deselects
-    const input = document.getElementById('collectionNameInput');
-    const isSelected = input.value.trim() === name;
-    input.value = isSelected ? '' : name;
-    const newInput = document.getElementById('collPickerNewInput');
-    if (newInput) newInput.value = '';
-    updateCollectionPickerDisplay();
-    (window._collPickerNames || []).forEach((_, j) => {
-      const chip = document.getElementById('collPickerChip-' + j);
-      const active = !isSelected && j === i;
-      if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
-    });
+    _collPickerSingleSelect(name, ctx);
   }
 }
 
@@ -5703,10 +5703,7 @@ function applyCollPickerNew() {
     document.getElementById('collPickerNewInput').value = '';
     // Stay open so user can review before Done
   } else {
-    document.getElementById('collectionNameInput').value = val;
-    document.querySelectorAll('#collPickerExisting .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
-    updateCollectionPickerDisplay();
-    closeSheet('collectionPickerSheet');
+    _collPickerSingleSelect(val, ctx);
   }
 }
 
