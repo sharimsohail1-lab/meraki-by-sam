@@ -6105,39 +6105,37 @@ async function _applyBlurEditor() {
     const slider = document.getElementById('blurSizeSlider');
     const r = parseInt(slider?.value || 130);
 
-    // Convert display-space centre to image-space centre.
-    // _blurEditorCx/Cy are in wrap-space; subtract the letterbox offsets to get display-image-space,
-    // then scale up to natural image pixels.
     if (!_blurEditorDisplayW || !_blurEditorDisplayH) throw new Error('Layout not initialised — reopen the editor');
     const scaleX = _blurEditorNatW / _blurEditorDisplayW;
     const scaleY = _blurEditorNatH / _blurEditorDisplayH;
+    // Wrap-space centre → image-space centre
     const imgCx = (_blurEditorCx - _blurEditorOffsetX) * scaleX;
     const imgCy = (_blurEditorCy - _blurEditorOffsetY) * scaleY;
-    // Oval radii in image pixels: match the 0.55/0.65 ratio used in the live preview
     const imgRx = r * 0.55 * scaleX;
     const imgRy = r * 0.65 * scaleY;
 
-    console.log('[BlurEditor] apply — imgCx:', Math.round(imgCx), 'imgCy:', Math.round(imgCy), 'imgRx:', Math.round(imgRx), 'imgRy:', Math.round(imgRy), 'nat:', _blurEditorNatW, 'x', _blurEditorNatH);
+    console.log('[BlurEditor] imgCx:', Math.round(imgCx), 'imgCy:', Math.round(imgCy), 'imgRx:', Math.round(imgRx), 'imgRy:', Math.round(imgRy), 'nat:', _blurEditorNatW, 'x', _blurEditorNatH);
 
     const srcImg = new Image();
     await new Promise((res, rej) => { srcImg.onload = res; srcImg.onerror = rej; srcImg.src = _blurEditorImgSrc; });
 
-    // Output canvas: full original image
+    // ── Output canvas: start with full original ───────────────────────────────
     const offscreen = document.createElement('canvas');
     offscreen.width = _blurEditorNatW;
     offscreen.height = _blurEditorNatH;
     const octx = offscreen.getContext('2d');
     octx.drawImage(srcImg, 0, 0);
 
-    // Bounding box of the ellipse with generous padding so blur doesn't get cut at edges
+    // ── Bounding box of the ellipse (with padding for blur overshoot) ─────────
     const pad = Math.round(Math.max(imgRx, imgRy) * 0.6);
     const bx = Math.max(0, Math.round(imgCx - imgRx - pad));
     const by = Math.max(0, Math.round(imgCy - imgRy - pad));
     const bw = Math.min(_blurEditorNatW - bx, Math.round(imgRx * 2 + pad * 2));
     const bh = Math.min(_blurEditorNatH - by, Math.round(imgRy * 2 + pad * 2));
 
-    // Downscale/upscale blur — works on every browser without ctx.filter.
-    // Three passes of 8× downscale produce strong pixelation that clearly hides a face.
+    // ── 3-pass downscale/upscale pixelation blur ───────────────────────────────
+    // Pass 0 reads from srcImg at source coords (bx,by,bw,bh); passes 1-2 from the previous blurCanvas.
+    // The final blurCanvas is bw×bh pixels containing the pixelated face region.
     const PASSES = 3, DOWNSCALE = 8;
     let blurCanvas = null;
     for (let pass = 0; pass < PASSES; pass++) {
@@ -6148,6 +6146,7 @@ async function _applyBlurEditor() {
       sCtx.imageSmoothingEnabled = true;
       sCtx.imageSmoothingQuality = 'high';
       if (pass === 0) {
+        // 9-arg drawImage: read source region (bx,by,bw,bh) from srcImg, write to full small canvas
         sCtx.drawImage(srcImg, bx, by, bw, bh, 0, 0, small.width, small.height);
       } else {
         sCtx.drawImage(blurCanvas, 0, 0, blurCanvas.width, blurCanvas.height, 0, 0, small.width, small.height);
@@ -6157,10 +6156,13 @@ async function _applyBlurEditor() {
       const bCtx = blurCanvas.getContext('2d');
       bCtx.imageSmoothingEnabled = true;
       bCtx.imageSmoothingQuality = 'high';
+      // Scale small → full bw×bh (upscale produces pixelation/blur)
       bCtx.drawImage(small, 0, 0, bw, bh);
     }
 
-    // Composite: clip to the ellipse, paint the blurred region
+    // ── Composite: clip to ellipse, paint blurred region at source coordinates ─
+    // 5-arg drawImage(image, dx, dy, dw, dh): draws the entire blurCanvas (bw×bh) to
+    // destination (bx, by) at size (bw, bh) — correct source-space placement.
     octx.save();
     octx.beginPath();
     octx.ellipse(imgCx, imgCy, imgRx, imgRy, 0, 0, Math.PI * 2);
@@ -6168,9 +6170,37 @@ async function _applyBlurEditor() {
     octx.drawImage(blurCanvas, bx, by, bw, bh);
     octx.restore();
 
+    // ── Pixel-diff verification: sample center of the selected ellipse ─────────
+    // Create a comparison canvas with just the original to get unmodified pixels.
+    const cmpW = Math.max(2, Math.min(20, Math.round(imgRx * 0.5)));
+    const cmpH = Math.max(2, Math.min(20, Math.round(imgRy * 0.5)));
+    const cmpX = Math.max(0, Math.min(_blurEditorNatW - cmpW, Math.round(imgCx - cmpW / 2)));
+    const cmpY = Math.max(0, Math.min(_blurEditorNatH - cmpH, Math.round(imgCy - cmpH / 2)));
+    const origCmp = document.createElement('canvas');
+    origCmp.width = _blurEditorNatW; origCmp.height = _blurEditorNatH;
+    const origCmpCtx = origCmp.getContext('2d');
+    origCmpCtx.drawImage(srcImg, 0, 0);
+    let diffScore = 0;
+    try {
+      const origPx = origCmpCtx.getImageData(cmpX, cmpY, cmpW, cmpH).data;
+      const outPx = octx.getImageData(cmpX, cmpY, cmpW, cmpH).data;
+      for (let i = 0; i < origPx.length; i += 4) {
+        diffScore += Math.abs(origPx[i] - outPx[i]) + Math.abs(origPx[i+1] - outPx[i+1]) + Math.abs(origPx[i+2] - outPx[i+2]);
+      }
+    } catch(gidErr) {
+      console.warn('[BlurEditor] getImageData failed (canvas tainted?)', gidErr.message);
+      // Proceed without the diff check if pixel data is inaccessible
+    }
+
     const result = offscreen.toDataURL('image/jpeg', 0.90);
 
-    // Sanity-check: the result must decode successfully with nonzero dimensions
+    console.log('[BlurEditor] pixel diff — cmpX:', cmpX, 'cmpY:', cmpY, 'cmpW:', cmpW, 'cmpH:', cmpH, 'diffScore:', diffScore, 'outputLength:', result.length, 'origLength:', _blurEditorImgSrc.length);
+
+    if (diffScore < 50) {
+      throw new Error('The face blur was not applied. Adjust the oval over the face area and try again.');
+    }
+
+    // Sanity-check dimensions
     const check = new Image();
     await new Promise((res, rej) => { check.onload = res; check.onerror = rej; check.src = result; });
     if (!check.naturalWidth || !check.naturalHeight) throw new Error('Generated image has no dimensions');
@@ -6181,7 +6211,7 @@ async function _applyBlurEditor() {
     if (_blurEditorResolve) { _blurEditorResolve(result); _blurEditorResolve = null; _blurEditorReject = null; }
   } catch(e) {
     console.error('[BlurEditor] apply failed', e);
-    if (status) status.textContent = 'The face blur could not be applied. Adjust the area and try again.';
+    if (status) status.textContent = e.message || 'The face blur could not be applied. Adjust the area and try again.';
     if (btn) { btn.disabled = false; btn.textContent = 'Use blurred photo'; }
   }
 }
@@ -6708,7 +6738,11 @@ let catalogRenderedPages = null;
 let catalogRenderSignature = null;
 
 // Individual Marketing & Share image choice for the current product
-let currentMarketingImageChoice = { source: 'model', blurFace: false, blurredDataUrl: null };
+let currentMarketingImageChoice = { source: 'model', blurFace: false, blurredDataUrl: null, blurRevision: 0 };
+// Monotonically increasing token; only the card build that owns the current token may update the UI
+let _mktCardRenderToken = 0;
+// Monotonically increasing blur revision counter
+let _blurRevisionCounter = 0;
 
 // Blur editor state
 let _blurEditorResolve = null;
@@ -7665,7 +7699,7 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   return lines.length;
 }
 
-/// opts.imageSrc: required — the exact image to use (model_photo, photo, or blurred data URL). No DOM hero fallback.
+/// opts: { imageSrc (required), sourceType, blurRevision }. No DOM hero fallback.
 async function _buildItemShareCard(p, opts) {
   // Always use the latest saved state for metadata (name, description, price, etc.)
   if (p && p.id) {
@@ -7715,20 +7749,28 @@ async function _buildItemShareCard(p, opts) {
   ctx.fillStyle = '#f5f0ea';
   ctx.fillRect(0, 0, W, IMG_H);
 
-  // Load product photo — opts.imageSrc must be supplied for Marketing & Share; no DOM hero fallback.
-  // For data: URLs (blurred result, model_photo, original photo) skip crossOrigin to avoid Safari issues.
-  let imgEl = null;
+  const sourceType = opts?.sourceType || 'unknown';
+  const blurRevision = opts?.blurRevision || 0;
   const explicitSrc = opts?.imageSrc || null;
+
+  // Contract: blurred-original must not be the same as the stored original or model photo
+  if (sourceType === 'blurred-original') {
+    if (!blurRevision) throw new Error('[ShareCard] blurred-original missing blurRevision');
+    if (explicitSrc === p.photo) throw new Error('[ShareCard] blurred-original imageSrc is identical to p.photo — blur was not applied');
+    if (explicitSrc === p.model_photo) throw new Error('[ShareCard] blurred-original imageSrc is identical to p.model_photo');
+  }
+
+  // Load image — for data: URLs skip crossOrigin to avoid SecurityError on Safari
+  let imgEl = null;
   if (!explicitSrc) {
-    console.warn('[ShareCard] no imageSrc provided — card will have no photo');
+    console.warn('[ShareCard] no imageSrc — card will have no photo sourceType=' + sourceType);
   } else {
-    console.log('[ShareCard] loading imageSrc type:', explicitSrc.startsWith('data:') ? 'data-url' : 'url', 'length:', explicitSrc.length);
+    console.log('[ShareCard] loading sourceType=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' type=' + (explicitSrc.startsWith('data:') ? 'data-url' : 'url') + ' length=' + explicitSrc.length);
     try {
       if (explicitSrc.startsWith('data:')) {
-        // Data URLs are same-origin — do not set crossOrigin, which causes SecurityError on Safari
         imgEl = await new Promise((res, rej) => {
           const img = new Image();
-          img.onload = () => { console.log('[ShareCard] loaded', img.naturalWidth, 'x', img.naturalHeight); res(img); };
+          img.onload = () => { console.log('[ShareCard] decoded ' + img.naturalWidth + 'x' + img.naturalHeight + ' sourceType=' + sourceType); res(img); };
           img.onerror = rej;
           img.src = explicitSrc;
         });
@@ -7736,7 +7778,7 @@ async function _buildItemShareCard(p, opts) {
         imgEl = await _loadImgWithTimeout('/api/ideogram?url=' + encodeURIComponent(explicitSrc), 8000);
       }
     } catch(e) {
-      console.error('[ShareCard] image load failed', e.message);
+      console.error('[ShareCard] image load failed sourceType=' + sourceType, e.message);
     }
   }
   if (imgEl) {
@@ -7909,9 +7951,9 @@ async function openMktShareWorkspace() {
       </div>
     </div>`;
 
-  // If AI source selected, auto-build the card immediately — pass model_photo explicitly
+  // If AI source selected, auto-build the card immediately
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, p.model_photo);
+    _mktBuildAndShowCard(p, { imageSrc: p.model_photo, sourceType: 'model' });
   }
 }
 
@@ -7923,12 +7965,12 @@ function _setMktImgSource(source) {
   const origBtn = document.getElementById('mktSrcOrigBtn');
   if (aiBtn) { aiBtn.className = 'mkt-img-src-btn' + (source === 'model' ? ' active' : ''); }
   if (origBtn) { origBtn.className = 'mkt-img-src-btn' + (source === 'original' ? ' active' : ''); }
-  // Auto-build if switching to AI (no privacy question needed) — pass model_photo explicitly
+  // Auto-build if switching to AI (no privacy question needed)
   const cardArea = document.getElementById('mktCardArea');
   if (source === 'model') {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Building share card…</div>';
     const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
-    _mktBuildAndShowCard(p, p?.model_photo);
+    _mktBuildAndShowCard(p, { imageSrc: p?.model_photo, sourceType: 'model' });
   } else {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Tap Generate Share Card to continue.</div>';
   }
@@ -7938,7 +7980,7 @@ async function _mktGenerateCard() {
   const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
   if (!p) return;
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, p.model_photo);
+    _mktBuildAndShowCard(p, { imageSrc: p.model_photo, sourceType: 'model' });
     return;
   }
   // Original selected — ask about privacy
@@ -7954,20 +7996,20 @@ async function _mktPrivacyChoice(choice) {
   if (choice === 'as-is') {
     currentMarketingImageChoice.blurFace = false;
     currentMarketingImageChoice.blurredDataUrl = null;
-    _mktBuildAndShowCard(p, p.photo);
+    currentMarketingImageChoice.blurRevision = 0;
+    _mktBuildAndShowCard(p, { imageSrc: p.photo, sourceType: 'original' });
   } else if (choice === 'blur') {
     if (!p.photo) { showToast('No original photo'); return; }
     const cardArea = document.getElementById('mktCardArea');
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Preparing blur editor…</div>';
     try {
       const blurred = await _openBlurEditor(p.photo);
+      const rev = ++_blurRevisionCounter;
       currentMarketingImageChoice.blurFace = true;
       currentMarketingImageChoice.blurredDataUrl = blurred;
-      console.log('[Mkt] blur ready, dataUrl length:', blurred?.length, 'source:', currentMarketingImageChoice.source);
-      if (currentMarketingImageChoice.source === 'original' && currentMarketingImageChoice.blurFace && blurred !== currentMarketingImageChoice.blurredDataUrl) {
-        throw new Error('Blurred marketing image was not assigned');
-      }
-      _mktBuildAndShowCard(p, blurred);
+      currentMarketingImageChoice.blurRevision = rev;
+      console.log('[mkt] blur ready rev=' + rev + ' length=' + blurred.length + ' source=' + currentMarketingImageChoice.source);
+      _mktBuildAndShowCard(p, { imageSrc: blurred, sourceType: 'blurred-original', blurRevision: rev });
     } catch(e) {
       if (e !== 'cancelled') {
         if (cardArea) cardArea.innerHTML = `<div style="font-size:12px;color:#c0392b;background:#fdecea;padding:8px 12px;border-radius:6px">${e.message || 'Could not prepare the blurred photo. Try again or use the AI model photo.'}</div>`;
@@ -7978,11 +8020,24 @@ async function _mktPrivacyChoice(choice) {
   }
 }
 
-async function _mktBuildAndShowCard(p, imageSrc) {
+async function _mktBuildAndShowCard(p, opts) {
+  // opts: { imageSrc, sourceType, blurRevision? }
+  const myToken = ++_mktCardRenderToken;
+  const imageSrc = opts?.imageSrc || null;
+  const sourceType = opts?.sourceType || 'unknown';
+  const blurRevision = opts?.blurRevision || 0;
+  console.log('[mkt] building card token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' imageLength=' + (imageSrc ? imageSrc.length : 0));
   const cardArea = document.getElementById('mktCardArea');
   if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Generating marketing image…</div>';
   try {
-    const cardUrl = await _buildItemShareCard(p, imageSrc ? { imageSrc } : undefined);
+    if (!imageSrc) { console.warn('[mkt] no imageSrc for token=' + myToken + ' sourceType=' + sourceType); }
+    const cardUrl = await _buildItemShareCard(p, { imageSrc, sourceType, blurRevision });
+    // Discard result if a newer render has started since this one began
+    if (_mktCardRenderToken !== myToken) {
+      console.log('[mkt] stale render discarded token=' + myToken + ' current=' + _mktCardRenderToken + ' source=' + sourceType);
+      return;
+    }
+    console.log('[mkt] card complete token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' cardLength=' + cardUrl.length);
     window._currentShareCardUrl = cardUrl;
     window._shareTexts = window._shareTexts || [];
     window._shareTexts[0] = p.whatsapp_listing || p.caption_en || '';
