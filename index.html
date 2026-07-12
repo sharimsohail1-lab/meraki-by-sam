@@ -5624,22 +5624,54 @@ function openCollectionPicker(opts) {
   openSheet('collectionPickerSheet');
 }
 
+// Re-renders the collPickerExisting container to reflect current _collPickerSelected state.
+// Shows all known names + any user-created names not yet in allCollectionNames().
+function _renderCollPickerChips() {
+  const names = window._collPickerNames || [];
+  const selected = window._collPickerSelected || new Set();
+  // User-created names this session that aren't in the known list
+  const extras = [...selected].filter(n => !names.some(e => e.toLowerCase() === n.toLowerCase()));
+  window._cpExtras = extras; // safe onclick reference
+  const container = document.getElementById('collPickerExisting');
+  if (!container) return;
+  if (!names.length && !extras.length) { container.innerHTML = ''; return; }
+  let html = '<div class="field-label" style="margin-bottom:6px">Existing Collections</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">';
+  names.forEach((n, i) => {
+    const active = [...selected].some(s => s.toLowerCase() === n.toLowerCase());
+    html += `<div class="coll-suggestion" id="collPickerChip-${i}" style="${active ? 'background:#F5D78A;border-color:var(--gold)' : ''}" onclick="toggleCollPickerChip(${i})">${n}</div>`;
+  });
+  extras.forEach((n, xi) => {
+    html += `<div class="coll-suggestion" style="background:#F5D78A;border-color:var(--gold)" onclick="_toggleCollPickerByName(window._cpExtras[${xi}])">${n} ✕</div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Toggle a collection name in _collPickerSelected by name (not index).
+// In multi mode: toggle Set membership and re-render chips.
+// In single mode: write to intake input and close (same as applyCollSuggestion).
+function _toggleCollPickerByName(name) {
+  const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
+  if (ctx.mode === 'multi') {
+    const sel = window._collPickerSelected || new Set();
+    const lower = name.toLowerCase();
+    const existing = [...sel].find(n => n.toLowerCase() === lower);
+    if (existing) { sel.delete(existing); } else { sel.add(name); }
+    window._collPickerSelected = sel;
+    _renderCollPickerChips();
+  } else {
+    document.getElementById('collectionNameInput').value = name;
+    updateCollectionPickerDisplay();
+    document.querySelectorAll('#collectionSuggestions .coll-suggestion').forEach(c => { c.style.background = ''; c.style.borderColor = ''; });
+    closeSheet('collectionPickerSheet');
+  }
+}
+
 function toggleCollPickerChip(i) {
   const name = window._collPickerNames[i];
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
-
   if (ctx.mode === 'multi') {
-    if (window._collPickerSelected.has(name)) {
-      window._collPickerSelected.delete(name);
-    } else {
-      window._collPickerSelected.add(name);
-    }
-    // Update all chip highlights
-    (window._collPickerNames || []).forEach((n, j) => {
-      const chip = document.getElementById('collPickerChip-' + j);
-      const active = window._collPickerSelected.has(n);
-      if (chip) { chip.style.background = active ? '#F5D78A' : ''; chip.style.borderColor = active ? 'var(--gold)' : ''; }
-    });
+    _toggleCollPickerByName(name);
   } else {
     // Single-select: tap selects only this chip; tap again deselects
     const input = document.getElementById('collectionNameInput');
@@ -5661,14 +5693,14 @@ function applyCollPickerNew() {
   if (!val) return;
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
   if (ctx.mode === 'multi') {
-    window._collPickerSelected.add(val);
-    document.getElementById('collPickerNewInput').value = '';
-    // Highlight chip if it now appears in the existing list
-    const idx = (window._collPickerNames || []).indexOf(val);
-    if (idx >= 0) {
-      const chip = document.getElementById('collPickerChip-' + idx);
-      if (chip) { chip.style.background = '#F5D78A'; chip.style.borderColor = 'var(--gold)'; }
+    // Case-insensitive duplicate check — preserve existing capitalization
+    const valLower = val.toLowerCase();
+    const alreadySelected = [...(window._collPickerSelected || new Set())].some(n => n.toLowerCase() === valLower);
+    if (!alreadySelected) {
+      window._collPickerSelected.add(val);
+      _renderCollPickerChips(); // show new name as a selected chip immediately
     }
+    document.getElementById('collPickerNewInput').value = '';
     // Stay open so user can review before Done
   } else {
     document.getElementById('collectionNameInput').value = val;
@@ -5681,9 +5713,8 @@ function applyCollPickerNew() {
 function _applyCollPickerDone() {
   const ctx = window._collPickerCtx || { mode: 'single', targetId: 'collectionNameInput' };
   if (ctx.mode === 'multi') {
-    const newVal = document.getElementById('collPickerNewInput').value.trim();
-    if (newVal) window._collPickerSelected.add(newVal);
-    const joined = [...window._collPickerSelected].join(', ');
+    // Read only from the confirmed selected Set — do not pick up uncommitted input text
+    const joined = [...(window._collPickerSelected || new Set())].join(', ');
     const targetEl = document.getElementById(ctx.targetId);
     if (targetEl) targetEl.value = joined;
     const label = document.getElementById('detailCollectionLabel');
@@ -5778,7 +5809,7 @@ Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki
 
     window._collSuggNames = names;
     sugDiv.innerHTML = names.map((n, i) =>
-      `<div class="coll-suggestion" onclick="applyCollSuggestion(this,window._collSuggNames[${i}])">${n}</div>`
+      `<div class="coll-suggestion" onclick="_toggleCollPickerByName(window._collSuggNames[${i}])">${n}</div>`
     ).join('');
   } catch(e) {
     sugDiv.innerHTML = '<span style="font-size:11px;color:var(--burgundy)">Could not generate suggestions</span>';
