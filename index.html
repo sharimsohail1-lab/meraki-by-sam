@@ -2617,7 +2617,15 @@ registerImageGenProvider('fashn', {
     const predId = runData.id;
     // Short polling correlation ID — different from the generation _rid above.
     const _pollRid = Math.random().toString(36).slice(2, 8);
-    console.log('[fashn gen]', { rid: _rid, phase: 'prediction-started', predId, pollRid: _pollRid });
+    console.log('[fashn gen]', { rid: _rid, phase: 'prediction-id', type: typeof predId, length: typeof predId === 'string' ? predId.length : null, prefix: typeof predId === 'string' ? predId.slice(0, 30) : String(predId).slice(0, 30), responseKeys: Object.keys(runData) });
+
+    // Hard guard: prediction ID must be a short opaque string, not a base64 blob or object.
+    if (typeof predId !== 'string' || predId.length < 5 || predId.length > 200) {
+      throw new Error('Invalid FASHN prediction ID: type=' + typeof predId + ' length=' + (predId?.length ?? 'n/a'));
+    }
+    if (predId.startsWith('data:') || predId.startsWith('{') || predId.startsWith('[') || predId.startsWith('https://')) {
+      throw new Error('Invalid FASHN prediction ID format: ' + predId.slice(0, 20));
+    }
 
     // Poll status — max 2 minutes, 3-second interval
     const maxWaitMs = 120000;
@@ -2626,7 +2634,12 @@ registerImageGenProvider('fashn', {
 
     while (Date.now() - started < maxWaitMs) {
       await new Promise(r => setTimeout(r, pollIntervalMs));
-      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId) + '&_rid=' + _pollRid);
+      const pollUrl = '/api/fashn?id=' + encodeURIComponent(predId) + '&_rid=' + _pollRid;
+      console.log('[fashn gen]', { rid: _rid, phase: 'poll-url', predIdLen: predId.length, pollUrlLen: pollUrl.length, predIdPrefix: predId.slice(0, 30) });
+      if (pollUrl.length > 1000) {
+        throw new Error('Refusing oversized FASHN polling URL: ' + pollUrl.length + ' characters');
+      }
+      const statusRes = await fetch(pollUrl);
 
       // Guard: check HTTP status before attempting JSON parse.
       // A non-JSON error body (Vercel 413 HTML, etc.) would throw a SyntaxError whose

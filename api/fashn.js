@@ -269,8 +269,17 @@ export default async function handler(req, res) {
         console.error('[fashn] run failed:', r.status, 'keys:', Object.keys(data), JSON.stringify(data));
         return res.status(r.status).json(data);
       }
-      console.log('[fashn] Prediction started:', data.id);
-      return res.status(200).json({ id: data.id });
+      const clientPayload = { id: data.id };
+      const responseBody = JSON.stringify(clientPayload);
+      console.log('[fashn create] client response', {
+        keys:          Object.keys(clientPayload),
+        responseBytes: Buffer.byteLength(responseBody, 'utf8'),
+        idType:        typeof data.id,
+        idLength:      typeof data.id === 'string' ? data.id.length : null,
+        idPrefix:      typeof data.id === 'string' ? data.id.slice(0, 40) : String(data.id).slice(0, 40),
+        upstreamKeys:  Object.keys(data).join(',')
+      });
+      return res.status(200).send(responseBody);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
