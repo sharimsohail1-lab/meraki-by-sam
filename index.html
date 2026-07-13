@@ -2510,15 +2510,24 @@ registerImageGenProvider('fashn', {
   id: 'fashn',
   label: 'FASHN Virtual Try-On',
   async generate(prompt, garmentB64, imageWeight) {
+    const _rid = _genRid || 'no-rid';
+    let _phase = 'generate-entry';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, productId: currentProduct?.id });
+
+    try {
+
+    _phase = 'read-model-photo';
     const modelPhoto = localStorage.getItem('fashnModelPhoto');
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, found: !!modelPhoto, len: modelPhoto?.length ?? 0, prefix: typeof modelPhoto === 'string' ? modelPhoto.slice(0, 32) : 'none' });
     if (!modelPhoto) {
       throw new Error('FASHN needs a model photo. Go to Settings → Provider Lab to upload one.');
     }
 
     // Always use a single clean structural image — not a composite, not a detail shot
+    _phase = 'select-garment';
     const selected = selectFashnGarmentImage(uploadedPhotos, currentProduct);
     const fashnGarmentRaw = selected?.src || garmentB64;
-    console.log('FASHN_INPUT_IMAGE:', selected ? `slot="${selected.slot}"` : 'fallback from caller');
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, slot: selected?.slot ?? 'fallback-from-caller', rawLen: fashnGarmentRaw?.length ?? 0, rawPrefix: typeof fashnGarmentRaw === 'string' ? fashnGarmentRaw.slice(0, 32) : 'none' });
 
     if (!fashnGarmentRaw) {
       throw new Error('No garment photo available for FASHN.');
@@ -2526,7 +2535,11 @@ registerImageGenProvider('fashn', {
 
     // Normalize to jpeg/png — FASHN rejects unsupported formats even if the browser
     // can display them. Never modifies the stored products.photo.
+    _phase = 'normalize-start';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase });
     const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw, currentProduct?.id);
+    _phase = 'normalize-done';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, normalizedLen: fashnGarment?.length ?? 0, normalizedPrefix: typeof fashnGarment === 'string' ? fashnGarment.slice(0, 32) : 'none' });
 
     // ── Redacted pre-flight diagnostic — never logs base64 content ──────────────
     const _diag = {
@@ -2552,14 +2565,17 @@ registerImageGenProvider('fashn', {
     };
     console.log('[FASHN preflight]', JSON.stringify(_diag, null, 2));
 
+    _phase = 'garment-guard';
     const _garmentAccepted = fashnGarment?.startsWith('data:image/jpeg;base64,')
       || fashnGarment?.startsWith('data:image/png;base64,')
       || fashnGarment?.startsWith('https://');
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, accepted: _garmentAccepted });
     if (!_garmentAccepted) {
       throw new Error('Garment photo is in an unsupported format after normalization (' + _diag.normalizedPrefix + '). Please replace the original photo and try again.');
     }
 
     // Build payload once so the logged version matches exactly what is sent.
+    _phase = 'build-payload';
     const _fashnPayload = {
       model_image: modelPhoto,
       garment_image: fashnGarment,
@@ -2567,22 +2583,27 @@ registerImageGenProvider('fashn', {
       garment_photo_type: 'flat-lay',
       mode: 'balanced'
     };
-    console.log('[FASHN payload redacted]', JSON.stringify({
-      model_image:       { type: typeof _fashnPayload.model_image,   prefix: _fashnPayload.model_image?.slice(0,32),   length: _fashnPayload.model_image?.length,   empty: !_fashnPayload.model_image },
-      garment_image:     { type: typeof _fashnPayload.garment_image, prefix: _fashnPayload.garment_image?.slice(0,32), length: _fashnPayload.garment_image?.length, empty: !_fashnPayload.garment_image },
-      category:          _fashnPayload.category,
-      garment_photo_type:_fashnPayload.garment_photo_type,
-      mode:              _fashnPayload.mode,
-    }));
+    console.log('[fashn gen]', { rid: _rid, phase: _phase,
+      model_image:   { len: _fashnPayload.model_image?.length,   prefix: _fashnPayload.model_image?.slice(0,32) },
+      garment_image: { len: _fashnPayload.garment_image?.length, prefix: _fashnPayload.garment_image?.slice(0,32) },
+      category: _fashnPayload.category,
+    });
 
-    console.group('[Meraki] FASHN virtual try-on');
-    console.log('PAID API CALL: starting FASHN prediction');
+    _phase = 'stringify-payload';
+    const _bodyStr = JSON.stringify(_fashnPayload);
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, bodyBytes: _bodyStr.length });
+
+    _phase = 'fetch-start';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, url: '/api/fashn', method: 'POST' });
 
     const runRes = await fetch('/api/fashn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(_fashnPayload)
+      body: _bodyStr
     });
+
+    _phase = 'fetch-response';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, status: runRes.status, ok: runRes.ok });
     const runData = await runRes.json();
     if (!runRes.ok || runData.error) {
       // Log the full FASHN error shape — every key — so we can see exactly which field is rejected.
@@ -2594,9 +2615,9 @@ registerImageGenProvider('fashn', {
     }
 
     const predId = runData.id;
-    // Correlation ID for matching frontend and server logs.
-    const _rid = Math.random().toString(36).slice(2, 8);
-    console.log('Prediction ID:', predId, '| rid:', _rid);
+    // Short polling correlation ID — different from the generation _rid above.
+    const _pollRid = Math.random().toString(36).slice(2, 8);
+    console.log('[fashn gen]', { rid: _rid, phase: 'prediction-started', predId, pollRid: _pollRid });
 
     // Poll status — max 2 minutes, 3-second interval
     const maxWaitMs = 120000;
@@ -2605,7 +2626,7 @@ registerImageGenProvider('fashn', {
 
     while (Date.now() - started < maxWaitMs) {
       await new Promise(r => setTimeout(r, pollIntervalMs));
-      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId) + '&_rid=' + _rid);
+      const statusRes = await fetch('/api/fashn?id=' + encodeURIComponent(predId) + '&_rid=' + _pollRid);
 
       // Guard: check HTTP status before attempting JSON parse.
       // A non-JSON error body (Vercel 413 HTML, etc.) would throw a SyntaxError whose
@@ -2613,41 +2634,39 @@ registerImageGenProvider('fashn', {
       // source of the misleading browser error message. Handle it explicitly here.
       if (!statusRes.ok) {
         const _pollStatus = statusRes.status;
-        console.error('[FASHN poll] non-200 response:', _pollStatus, '| rid:', _rid);
+        console.error('[fashn gen]', { rid: _rid, phase: 'poll-non-200', pollRid: _pollRid, status: _pollStatus });
         if (_pollStatus === 413) {
-          console.groupEnd();
           throw new Error('The generated image was too large to retrieve. Please try again.');
         }
-        console.groupEnd();
         throw new Error('FASHN status check failed (' + _pollStatus + '). Please try again.');
       }
 
       const statusData = await statusRes.json();
-      console.log('[FASHN poll] status:', statusData.status, '| rid:', _rid);
+      console.log('[fashn gen]', { rid: _rid, phase: 'poll-status', pollRid: _pollRid, status: statusData.status });
 
       if (statusData.status === 'completed') {
-        // API now returns output_url (single string) instead of the full upstream output field.
         const imageUrl = statusData.output_url;
         if (!imageUrl) {
-          console.groupEnd();
           throw new Error('FASHN completed but returned no image');
         }
-        console.log('[FASHN poll] output_url prefix:', imageUrl.slice(0, 80), '| length:', imageUrl.length);
-        console.groupEnd();
+        console.log('[fashn gen]', { rid: _rid, phase: 'poll-completed', outputUrlPrefix: imageUrl.slice(0, 80), outputUrlLen: imageUrl.length });
         return imageUrl;
       }
 
       if (statusData.status === 'failed') {
         const errMsg = statusData.error?.message || statusData.error || 'Unknown FASHN error';
-        console.error('[FASHN poll] failed:', errMsg);
-        console.groupEnd();
+        console.error('[fashn gen]', { rid: _rid, phase: 'poll-failed', err: errMsg });
         throw new Error('FASHN generation failed: ' + errMsg);
       }
       // status === 'processing' or 'starting' — keep polling
     }
 
-    console.groupEnd();
     throw new Error('FASHN timed out after 2 minutes');
+
+    } catch (e) {
+      console.error('[fashn gen] CATCH', { rid: _rid, phase: _phase, productId: currentProduct?.id, errorName: e?.name, errorMessage: e?.message, stack: e?.stack });
+      throw e;
+    }
   }
 });
 
@@ -3657,7 +3676,8 @@ async function generateModelPhoto(targetImgId = 'modelPhotoImg', outputDivId = '
 }
 
 async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
-  const _rid = Math.random().toString(36).slice(2, 10);
+  _genRid = Math.random().toString(36).slice(2, 10);
+  const _rid = _genRid;
   let _lastPhase = 'init';
   if (btnId === 'genModelBtn') _isGeneratingModelPhoto = true;
   setLoading(btnId, true, '');
@@ -11647,6 +11667,7 @@ function _renderActiveTemplatePreview() {
 let _fashnPickerTarget = null;  // { targetImgId, outputDivId, btnId }
 let _fashnPickerSelected = null;  // defId selected in picker
 let _fashnPickerConfirming = false;  // double-submit guard for Confirm button
+let _genRid = null;                  // correlation ID for current generation attempt (set by _runGenerateModelPhoto)
 let _fashnCategory = localStorage.getItem('fashnCategory') || 'tops';
 
 // ── Replace original photo ───────────────────────────────────────────────────
@@ -11819,9 +11840,12 @@ async function _confirmFashnPicker() {
   const _confirmBtn = document.getElementById('fashnPickerConfirmBtn');
   if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.innerHTML = '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Starting…'; }
 
+  console.log('[picker] confirmed', { selected: _fashnPickerSelected, productId: currentProduct?.id });
+
   let defIdToUse = _fashnPickerSelected;
 
   if (defIdToUse === 'cfs-auto') {
+    console.log('[picker] resolving cfs-auto');
     await loadModelTemplates();
     defIdToUse = getNextCFSTemplate();
     if (!defIdToUse) {
@@ -11830,9 +11854,11 @@ async function _confirmFashnPicker() {
       if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.innerHTML = 'Generate with Selected'; }
       return;
     }
+    console.log('[picker] cfs-auto resolved to', defIdToUse);
   }
 
   const row = modelTemplates.find(r => r.def_id === defIdToUse);
+  console.log('[picker] template row', { defId: defIdToUse, found: !!row, hasImage: !!row?.image, imageLen: row?.image?.length ?? 0, imagePrefix: typeof row?.image === 'string' ? row.image.slice(0, 32) : 'none' });
   if (!row?.image) {
     showToast('No image for selected template');
     _fashnPickerConfirming = false;
@@ -11846,6 +11872,7 @@ async function _confirmFashnPicker() {
   // Set fashnModelPhoto to the actual chosen template for this run
   localStorage.setItem('fashnModelPhoto', row.image);
   saveSetting('activeModelTemplateId', _fashnPickerSelected);
+  console.log('[picker] model photo stored, launching generation');
   closeSheet('fashnPickerSheet');
   const { targetImgId, outputDivId, btnId } = _fashnPickerTarget;
   try {
