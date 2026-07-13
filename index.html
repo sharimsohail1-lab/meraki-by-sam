@@ -2450,60 +2450,92 @@ function selectFashnGarmentImage(photos, product) {
 // ~16 MB; adding the decoded source image and JPEG export copy stays well under
 // the Safari on iPhone practical canvas limit (~50–60 MB before OS kill).
 // 3000 px would produce ~34 MB backing store alone, leaving little headroom.
-// FASHN does not require full-resolution input — 2048 px is sufficient detail.
-const _FASHN_MAX_PX = 2048;
-
-async function _normalizeFashnGarment(src, productId) {
-  // Extract MIME type from data URL prefix for diagnostics (never logs base64 body).
-  const _mimeMatch = typeof src === 'string' ? src.match(/^data:([^;]+);base64,/) : null;
-  const _srcMime = _mimeMatch ? _mimeMatch[1] : (src?.startsWith('https://') ? 'url' : 'unknown');
-  const _srcLen = src?.length ?? 0;
-  const _srcCategory = src?.startsWith('data:') ? 'data-url' : src?.startsWith('https://') ? 'https-url' : 'other';
-
-  console.log('[FASHN normalize] product:', productId || 'unknown', '| category:', _srcCategory, '| mime:', _srcMime, '| length:', _srcLen);
-
+// Compress a data-URL image to JPEG, targeting a max longest-side and max byte size.
+// Returns a jpeg data URL. Never modifies stored photos — in-memory only.
+async function _compressFashnImage(src, role, { maxPx, maxBytes }) {
   if (!src) return src;
-  if (src.startsWith('data:image/jpeg;base64,') || src.startsWith('data:image/png;base64,')) {
-    console.log('[FASHN normalize] no conversion needed — already jpeg/png');
-    return src;
-  }
+
+  // HTTPS CDN URLs pass through — we can't recompress remote images client-side.
   if (src.startsWith('https://')) {
-    console.log('[FASHN normalize] no conversion needed — https url');
+    console.log('[FASHN compress]', { role, note: 'https-url passthrough' });
     return src;
   }
 
-  // Non-jpeg/png data URL: draw on canvas to produce JPEG.
-  try {
-    const img = await loadImg(src);
-    let w = img.naturalWidth, h = img.naturalHeight;
-    console.log('[FASHN normalize] source dimensions:', w, 'x', h);
+  const _mimeMatch = src.match(/^data:([^;]+);base64,/);
+  const _srcMime = _mimeMatch ? _mimeMatch[1] : 'unknown';
+  const _srcBytes = Math.round(new TextEncoder().encode(src).length);
 
-    // Downscale preserving aspect ratio to stay under Safari canvas memory limit.
-    // Never upscale images smaller than the cap.
-    if (Math.max(w, h) > _FASHN_MAX_PX) {
-      const scale = _FASHN_MAX_PX / Math.max(w, h);
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-      console.log('[FASHN normalize] downscaled to:', w, 'x', h);
-    }
+  const img = await loadImg(src);
+  const origW = img.naturalWidth;
+  const origH = img.naturalHeight;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-    const jpeg = canvas.toDataURL('image/jpeg', 0.90);
-
-    // Verify output prefix before returning — guards against blank canvas on Safari OOM.
-    if (!jpeg.startsWith('data:image/jpeg;base64,')) {
-      throw new Error('Canvas export did not produce a valid JPEG (prefix: ' + jpeg.slice(0, 40) + ')');
-    }
-
-    console.log('[FASHN normalize] converted', _srcMime, '→ image/jpeg | output length:', jpeg.length);
-    return jpeg;
-  } catch (e) {
-    console.warn('[FASHN normalize] conversion failed:', e.message, '| mime:', _srcMime, '| length:', _srcLen);
-    throw new Error('This garment photo could not be prepared for AI generation. Please replace the original photo and try again.');
+  // Determine starting canvas dimensions: cap longest side, never upscale.
+  let w = origW, h = origH;
+  if (Math.max(w, h) > maxPx) {
+    const scale = maxPx / Math.max(w, h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
   }
+
+  const canvas = document.createElement('canvas');
+
+  // Progressive compression: lower quality then shrink if still over budget.
+  const qualitySteps = [0.78, 0.65, 0.50, 0.38];
+  const scalingSteps = [1.0, 0.85, 0.70, 0.55];
+
+  let result = null;
+  let usedQuality = qualitySteps[0];
+  let usedW = w, usedH = h;
+
+  outer:
+  for (const scaleF of scalingSteps) {
+    const cw = Math.round(w * scaleF);
+    const ch = Math.round(h * scaleF);
+    canvas.width  = cw;
+    canvas.height = ch;
+    canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+
+    for (const q of qualitySteps) {
+      const jpeg = canvas.toDataURL('image/jpeg', q);
+      if (!jpeg.startsWith('data:image/jpeg;base64,')) {
+        throw new Error('Canvas export did not produce a valid JPEG');
+      }
+      const bytes = Math.round(new TextEncoder().encode(jpeg).length);
+      if (bytes <= maxBytes) {
+        result     = jpeg;
+        usedQuality = q;
+        usedW = cw;
+        usedH = ch;
+        break outer;
+      }
+    }
+  }
+
+  // If every step still exceeds budget, use the smallest result produced.
+  if (!result) {
+    const cw = Math.round(w * scalingSteps[scalingSteps.length - 1]);
+    const ch = Math.round(h * scalingSteps[scalingSteps.length - 1]);
+    canvas.width  = cw;
+    canvas.height = ch;
+    canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+    result = canvas.toDataURL('image/jpeg', qualitySteps[qualitySteps.length - 1]);
+    usedQuality = qualitySteps[qualitySteps.length - 1];
+    usedW = cw;
+    usedH = ch;
+  }
+
+  const _finalBytes = Math.round(new TextEncoder().encode(result).length);
+  console.log('[FASHN compress]', {
+    role,
+    originalDimensions: origW + 'x' + origH,
+    originalBytes: _srcBytes,
+    finalDimensions: usedW + 'x' + usedH,
+    finalBytes: _finalBytes,
+    quality: usedQuality,
+    srcMime: _srcMime
+  });
+
+  return result;
 }
 
 registerImageGenProvider('fashn', {
@@ -2533,13 +2565,18 @@ registerImageGenProvider('fashn', {
       throw new Error('No garment photo available for FASHN.');
     }
 
-    // Normalize to jpeg/png — FASHN rejects unsupported formats even if the browser
-    // can display them. Never modifies the stored products.photo.
-    _phase = 'normalize-start';
+    // Compress both images to JPEG under size budgets before sending.
+    // In-memory only — never touches products.photo or products.model_photo.
+    _phase = 'compress-garment';
     console.log('[fashn gen]', { rid: _rid, phase: _phase });
-    const fashnGarment = await _normalizeFashnGarment(fashnGarmentRaw, currentProduct?.id);
-    _phase = 'normalize-done';
-    console.log('[fashn gen]', { rid: _rid, phase: _phase, normalizedLen: fashnGarment?.length ?? 0, normalizedPrefix: typeof fashnGarment === 'string' ? fashnGarment.slice(0, 32) : 'none' });
+    const fashnGarment = await _compressFashnImage(fashnGarmentRaw, 'garment', { maxPx: 1600, maxBytes: 1_500_000 });
+
+    _phase = 'compress-model';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase });
+    const fashnModel = await _compressFashnImage(modelPhoto, 'model', { maxPx: 1400, maxBytes: 1_000_000 });
+
+    _phase = 'compress-done';
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, garmentLen: fashnGarment?.length ?? 0, modelLen: fashnModel?.length ?? 0 });
 
     // ── Redacted pre-flight diagnostic — never logs base64 content ──────────────
     const _diag = {
@@ -2551,13 +2588,10 @@ registerImageGenProvider('fashn', {
       garmentRawPrefix:         typeof fashnGarmentRaw === 'string' ? fashnGarmentRaw.slice(0, 32) : String(fashnGarmentRaw),
       garmentRawLength:         fashnGarmentRaw?.length ?? 0,
       garmentRawHasWhitespace:  typeof fashnGarmentRaw === 'string' && /[\s]/.test(fashnGarmentRaw.slice(32)),
-      normalizedPrefix:         typeof fashnGarment === 'string' ? fashnGarment.slice(0, 32) : String(fashnGarment),
-      normalizedLength:         fashnGarment?.length ?? 0,
-      normalizedHasWhitespace:  typeof fashnGarment === 'string' && /[\s]/.test(fashnGarment.slice(32)),
-      normalizedSameAsRaw:      fashnGarment === fashnGarmentRaw,
-      modelPhotoPrefix:         typeof modelPhoto === 'string' ? modelPhoto.slice(0, 32) : String(modelPhoto),
-      modelPhotoLength:         modelPhoto?.length ?? 0,
-      modelPhotoHasWhitespace:  typeof modelPhoto === 'string' && /[\s]/.test(modelPhoto.slice(32)),
+      compressedGarmentPrefix:  typeof fashnGarment === 'string' ? fashnGarment.slice(0, 32) : String(fashnGarment),
+      compressedGarmentLength:  fashnGarment?.length ?? 0,
+      compressedModelPrefix:    typeof fashnModel === 'string' ? fashnModel.slice(0, 32) : String(fashnModel),
+      compressedModelLength:    fashnModel?.length ?? 0,
       fashnCategory:            _fashnCategory || 'tops',
       garmentType:              garmentType,
       endpoint:                 '/api/fashn',
@@ -2571,13 +2605,13 @@ registerImageGenProvider('fashn', {
       || fashnGarment?.startsWith('https://');
     console.log('[fashn gen]', { rid: _rid, phase: _phase, accepted: _garmentAccepted });
     if (!_garmentAccepted) {
-      throw new Error('Garment photo is in an unsupported format after normalization (' + _diag.normalizedPrefix + '). Please replace the original photo and try again.');
+      throw new Error('Garment photo is in an unsupported format after compression. Please replace the original photo and try again.');
     }
 
     // Build payload once so the logged version matches exactly what is sent.
     _phase = 'build-payload';
     const _fashnPayload = {
-      model_image: modelPhoto,
+      model_image: fashnModel,
       garment_image: fashnGarment,
       category: _fashnCategory || 'tops',
       garment_photo_type: 'flat-lay',
@@ -2591,7 +2625,11 @@ registerImageGenProvider('fashn', {
 
     _phase = 'stringify-payload';
     const _bodyStr = JSON.stringify(_fashnPayload);
-    console.log('[fashn gen]', { rid: _rid, phase: _phase, bodyBytes: _bodyStr.length });
+    const _requestBytes = new TextEncoder().encode(_bodyStr).length;
+    console.log('[fashn gen]', { rid: _rid, phase: _phase, requestBytes: _requestBytes });
+    if (_requestBytes > 3_500_000) {
+      throw new Error('FASHN request is still too large after compression: ' + Math.round(_requestBytes / 1024) + ' KB. Please use a smaller photo.');
+    }
 
     _phase = 'fetch-start';
     console.log('[fashn gen]', { rid: _rid, phase: _phase, url: '/api/fashn', method: 'POST' });
