@@ -111,23 +111,33 @@ export default async function handler(req, res) {
       // Read body into memory but never forward the raw object.
       const data = await r.json();
 
+      // Measure the full upstream body size — proves whether the payload itself is large.
+      const upstreamBodyBytes = Buffer.byteLength(JSON.stringify(data), 'utf8');
+
       // Log shape only — never log output values.
-      const _outputSample = Array.isArray(data.output) ? data.output[0] : data.output;
-      const _outputType   = (() => {
+      const _outputSample   = Array.isArray(data.output) ? data.output[0] : data.output;
+      const _outputArrayLen = Array.isArray(data.output) ? data.output.length : 'not-array';
+      const _outputType     = (() => {
         if (!_outputSample)                                      return 'absent';
         if (typeof _outputSample !== 'string')                   return typeof _outputSample;
-        if (_outputSample.startsWith('data:'))                   return 'base64-data-url';
+        if (_outputSample.startsWith('data:image/'))             return 'base64-data-url';
+        if (_outputSample.startsWith('data:'))                   return 'base64-other';
         if (_outputSample.startsWith('https://'))                return 'https-url';
         return 'unknown-string';
       })();
       console.log('[fashn poll] upstream body', {
-        build:        FASHN_BUILD,
-        rid:          _rid || 'none',
-        jobStatus:    data.status,
-        outputType:   _outputType,
-        outputLength: _outputSample?.length ?? 'n/a',
-        outputPrefix: typeof _outputSample === 'string' ? _outputSample.slice(0, 60) : 'n/a',
-        topLevelKeys: Object.keys(data).join(',')
+        build:            FASHN_BUILD,
+        rid:              _rid || 'none',
+        jobStatus:        data.status,
+        upstreamBodyBytes,
+        outputType:       _outputType,
+        outputArrayLen:   _outputArrayLen,
+        outputItemType:   typeof _outputSample,
+        outputItemLength: _outputSample?.length ?? 'n/a',
+        outputPrefix:     typeof _outputSample === 'string' ? _outputSample.slice(0, 60) : 'n/a',
+        isHttpsUrl:       typeof _outputSample === 'string' && _outputSample.startsWith('https://'),
+        isBase64DataUrl:  typeof _outputSample === 'string' && _outputSample.startsWith('data:image/'),
+        topLevelKeys:     Object.keys(data).join(',')
       });
 
       // ── upstream non-2xx ─────────────────────────────────────────────────────
