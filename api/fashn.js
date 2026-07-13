@@ -229,10 +229,15 @@ export default async function handler(req, res) {
           garment_photo_type: garment_photo_type || 'flat-lay',
           mode:               mode || 'balanced',
           segmentation_free:  true,
-          num_samples:        1
+          num_samples:        1,
+          return_base64:      false   // explicit — omitting defaults to true in FASHN API
         }
       };
 
+      console.log('[fashn create] output mode', {
+        return_base64:  payload.inputs.return_base64,
+        output_format:  payload.inputs.output_format ?? 'not set'
+      });
       console.log('[fashn] upstream payload fields:', {
         model_name: payload.model_name,
         inputs: {
