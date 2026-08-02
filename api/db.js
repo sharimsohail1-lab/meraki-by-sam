@@ -27,6 +27,10 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   exhibitions: new Set([
     'id','name','location','date','status','notes','created_at','updated_at'
   ]),
+  model_templates: new Set([
+    'id','def_id','name','category','group_name','subtype','pose_notes','prompt',
+    'image','source_provider','is_default','status','created_at'
+  ]),
 };
 
 // Backwards-compat alias — used by products boot

@@ -2442,6 +2442,165 @@ function selectFashnGarmentImage(photos, product) {
   return null;
 }
 
+// ─── IMAGE STORAGE ABSTRACTION ───────────────────────────────────────────────
+// resolveImageSource: normalise any image value produced by legacy or future code.
+// Returns a typed descriptor; callers never need to pattern-match on the raw value.
+function resolveImageSource(value) {
+  if (!value) return null;
+
+  if (typeof value === 'string' && value.startsWith('data:image/')) {
+    return { type: 'legacy-data-url', src: value };
+  }
+
+  if (typeof value === 'string' && value.startsWith('https://')) {
+    return { type: 'remote-url', src: value };
+  }
+
+  if (value && typeof value === 'object' && value.storage_provider && value.storage_key) {
+    return {
+      type:     'storage-object',
+      provider: value.storage_provider,
+      key:      value.storage_key,
+      src:      value.public_url || null
+    };
+  }
+
+  return null;
+}
+
+// resolveImageSrc: shorthand that returns a usable src string (for img.src / CSS url()).
+function resolveImageSrc(value) {
+  const r = resolveImageSource(value);
+  return r ? r.src : null;
+}
+
+// ─── PERSISTENT IMAGE PREPARATION ───────────────────────────────────────────
+// preparePersistentImage: prepare an image for storage (DB or object storage).
+// Decodes any data URL / File / Blob, resizes to fit within maxPx on the longest
+// side, and exports as WebP where supported, falling back to JPEG.
+// Uses progressive quality + scale reduction until under maxBytes.
+// Never writes to storage — callers decide where the result goes.
+// Returns: { blob, dataUrl, width, height, mimeType, bytes }
+async function preparePersistentImage(src, {
+  maxPx    = 1800,
+  maxBytes = 1_500_000,
+  quality  = 0.84
+} = {}) {
+  if (!src) throw new Error('preparePersistentImage: no source provided');
+
+  // Resolve input to a data URL the browser can load.
+  let dataUrlSrc;
+  if (src instanceof File || src instanceof Blob) {
+    dataUrlSrc = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.onerror = rej;
+      r.readAsDataURL(src);
+    });
+  } else if (typeof src === 'string' && src.startsWith('https://')) {
+    // Proxy CDN URLs through the ideogram endpoint for CORS access.
+    dataUrlSrc = '/api/ideogram?url=' + encodeURIComponent(src);
+  } else if (typeof src === 'string') {
+    dataUrlSrc = src;
+  } else {
+    throw new Error('preparePersistentImage: unsupported input type');
+  }
+
+  const img = await loadImg(dataUrlSrc);
+  const origW = img.naturalWidth;
+  const origH = img.naturalHeight;
+
+  // Determine canvas start dimensions — cap longest side, never upscale.
+  const baseScale = Math.min(1, maxPx / Math.max(origW, origH));
+  const baseW = Math.round(origW * baseScale);
+  const baseH = Math.round(origH * baseScale);
+
+  const supportsWebP = (() => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 1; c.height = 1;
+      return c.toDataURL('image/webp', 0.5).startsWith('data:image/webp');
+    } catch { return false; }
+  })();
+  const preferredMime = supportsWebP ? 'image/webp' : 'image/jpeg';
+
+  const qualitySteps = [quality, Math.max(quality - 0.10, 0.55), 0.55, 0.42];
+  const scaleSteps   = [1.0, 0.85, 0.70, 0.55];
+
+  const canvas = document.createElement('canvas');
+  let best = null;
+
+  outer:
+  for (const sf of scaleSteps) {
+    const cw = Math.max(1, Math.round(baseW * sf));
+    const ch = Math.max(1, Math.round(baseH * sf));
+    canvas.width  = cw;
+    canvas.height = ch;
+    canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+    for (const q of qualitySteps) {
+      const dataUrl = canvas.toDataURL(preferredMime, q);
+      if (!dataUrl.startsWith('data:')) throw new Error('Canvas export failed');
+      const bytes = Math.round(new TextEncoder().encode(dataUrl).length * 0.75); // base64 → binary estimate
+      if (bytes <= maxBytes || (sf === scaleSteps.at(-1) && q === qualitySteps.at(-1))) {
+        best = { dataUrl, width: cw, height: ch, quality: q, bytes };
+        break outer;
+      }
+    }
+  }
+
+  const mimeType = best.dataUrl.match(/^data:([^;]+);/)?.[1] ?? preferredMime;
+  const blobBytes = await fetch(best.dataUrl).then(r => r.blob()).then(b => b.size);
+
+  console.log('[preparePersistentImage]', {
+    originalDimensions: origW + 'x' + origH,
+    finalDimensions:    best.width + 'x' + best.height,
+    mimeType,
+    quality:            best.quality,
+    bytes:              blobBytes
+  });
+
+  const blob = await fetch(best.dataUrl).then(r => r.blob());
+  return { blob, dataUrl: best.dataUrl, width: best.width, height: best.height, mimeType, bytes: blobBytes };
+}
+
+// ─── SUPABASE STORAGE ABSTRACTION ────────────────────────────────────────────
+// Minimal provider interface. Only the 'supabase' provider exists today;
+// adding 'r2' in the future requires only a new case in each function.
+// All storage calls go through /api/storage (to be created when Supabase Storage
+// is ready) — the frontend never imports the Supabase JS SDK directly.
+//
+// NOTE: Supabase Storage upload is NOT yet wired up — these stubs define the
+// interface so product/gallery code can be written to it now without changes later.
+
+async function uploadImage({ provider = 'supabase', fileOrBlob, key, contentType, cacheControl = '31536000' }) {
+  if (provider === 'supabase') {
+    // Future: POST /api/storage { action:'upload', key, contentType, cacheControl, data:<base64> }
+    throw new Error('uploadImage: Supabase Storage not yet configured — store base64 via /api/db for now');
+  }
+  throw new Error('uploadImage: unknown provider ' + provider);
+}
+
+async function deleteImage({ provider = 'supabase', key }) {
+  if (provider === 'supabase') {
+    throw new Error('deleteImage: Supabase Storage not yet configured');
+  }
+  throw new Error('deleteImage: unknown provider ' + provider);
+}
+
+function getImageUrl({ provider = 'supabase', key, publicUrl }) {
+  if (publicUrl) return publicUrl;
+  // Once Supabase Storage bucket "meraki-images" is set up this becomes:
+  // return `${SUPABASE_URL}/storage/v1/object/public/meraki-images/${key}`;
+  return null;
+}
+
+// Normalise any image value from DB or localStorage to a usable src string.
+// Handles: legacy base64 data URLs, HTTPS CDN URLs, future storage objects.
+function getDisplaySrc(value) {
+  return resolveImageSrc(value);
+}
+
+// ─── FASHN COMPRESSION HELPER ────────────────────────────────────────────────
 // Normalize any displayable image to a JPEG data URL for FASHN compatibility.
 // FASHN accepts only image/jpeg, image/png, and https:// URLs. This converts
 // any other decodable data URL in-memory — never touches the stored photo.
@@ -3101,14 +3260,24 @@ function triggerSlotUpload(slotId) {
 function handleSlotFile(slotId, input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const _slotDef = (PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other']).find(s => s.id === slotId);
-    uploadedPhotos[slotId] = { file, dataUrl: e.target.result, label: _slotDef?.label || slotId };
-    renderPhotoSlots();
-    renderExtraSlots();
-  };
-  reader.readAsDataURL(file);
+  const _slotDef = (PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other']).find(s => s.id === slotId);
+  // Compress immediately so nothing above 1.5 MB can reach products.photo.
+  preparePersistentImage(file, { maxPx: 1800, maxBytes: 1_500_000, quality: 0.84 })
+    .then(({ dataUrl }) => {
+      uploadedPhotos[slotId] = { file, dataUrl, label: _slotDef?.label || slotId };
+      renderPhotoSlots();
+      renderExtraSlots();
+    })
+    .catch(() => {
+      // Fall back to raw FileReader if canvas prep fails (e.g. unsupported format on old device).
+      const reader = new FileReader();
+      reader.onload = e => {
+        uploadedPhotos[slotId] = { file, dataUrl: e.target.result, label: _slotDef?.label || slotId };
+        renderPhotoSlots();
+        renderExtraSlots();
+      };
+      reader.readAsDataURL(file);
+    });
 }
 
 function addExtraSlot(label) {
@@ -4348,10 +4517,13 @@ async function applyWatermark(imageUrl, _rid) {
     console.log('[watermark]', { rid: _rid, phase: watermarkPhase + '-done', naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
 
     watermarkPhase = 'draw-generated-image';
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, canvasW: canvas.width, canvasH: canvas.height });
+    // Cap to 1800 px on the longest side — avoids storing a full 2000+ px AI image in Supabase.
+    const _WM_MAX_PX = 1800;
+    const _wmScale = Math.min(1, _WM_MAX_PX / Math.max(img.width, img.height));
+    canvas.width  = Math.round(img.width  * _wmScale);
+    canvas.height = Math.round(img.height * _wmScale);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, srcDim: img.width + 'x' + img.height, canvasDim: canvas.width + 'x' + canvas.height });
 
     watermarkPhase = 'load-logo';
     console.log('[watermark]', { rid: _rid, phase: watermarkPhase, logoSrc: MERAKI_LOGO_SRC });
@@ -4368,9 +4540,11 @@ async function applyWatermark(imageUrl, _rid) {
     console.log('[watermark]', { rid: _rid, phase: watermarkPhase });
 
     watermarkPhase = 'export-canvas';
-    const result = canvas.toDataURL('image/jpeg', 0.92);
+    // Quality 0.86 — good garment detail, typically under 1.5 MB at 1800 px.
+    const result = canvas.toDataURL('image/jpeg', 0.86);
     const _resultPrefix = typeof result === 'string' ? result.slice(0, 40) : String(result);
-    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, resultPrefix: _resultPrefix, resultLen: result?.length });
+    const _resultApproxBytes = Math.round(new TextEncoder().encode(result).length * 0.75);
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, resultPrefix: _resultPrefix, resultLen: result?.length, approxBytes: _resultApproxBytes });
     return result;
   } catch (e) {
     console.warn('[watermark] FAILED — falling back to original URL', {
@@ -6703,11 +6877,23 @@ function openProductDetail(id, opts) {
     console.error('[ProductDetail]', e);
     return;
   }
-  // If this product hasn't been fully loaded yet, fetch the full row in the background
+  // If this product hasn't been fully loaded yet, fetch the full row in the background.
+  // We use an explicit column list so we never pull unexpected future columns and avoid
+  // returning detail_photos (potentially large JSONB) until the detail photo section is opened.
+  const _DETAIL_CORE_COLS = [
+    'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
+    'description_en','description_ur','price','cost','status','reserved_for','customer_id',
+    'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
+    'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
+    'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
+    'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb'
+  ].join(',');
+  // detail_photos is intentionally excluded — fetched on demand by _ensureDetailPhotosLoaded().
+
   if (!p._hydrated && _hydratingProductId !== id) {
     _hydratingProductId = id;
     _showDetailHydrating(true);
-    db('select', 'products', { filter: { id } })
+    db('select', 'products', { filter: { id }, columns: _DETAIL_CORE_COLS })
       .then(rows => {
         const full = rows?.[0];
         if (!full) return;
@@ -6742,7 +6928,25 @@ function _openProductDetailUI(p) {
   if (!_pvPref) _pvPref = p.model_photo ? 'ai-only' : null;
   _applyPhotoView(_pvPref, p);
 
-  // Detail photo insets — always render with add button
+  // Detail photo insets — always render with add button.
+  // detail_photos may be absent from the initial hydration (it's fetched on-demand
+  // to keep the core product-detail response small). If absent, we kick off a
+  // background fetch and re-render when it arrives.
+  if (p.detail_photos === undefined && p._hydrated && !p._detailPhotosLoaded) {
+    p._detailPhotosLoaded = true; // prevent duplicate fetches on re-render
+    db('select', 'products', { filter: { id: p.id }, columns: 'id,detail_photos' })
+      .then(rows => {
+        const dp = rows?.[0]?.detail_photos ?? null;
+        p.detail_photos = dp;
+        const idx = inventory.findIndex(x => x.id === p.id);
+        if (idx >= 0) inventory[idx].detail_photos = dp;
+        if (currentProduct?.id === p.id) {
+          currentProduct = { ...currentProduct, detail_photos: dp };
+          _openProductDetailUI(currentProduct);
+        }
+      })
+      .catch(() => {}); // silently ignore — insets stay empty; user can reload
+  }
   const _dpRaw = p.detail_photos;
   let _dpParsed = [];
   try {
@@ -11183,13 +11387,23 @@ function _applyProviderUI() {
 function saveFashnModelPhoto(input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    localStorage.setItem('fashnModelPhoto', e.target.result);
-    showToast('Model photo saved');
-    _renderFashnModelPhotoPreview();
-  };
-  reader.readAsDataURL(file);
+  // Compress before localStorage — unbounded phone images can exhaust quota.
+  preparePersistentImage(file, { maxPx: 1400, maxBytes: 1_000_000, quality: 0.82 })
+    .then(({ dataUrl }) => {
+      localStorage.setItem('fashnModelPhoto', dataUrl);
+      showToast('Model photo saved');
+      _renderFashnModelPhotoPreview();
+    })
+    .catch(() => {
+      // Fallback: raw FileReader if canvas prep fails on an old device.
+      const reader = new FileReader();
+      reader.onload = e => {
+        localStorage.setItem('fashnModelPhoto', e.target.result);
+        showToast('Model photo saved');
+        _renderFashnModelPhotoPreview();
+      };
+      reader.readAsDataURL(file);
+    });
 }
 
 function _renderFashnModelPhotoPreview() {
@@ -11228,8 +11442,9 @@ async function loadAppSettings() {
       activeModelTemplateId = active.value;
       localStorage.setItem('activeModelTemplateId', active.value);
       if (active.value !== 'cfs-auto' && !localStorage.getItem('fashnModelPhoto')) {
-        const tmplRows = await db('select', 'model_templates', {}) || [];
-        const row = tmplRows.find(r => r.def_id === active.value);
+        // Fetch only the image for the active template — not the full template list.
+        const tmplRows = await db('select', 'model_templates', { filter: { def_id: active.value }, columns: 'id,def_id,image' }) || [];
+        const row = tmplRows[0];
         if (row?.image) localStorage.setItem('fashnModelPhoto', row.image);
       }
     }
@@ -11415,9 +11630,15 @@ async function openModelTemplateSheet() {
   await loadModelTemplates();
 }
 
+// Template list columns — includes image for now because thumbnail display and
+// "has been generated" checks throughout the template UI rely on row.image.
+// Future improvement: add a model_templates.thumbnail column (tiny 56×72 JPEG) so
+// the list query can exclude the full image and load it only on template selection.
+const MODEL_TEMPLATE_LIST_COLS = 'id,def_id,name,category,group_name,subtype,pose_notes,source_provider,is_default,status,image,created_at';
+
 async function loadModelTemplates() {
   try {
-    const rows = await db('select', 'model_templates', {}) || [];
+    const rows = await db('select', 'model_templates', { columns: MODEL_TEMPLATE_LIST_COLS }) || [];
     modelTemplates = rows;
   } catch(e) {
     console.warn('[templates] DB not ready:', e.message);
@@ -11626,35 +11847,44 @@ async function generateAllMissingCFS() {
   await loadModelTemplates();
 }
 
-function uploadModelTemplate(defId, input) {
+async function uploadModelTemplate(defId, input) {
   const file = input.files[0];
   if (!file) return;
   const def = MODEL_TEMPLATE_DEFS.find(d => d.defId === defId);
   if (!def) return;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    const dataUrl = e.target.result;
-    const existing = modelTemplates.find(r => r.def_id === defId);
-    if (existing) await db('delete', 'model_templates', { id: existing.id });
-    await db('insert', 'model_templates', { data: {
-      def_id: defId,
-      name: def.name,
-      group_name: def.group || 'other',
-      subtype: def.subtype || null,
-      pose_notes: def.poseNotes,
-      prompt: def.prompt,
-      image: dataUrl,
-      source_provider: 'upload',
-      status: 'approved',
-      is_default: false
-    }});
-    showToast('Uploaded and approved');
-    await loadModelTemplates();
-  };
-  reader.readAsDataURL(file);
+  // Compress before DB write — avoid storing unbounded phone images.
+  let dataUrl;
+  try {
+    const prepared = await preparePersistentImage(file, { maxPx: 1400, maxBytes: 1_000_000, quality: 0.82 });
+    dataUrl = prepared.dataUrl;
+  } catch {
+    // Fallback to raw FileReader if canvas prep fails.
+    dataUrl = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = e => res(e.target.result);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+  }
+  const existing = modelTemplates.find(r => r.def_id === defId);
+  if (existing) await db('delete', 'model_templates', { id: existing.id });
+  await db('insert', 'model_templates', { data: {
+    def_id: defId,
+    name: def.name,
+    group_name: def.group || 'other',
+    subtype: def.subtype || null,
+    pose_notes: def.poseNotes,
+    prompt: def.prompt,
+    image: dataUrl,
+    source_provider: 'upload',
+    status: 'approved',
+    is_default: false
+  }});
+  showToast('Uploaded and approved');
+  await loadModelTemplates();
 }
 
-function _selectModelTemplateById(defId, fromPicker) {
+async function _selectModelTemplateById(defId, fromPicker) {
   if (defId === 'cfs-auto') {
     activeModelTemplateId = 'cfs-auto';
     localStorage.setItem('activeModelTemplateId', 'cfs-auto');
@@ -11665,10 +11895,28 @@ function _selectModelTemplateById(defId, fromPicker) {
     return;
   }
   const row = modelTemplates.find(r => r.def_id === defId);
-  if (!row?.image) { showToast('No image for this template'); return; }
+  if (!row) { showToast('Template not found'); return; }
+
+  // Lazy-load the image for just this template — the list query omits image to keep payload small.
+  let imageDataUrl = row.image || null;
+  if (!imageDataUrl) {
+    try {
+      const rows = await db('select', 'model_templates', { filter: { id: row.id }, columns: 'id,image' });
+      imageDataUrl = rows?.[0]?.image || null;
+    } catch(e) {
+      console.warn('[templates] image load failed:', e.message);
+    }
+  }
+  if (!imageDataUrl) { showToast('No image for this template'); return; }
+
+  // Cache back onto the in-memory row so subsequent uses don't re-fetch.
+  row.image = imageDataUrl;
+
   activeModelTemplateId = defId;
   localStorage.setItem('activeModelTemplateId', defId);
-  localStorage.setItem('fashnModelPhoto', row.image);
+  // Only store the activeModelTemplateId in localStorage — load the image from DB each session.
+  // The full image is stored in localStorage only if the template has no DB ID (e.g., manual upload scenario).
+  localStorage.setItem('fashnModelPhoto', imageDataUrl);
   saveSetting('activeModelTemplateId', defId);
   showToast('Active template set');
   if (fromPicker) { closeSheet('fashnPickerSheet'); } else { renderModelTemplates(); }
