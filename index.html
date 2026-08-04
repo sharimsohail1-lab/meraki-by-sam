@@ -1064,8 +1064,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </button>
       <div id="mktShareOutput" style="display:none;margin-top:12px"></div>
     </div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 4px" id="detailDesc"></div>
-    <div style="text-align:right;margin-bottom:10px">
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin:14px 0 4px;white-space:pre-wrap" id="detailDesc"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+      <button onclick="openBioEditor('detail','manual')" style="background:var(--sand-light);border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:5px 13px;font-weight:600"><i class="ti ti-edit" style="font-size:11px"></i> Edit Description</button>
       <button onclick="openAmendAnalysisSheet('detail')" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0;text-decoration:underline"><i class="ti ti-wand" style="font-size:11px"></i> Amend AI analysis</button>
     </div>
     <div class="field-label" id="t-updateStatus">Update Status</div>
@@ -1924,7 +1925,7 @@ const PRODUCT_SUMMARY_COLS = [
   'category','garment_type','season','colors','occasion','buyer_type',
   'neckline','has_placket','has_dupatta','motifs',
   'size_inventory','collection_name','collection_names',
-  'description_en','description_ur',
+  'description_en','description_ur','description_source',
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at'
@@ -3657,6 +3658,7 @@ async function _doSaveProduct() {
       occasion: currentAnalysis.occasion,
       category: currentAnalysis.category,
       description_en: currentAnalysis.description,
+      description_source: 'ai',
       share_blurb: currentAnalysis.shareBlurb || null,
       ideogram_prompt: currentAnalysis.ideogramPrompt,
       neckline: currentAnalysis.neckline || null,
@@ -6882,7 +6884,7 @@ function openProductDetail(id, opts) {
   // returning detail_photos (potentially large JSONB) until the detail photo section is opened.
   const _DETAIL_CORE_COLS = [
     'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
-    'description_en','description_ur','price','cost','status','reserved_for','customer_id',
+    'description_en','description_ur','description_source','price','cost','status','reserved_for','customer_id',
     'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
@@ -6972,7 +6974,7 @@ function _openProductDetailUI(p) {
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
   document.getElementById('detailMeta').innerHTML = [p.garment_type, p.season, p.category, p.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
-  document.getElementById('detailDesc').textContent = p.description_en || '';
+  _renderDetailDesc(p);
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   const _detailCollArr = getProductCollections(p);
@@ -8877,7 +8879,7 @@ async function _mktBuildAndShowCard(p, opts) {
       ${!canWebShare ? '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Download the image and copy a caption below to share.</div>' : ''}
       <div style="text-align:center;margin-top:14px;margin-bottom:2px">
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Not happy with the wording?</div>
-        <button class="bio-edit-cta" onclick="openSheet('bioEditSheet')"><i class="ti ti-edit"></i> Don't like the bio?</button>
+        <button class="bio-edit-cta" onclick="openBioEditor('marketing')"><i class="ti ti-edit"></i> Don't like the bio?</button>
       </div>`;
   } catch(e) {
     console.error('[ProductShare] share card render failed', e);
@@ -9153,6 +9155,12 @@ function _amendFormatFieldDisplay(field, val) {
 function _showAmendReview(revised, ctx, before, currentName) {
   window._amendSelectedName = null;
   window._amendNameReplaceOn = false;
+  window._amendDescReplaceOn = false;
+
+  // A description Sam wrote by hand is protected: the amend result may still suggest
+  // a rewrite, but applying it requires an explicit opt-in below.
+  const descProtected = ctx === 'detail' && _isManualDescription(currentProduct);
+  window._amendDescProtected = descProtected;
 
   const changed = [];
   for (const field of _AMEND_FIELDS) {
@@ -9164,13 +9172,18 @@ function _showAmendReview(revised, ctx, before, currentName) {
     if (prevStr !== revStr) changed.push({ field, label: _AMEND_FIELD_LABELS[field], before: prevVal, after: revVal });
   }
 
+  const descChanged = changed.some(c => c.field === 'description_en');
+  const visibleChanged = changed.filter(c => !(descProtected && c.field === 'description_en'));
+
   let html = '';
 
   if (changed.length === 0) {
     html += '<div style="font-size:13px;color:var(--muted);padding:8px 0;line-height:1.5">No fields were changed. Try a more specific correction.</div>';
   } else {
-    html += `<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">${changed.length} field${changed.length > 1 ? 's' : ''} revised</div>`;
-    for (const c of changed) {
+    if (visibleChanged.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">${visibleChanged.length} field${visibleChanged.length > 1 ? 's' : ''} revised</div>`;
+    }
+    for (const c of visibleChanged) {
       const isPrompt = c.field === 'ideogram_prompt';
       const prevDisp = _amendFormatFieldDisplay(c.field, c.before);
       const nextDisp = isPrompt ? _amendFormatFieldDisplay(c.field, c.after).slice(0, 160) + '…' : _amendFormatFieldDisplay(c.field, c.after);
@@ -9181,6 +9194,23 @@ function _showAmendReview(revised, ctx, before, currentName) {
         ${isPrompt ? '<div style="font-size:10px;color:var(--burgundy);margin-top:5px"><i class="ti ti-info-circle"></i> Future AI model generations will use the revised garment description.</div>' : ''}
       </div>`;
     }
+  }
+
+  // Protected description: opt-in card, unchecked by default.
+  if (descProtected && descChanged) {
+    const suggested = _amendFormatFieldDisplay('description_en', revised.description_en);
+    html += `<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:#fdf3f3;border-radius:8px;margin-bottom:6px">
+        <input type="checkbox" id="amendReplaceDescToggle" onchange="_toggleAmendDescReplace(this.checked)" style="width:16px;height:16px;accent-color:var(--burgundy);flex-shrink:0;cursor:pointer;margin-top:1px">
+        <label for="amendReplaceDescToggle" style="font-size:12px;color:var(--ink);cursor:pointer;line-height:1.4">Also replace my description<div style="font-size:11px;color:var(--muted);margin-top:2px">You wrote this description yourself. It is kept unless you tick this.</div></label>
+      </div>
+      <div id="amendDescPreview" style="display:none;padding:10px 12px;background:var(--sand-light);border-radius:8px">
+        <div style="font-size:11px;font-weight:600;color:var(--burgundy);margin-bottom:4px">Suggested description</div>
+        <div style="font-size:12px;color:var(--ink);line-height:1.4">${suggested}</div>
+      </div>
+    </div>`;
+  } else if (descProtected) {
+    html += `<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--sand-light);border-radius:8px;margin-bottom:10px;line-height:1.4"><i class="ti ti-lock"></i> Your hand-written description will be kept.</div>`;
   }
 
   // Name suggestions
@@ -9225,6 +9255,12 @@ function _selectAmendName(idx, name) {
   if (chip) { chip.style.background = 'var(--burgundy)'; chip.style.borderColor = 'var(--burgundy)'; chip.style.color = '#fff'; }
   const note = document.getElementById('amendSelectedNameNote') || document.getElementById('amendDetailNameNote');
   if (note) note.textContent = `Selected: "${name}"`;
+}
+
+function _toggleAmendDescReplace(checked) {
+  window._amendDescReplaceOn = checked;
+  const preview = document.getElementById('amendDescPreview');
+  if (preview) preview.style.display = checked ? 'block' : 'none';
 }
 
 function _toggleAmendNameReplace(checked) {
@@ -9276,7 +9312,6 @@ async function _applyAmendChanges(btn) {
       if (!currentProduct) throw new Error('No product open');
       const p = inventory.find(x => x.id === currentProduct.id) || currentProduct;
       const update = {
-        description_en: r.description_en,
         colors: r.colors,
         occasion: r.occasion,
         category: r.category,
@@ -9288,6 +9323,15 @@ async function _applyAmendChanges(btn) {
         catalog_blurb: r.catalog_blurb,
         share_blurb: r.share_blurb,
       };
+      // A hand-written description survives an unrelated amend unless Sam ticked
+      // the opt-in on the review sheet. Legacy/AI descriptions update as before.
+      if (!window._amendDescProtected) {
+        update.description_en = r.description_en;
+        update.description_source = 'ai';
+      } else if (window._amendDescReplaceOn) {
+        update.description_en = r.description_en;
+        update.description_source = 'ai';
+      }
       // Include name only when explicitly opted in and a suggestion selected
       if (window._amendNameReplaceOn && window._amendSelectedName) {
         update.name = window._amendSelectedName;
@@ -9297,8 +9341,7 @@ async function _applyAmendChanges(btn) {
       inventory[idx] = { ...inventory[idx], ...update };
       currentProduct = inventory[idx];
       // Refresh Product Detail DOM
-      const _dd = document.getElementById('detailDesc');
-      if (_dd) _dd.textContent = currentProduct.description_en || '';
+      _renderDetailDesc(currentProduct);
       const _dm = document.getElementById('detailMeta');
       if (_dm) _dm.innerHTML = [currentProduct.garment_type, currentProduct.season, currentProduct.category, currentProduct.colors].filter(Boolean).map(m => `<span class="meta-chip">${m}</span>`).join('');
       if (update.name) {
@@ -9322,23 +9365,106 @@ function _cancelAmendReview() {
 }
 
 // ─── BIO EDIT FLOW ─────────────────────────────────────────────────────────────
-// "Don't like the bio?" sheet → Regenerate or Edit Manually
+// Entered either from Product Detail ("Edit Description") or from the Marketing &
+// Share workspace ("Don't like the bio?"). The origin decides what we refresh and
+// what stays open after a successful save.
+
+let _bioEditContext = 'marketing';   // 'detail' | 'marketing'
+
+// Treats legacy rows (description_source === null) as AI-written.
+function _isManualDescription(p) {
+  return p?.description_source === 'manual';
+}
+
+// Paints #detailDesc, with a subtle empty state when there is no description.
+function _renderDetailDesc(p) {
+  const el = document.getElementById('detailDesc');
+  if (!el) return;
+  const text = (p?.description_en || '').trim();
+  el.textContent = text || 'No description added';
+  el.style.fontStyle = text ? '' : 'italic';
+  el.style.opacity   = text ? '' : '0.65';
+}
+
+// Single entry point for the bio sheet.
+// mode 'manual' opens straight into the textarea; omit it for the option menu.
+function openBioEditor(context, mode) {
+  _bioEditContext = context || 'marketing';
+  openSheet('bioEditSheet');
+  if (mode === 'manual') _openBioManualEdit();
+  else _renderBioEditMenu();
+}
+
+// Restores the sheet's default option menu (regenerate / edit manually / cancel).
+function _renderBioEditMenu() {
+  const content = document.getElementById('bioEditContent');
+  if (!content) return;
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-primary" onclick="_openBioRegenerate()" style="width:100%"><i class="ti ti-sparkles"></i> Regenerate Bio</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="bioStylePills">
+        <div style="font-size:11px;color:var(--muted);width:100%;margin-bottom:-2px">Quick style:</div>
+        <button onclick="_openBioRegenerate('elegant')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More elegant</button>
+        <button onclick="_openBioRegenerate('simple')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More simple</button>
+        <button onclick="_openBioRegenerate('detailed')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More detailed</button>
+        <button onclick="_openBioRegenerate('luxury')" style="font-size:11px;background:var(--sand-light);border:none;border-radius:16px;padding:5px 12px;cursor:pointer;color:var(--ink)">More luxury</button>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px">
+        <button class="btn" onclick="_openBioManualEdit()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-edit"></i> Edit Manually</button>
+      </div>
+      <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
+    </div>`;
+}
+
+// Applies a saved description to every place it is held, then refreshes the origin view.
+// Never touches _hydrated — the row stays as loaded as it was.
+function _commitDescription(productId, update) {
+  const idx = inventory.findIndex(x => x.id === productId);
+  if (idx >= 0) {
+    inventory[idx] = { ...inventory[idx], ...update };
+    if (currentProduct?.id === productId) currentProduct = inventory[idx];
+  } else if (currentProduct?.id === productId) {
+    currentProduct = { ...currentProduct, ...update };
+  }
+  if (currentProduct?.id === productId) _renderDetailDesc(currentProduct);
+  _invalidateMktPreview();
+}
 
 function _bioSheetError(msg, retryStyle) {
   const content = document.getElementById('bioEditContent');
   if (!content) return;
+  // Retry passes confirmed=true — the overwrite warning was already accepted.
   content.innerHTML = `
     <div style="color:var(--burgundy);font-size:13px;padding:12px 0;line-height:1.5">${msg}</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-      <button class="btn btn-primary" onclick="_openBioRegenerate(${retryStyle ? `'${retryStyle}'` : ''})" style="width:100%"><i class="ti ti-refresh"></i> Try Again</button>
+      <button class="btn btn-primary" onclick="_openBioRegenerate(${retryStyle ? `'${retryStyle}'` : 'undefined'},true)" style="width:100%"><i class="ti ti-refresh"></i> Try Again</button>
       <button class="btn" onclick="_openBioManualEdit()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-edit"></i> Edit Manually</button>
       <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
     </div>`;
 }
 
-async function _openBioRegenerate(style) {
+// Shown before AI regeneration replaces a description Sam wrote by hand.
+function _confirmBioRegenOverwrite(style) {
+  const content = document.getElementById('bioEditContent');
+  if (!content) return;
+  const styleArg = style ? `'${style}'` : 'undefined';
+  content.innerHTML = `
+    <div style="background:#fdf3f3;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:var(--burgundy);margin-bottom:6px"><i class="ti ti-alert-triangle"></i> This will replace your own description</div>
+      <div style="font-size:12px;color:var(--ink);line-height:1.5">You wrote this description yourself. Regenerating will replace it with AI-written text. This cannot be undone.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary" onclick="_openBioRegenerate(${styleArg},true)" style="width:100%"><i class="ti ti-sparkles"></i> Replace with AI bio</button>
+      <button class="btn" onclick="_openBioManualEdit()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-edit"></i> Keep mine — edit it instead</button>
+      <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="width:100%">Cancel</button>
+    </div>`;
+}
+
+async function _openBioRegenerate(style, confirmed) {
   const p = currentProduct;
   if (!p) { closeSheet('bioEditSheet'); return; }
+  // A hand-written description is never replaced without an explicit confirmation.
+  if (!confirmed && _isManualDescription(p)) { _confirmBioRegenOverwrite(style); return; }
   const content = document.getElementById('bioEditContent');
   if (content) content.innerHTML = '<div style="text-align:center;padding:20px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:10px;font-size:13px;color:var(--muted)">Regenerating bio…</div><div style="margin-top:6px;font-size:11px;color:var(--muted)">Usually takes 5–15 seconds</div></div>';
 
@@ -9411,7 +9537,8 @@ Return ONLY valid JSON (no markdown):
     const update = {
       description_en: parsed.description_en || null,
       catalog_blurb: parsed.catalog_blurb || null,
-      share_blurb: parsed.share_blurb || null
+      share_blurb: parsed.share_blurb || null,
+      description_source: 'ai'
     };
 
     try {
@@ -9420,11 +9547,10 @@ Return ONLY valid JSON (no markdown):
       console.warn('[BioRegen] DB save failed, updating state only:', saveErr.message);
     }
 
-    const idx = inventory.findIndex(x => x.id === p.id);
-    if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
+    _commitDescription(p.id, update);
 
     closeSheet('bioEditSheet');
-    openMktShareWorkspace();
+    if (_bioEditContext === 'marketing') openMktShareWorkspace();
     showToast('Bio updated ✓');
   } catch (e) {
     console.error('[BioRegen] failed:', e.message);
@@ -9438,31 +9564,73 @@ Return ONLY valid JSON (no markdown):
 function _openBioManualEdit() {
   const p = currentProduct;
   if (!p) return;
-  const currentBio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
+  // Only the canonical description — never silently absorb catalog_blurb or share_blurb,
+  // which are separate marketing fields with their own editors.
+  const currentBio = p.description_en || '';
   const content = document.getElementById('bioEditContent');
   if (!content) return;
   content.innerHTML = `
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Edit the full garment bio. This will be shown on the share card and in the catalog.</div>
-    <textarea id="bioManualText" style="width:100%;height:140px;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;line-height:1.6;resize:vertical;font-family:Inter,sans-serif">${currentBio}</textarea>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Write the garment description in your own words. It appears in the catalog and on the share card.</div>
+    <textarea id="bioManualText" dir="auto" oninput="_updateBioCharCount()" style="width:100%;height:150px;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;line-height:1.6;resize:vertical;font-family:Inter,sans-serif"></textarea>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+      <div style="font-size:11px;color:var(--muted)">Leave empty to clear the description.</div>
+      <div id="bioCharCount" style="font-size:11px;color:var(--muted)"></div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn btn-primary" onclick="_saveBioManual()" style="flex:1"><i class="ti ti-device-floppy"></i> Save Bio</button>
+      <button class="btn btn-primary" id="bioManualSaveBtn" onclick="_saveBioManual(this)" style="flex:1"><i class="ti ti-device-floppy"></i> Save Description</button>
       <button class="btn btn-secondary" onclick="closeSheet('bioEditSheet')" style="flex:1">Cancel</button>
     </div>`;
+  // Set via .value, not HTML interpolation — keeps quotes, angle brackets and
+  // apostrophes intact and avoids any markup being parsed.
+  const ta = document.getElementById('bioManualText');
+  if (ta) { ta.value = currentBio; ta.focus(); }
+  _updateBioCharCount();
 }
 
-function _saveBioManual() {
+function _updateBioCharCount() {
+  const ta = document.getElementById('bioManualText');
+  const el = document.getElementById('bioCharCount');
+  if (!ta || !el) return;
+  const n = ta.value.trim().length;
+  el.textContent = n === 1 ? '1 character' : n + ' characters';
+}
+
+async function _saveBioManual(btn) {
   const p = currentProduct;
   if (!p) return;
-  const text = (document.getElementById('bioManualText')?.value || '').trim();
-  if (!text) { showToast('Bio cannot be empty'); return; }
-  const update = { description_en: text };
-  db('update', 'products', { id: p.id, data: update }).then(() => {
-    const idx = inventory.findIndex(x => x.id === p.id);
-    if (idx >= 0) { Object.assign(inventory[idx], update); currentProduct = inventory[idx]; }
-    closeSheet('bioEditSheet');
-    openMktShareWorkspace();
-    showToast('Bio saved ✓');
-  }).catch(e => showToast('Save failed: ' + e.message));
+  if (btn?.disabled) return;                      // guards against rapid double taps
+  const ta = document.getElementById('bioManualText');
+  if (!ta) return;
+  // Trim the edges, keep interior line breaks exactly as typed.
+  const text = ta.value.trim();
+
+  const _origHTML = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…';
+  }
+
+  // Empty string rather than null — /api/db strips nulls, so null would be a no-op.
+  const update = { description_en: text, description_source: 'manual' };
+
+  try {
+    await db('update', 'products', { id: p.id, data: update });
+    _commitDescription(p.id, update);
+    if (btn) btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓';
+    setTimeout(() => {
+      closeSheet('bioEditSheet');
+      if (_bioEditContext === 'marketing') openMktShareWorkspace();
+      showToast(text ? 'Description saved ✓' : 'Description cleared ✓');
+    }, 450);
+  } catch (e) {
+    // Leave the sheet open with the typed text intact; change nothing in memory.
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save';
+      setTimeout(() => { btn.innerHTML = _origHTML; }, 2200);
+    }
+    showToast('Save failed: ' + e.message);
+  }
 }
 
 // ─── CHANGE NAME FLOW ──────────────────────────────────────────────────────────
