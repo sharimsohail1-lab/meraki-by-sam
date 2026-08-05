@@ -97,10 +97,12 @@ export default async function handler(req, res) {
         console.warn('[db] Schema cache error on insert, retrying without optional cols:', error.message);
         const fallback = stripOptionalCols(payload);
         const { data: r2, error: e2 } = await supabase.from(table).insert(fallback).select();
-        if (e2) { console.error('[db] insert fallback error:', e2.message); return res.status(400).json({ error: e2.message }); }
+        if (e2) { console.error('[db] insert fallback error:', e2.message); return res.status(400).json({ error: e2.message, code: e2.code || null }); }
         return res.status(200).json({ data: r2, warning: 'Saved without ' + OPTIONAL_COLS.join('/') + ' — run /api/migrate to fix schema cache' });
       }
-      if (error) { console.error('[db] insert error:', error.message); return res.status(400).json({ error: error.message }); }
+      // code is forwarded so the client can distinguish a unique-violation (23505)
+      // from any other failure without parsing the message text.
+      if (error) { console.error('[db] insert error:', error.message, '| code:', error.code); return res.status(400).json({ error: error.message, code: error.code || null }); }
       return res.status(200).json({ data: result });
     }
 

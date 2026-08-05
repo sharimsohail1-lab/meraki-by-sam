@@ -2194,7 +2194,13 @@ async function db(action, table, { id, data, filter, columns } = {}) {
     body: JSON.stringify(body)
   });
   const json = await r.json();
-  if (json.error) throw new Error(json.error);
+  if (json.error) {
+    const err = new Error(json.error);
+    // Postgres SQLSTATE, when the server was able to provide one (e.g. '23505'
+    // for a unique violation). Callers must branch on this, never on message text.
+    if (json.code) err.code = json.code;
+    throw err;
+  }
   return json.data;
 }
 
@@ -3319,12 +3325,74 @@ function goToStep(n) {
   if (n === 3 && !window._sizeStates['intakeSizeGrid']) initIntakeSizeSteppers();
 }
 
-function generateSKU() {
+// ─── SKU ALLOCATION ───────────────────────────────────────────────────────────
+// A SKU is `<prefix>-<3-digit sequence>`, where the prefix encodes garment type,
+// season and year — e.g. MRK-FS-EID26-007. The sequence is therefore namespaced
+// per prefix, and must be derived from the highest existing sequence FOR THAT
+// PREFIX. It was previously derived from inventory.length, a global count across
+// every prefix that also shrinks when a product is deleted, so it regularly
+// produced a number already in use and the insert failed on the unique index.
+
+function _skuPrefix() {
   const typeCode = { 'full-suit': 'FS', 'kameez': 'KZ', 'lehenga': 'LH', 'dupatta': 'DP', 'other': 'OT' }[garmentType] || 'OT';
   const year = new Date().getFullYear().toString().slice(-2);
   const seasonCode = intakeSeason ? ({ 'eid': 'EID', 'wedding': 'WED', 'summer': 'SUM', 'winter': 'WIN', 'casual': 'CAS', 'formal': 'FOR' }[intakeSeason] || null) : null;
-  const seq = String(inventory.length + 1).padStart(3, '0');
-  return seasonCode ? `MRK-${typeCode}-${seasonCode}${year}-${seq}` : `MRK-${typeCode}-${year}-${seq}`;
+  return seasonCode ? `MRK-${typeCode}-${seasonCode}${year}` : `MRK-${typeCode}-${year}`;
+}
+
+// Highest sequence in use for `prefix`, given a list of SKU strings.
+// Malformed suffixes are ignored for the maximum but returned so they can be logged.
+function _highestSkuSeq(skus, prefix) {
+  let max = 0;
+  const malformed = [];
+  for (const raw of skus) {
+    if (typeof raw !== 'string') continue;
+    const sku = raw.trim();
+    if (!sku.startsWith(prefix + '-')) continue;
+    const suffix = sku.slice(prefix.length + 1);
+    if (/^\d+$/.test(suffix)) {
+      const n = parseInt(suffix, 10);
+      if (n > max) max = n;
+    } else {
+      malformed.push(sku);
+    }
+  }
+  return { max, malformed };
+}
+
+// Allocates the next free SKU for the current garment type / season.
+// Reads SKUs straight from the database rather than the in-memory inventory, so
+// archived, sold and filtered-out products all count. Only the sku column is
+// selected, so the payload stays small.
+// `taken` lets a retry exclude a value the database just rejected.
+async function allocateNextSku(taken) {
+  const prefix = _skuPrefix();
+  let skus = [];
+  try {
+    const rows = await db('select', 'products', { columns: 'sku' });
+    skus = (rows || []).map(r => r.sku);
+  } catch (e) {
+    // Fall back to the loaded inventory. Still prefix-scoped and max-based, so
+    // far safer than a count; the unique index remains the final guard.
+    console.warn('[SKU] DB lookup failed, falling back to loaded inventory:', e.message);
+    skus = inventory.map(p => p.sku);
+  }
+  if (taken && taken.length) skus = skus.concat(taken);
+
+  const { max, malformed } = _highestSkuSeq(skus, prefix);
+  if (malformed.length) console.warn('[SKU] ignoring malformed SKUs for', prefix, ':', malformed.join(', '));
+
+  const next = prefix + '-' + String(max + 1).padStart(3, '0');
+  console.log('[SKU] allocated', next, '| prefix:', prefix, '| highest existing:', max, '| scanned:', skus.length);
+  return next;
+}
+
+// Preview only — shown during analysis before the product is saved. The
+// authoritative SKU is allocated again immediately before insert.
+function generateSKU() {
+  const prefix = _skuPrefix();
+  const { max } = _highestSkuSeq(inventory.map(p => p.sku), prefix);
+  return prefix + '-' + String(max + 1).padStart(3, '0');
 }
 
 async function analyzePhoto() {
@@ -3571,15 +3639,20 @@ Return only the JSON object. No explanation, no markdown fences.` }
   }
 }
 
+let _intakeSaveInProgress = false;
+
 async function saveProduct() {
   if (!currentAnalysis) return;
+  if (_intakeSaveInProgress) return;   // ignore repeat taps while a save is running
   _doSaveProduct();
 }
 
 async function _doSaveProduct() {
   const btn = document.getElementById('saveProductBtn');
+  if (_intakeSaveInProgress) return;
+  _intakeSaveInProgress = true;
   btn.disabled = true;
-  btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+  btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Saving…';
 
   // Structural photo for products.photo — front preferred
   const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
@@ -3648,9 +3721,23 @@ async function _doSaveProduct() {
   const name = document.getElementById('itemNameInput').value || currentAnalysis.name;
   const collection = document.getElementById('collectionNameInput').value || null;
 
+  // Allocate the SKU from the database now, not at analysis time — the preview
+  // may be minutes old and another save (or a deletion) may have moved the
+  // sequence on. Retries below re-allocate against the values just rejected.
+  const _rejectedSkus = [];
+  let _sku;
   try {
-    const rows = await db('insert', 'products', { data: {
-      sku: currentAnalysis.sku,
+    _sku = await allocateNextSku(_rejectedSkus);
+  } catch (e) {
+    _intakeSaveInProgress = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
+    btn.disabled = false;
+    showToast('Could not allocate an SKU: ' + e.message);
+    return;
+  }
+
+  const _buildRow = sku => ({
+      sku,
       name,
       garment_type: garmentType,
       season: intakeSeason,
@@ -3674,19 +3761,62 @@ async function _doSaveProduct() {
       size_inventory: size_inventory,
       collection_name: collection,
       collection_names: collection ? JSON.stringify([collection]) : JSON.stringify([]),
-    }});
-    console.log('[Meraki] Product saved — photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
-    const saved = rows[0];
-    inventory.unshift(saved);
-    buildSmartRecommendations();
-    showToast('Saved to inventory ✓');
-    resetIntake();
-    openProductDetail(saved.id);
-  } catch(e) {
+  });
+
+  // Unique violation on products.sku is the only error worth retrying: it means
+  // someone else took the number between our lookup and our insert. Every other
+  // failure is surfaced immediately with the form left intact.
+  const _isDuplicateSku = err =>
+    err?.code === '23505' ||
+    /duplicate key value.*products_sku|products_sku_key/i.test(err?.message || '');
+
+  const MAX_SKU_RETRIES = 2;
+  let rows = null, lastErr = null;
+
+  for (let attempt = 0; attempt <= MAX_SKU_RETRIES; attempt++) {
+    try {
+      rows = await db('insert', 'products', { data: _buildRow(_sku) });
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (!_isDuplicateSku(e) || attempt === MAX_SKU_RETRIES) break;
+      console.warn('[SKU]', _sku, 'was taken — reallocating (attempt', attempt + 1, 'of', MAX_SKU_RETRIES + ')');
+      _rejectedSkus.push(_sku);
+      try {
+        _sku = await allocateNextSku(_rejectedSkus);
+      } catch (allocErr) { lastErr = allocErr; break; }
+    }
+  }
+
+  if (!rows) {
+    // Leave every entered value and uploaded photo untouched so Sam can retry.
+    _intakeSaveInProgress = false;
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
     btn.disabled = false;
-    showToast('Save failed: ' + e.message);
+    showToast(_isDuplicateSku(lastErr)
+      ? 'Could not find a free SKU — please try again.'
+      : 'Save failed: ' + (lastErr?.message || 'unknown error'));
+    return;
   }
+
+  console.log('[Meraki] Product saved as', _sku, '— photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
+
+  // Tell Sam if the SKU moved on from the one shown during analysis.
+  const _previewSku = currentAnalysis.sku;
+  if (_previewSku && _previewSku !== _sku) {
+    const el = document.getElementById('generatedSKU');
+    if (el) el.textContent = _sku;
+    showToast('SKU updated to ' + _sku);
+  }
+  currentAnalysis.sku = _sku;
+
+  const saved = rows[0];
+  inventory.unshift(saved);
+  buildSmartRecommendations();
+  if (!_previewSku || _previewSku === _sku) showToast('Saved to inventory ✓');
+  _intakeSaveInProgress = false;
+  resetIntake();
+  openProductDetail(saved.id);
 }
 
 function renderNextSteps(product) {
