@@ -504,7 +504,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 <!-- ADMIN PIN GATE — shown before any private data loads -->
 <div id="adminPinGate" style="position:fixed;inset:0;background:#faf8f5;z-index:9999;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px">
-  <div style="font-size:28px;font-weight:700;color:#6B1B2B;margin-bottom:6px;font-family:'Playfair Display',serif">Meraki by Sam</div>
+  <div style="font-size:28px;font-weight:700;color:#6B1B2B;margin-bottom:6px;font-family:'Playfair Display',serif">Meraki by Saima</div>
   <div style="font-size:14px;color:#888;margin-bottom:36px">Admin access</div>
   <div style="width:100%;max-width:320px">
     <div style="font-size:13px;font-weight:600;color:#555;margin-bottom:8px;text-align:center">Enter PIN</div>
@@ -528,7 +528,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button class="home-btn" id="headerHomeBtn" onclick="goHomeFromAdd()"><i class="ti ti-chevron-left"></i><span id="t-homeBtn">Home</span></button>
       <button class="lang-btn" id="langToggle" onclick="toggleLang()">اردو</button>
     </div>
-    <img class="header-logo" id="headerLogo" src="/assets/meraki-logo.png" alt="Meraki by Sam">
+    <!-- src is re-set from MERAKI_LOGO_SRC on boot; keep the ?v= here in sync with it -->
+    <img class="header-logo" id="headerLogo" src="/assets/meraki-logo.png?v=2" alt="Meraki by Saima">
     <button class="settings-btn" onclick="openModal('settingsModal')"><i class="ti ti-settings"></i></button>
   </div>
 
@@ -538,7 +539,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <!-- HOME -->
     <div id="screen-home" class="screen active">
       <div class="greeting-card">
-        <div class="greeting-text" id="greetingText">Good morning, Sam ✨</div>
+        <div class="greeting-text" id="greetingText">Good morning, Saima ✨</div>
         <div class="greeting-date" id="greetingDate"></div>
       </div>
       <div id="smartRecommendations" style="margin-bottom:14px"></div>
@@ -916,7 +917,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <!-- Catalog Cover -->
     <div class="coll-catalog-cover" id="collCatalogCover">
-      <img id="collCoverLogo" class="coll-cover-logo" src="" alt="Meraki by Sam">
+      <img id="collCoverLogo" class="coll-cover-logo" src="" alt="Meraki by Saima">
       <div class="coll-cover-title" id="collDetailName"></div>
       <div class="coll-cover-sub" id="collCoverSub"></div>
     </div>
@@ -2101,12 +2102,15 @@ let voiceRecognition = null;
 let voiceTranscriptText = '';
 let activeImageGenProvider = localStorage.getItem('imageGenProvider') || 'fashn';
 let productTryOnProvider = 'fashn'; // local to Add/Detail — separate from Settings provider
-const MERAKI_LOGO_SRC = '/assets/meraki-logo.png';
+// ?v= is a cache-buster. Bump it whenever assets/meraki-logo.png is replaced so
+// browsers and any CDN edge pick up the new artwork immediately rather than
+// serving a stale copy. v2 = "Meraki by Saima" branding.
+const MERAKI_LOGO_SRC = '/assets/meraki-logo.png?v=2';
 
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
 const T = {
   en: {
-    greeting: 'Good', greetingName: 'Sam ✨',
+    greeting: 'Good', greetingName: 'Saima ✨',
     statAvail: 'Available', statRes: 'Reserved', statSold: 'Sold',
     todayActions: '📋 Today\'s Actions',
     qaAdd: 'Add New Piece', qaWhatsapp: 'WhatsApp Catalog',
@@ -2143,7 +2147,7 @@ const T = {
     homeBtn: 'Home',
   },
   ur: {
-    greeting: 'السلام', greetingName: 'سام ✨',
+    greeting: 'السلام', greetingName: 'سائمہ ✨',
     statAvail: 'دستیاب', statRes: 'محفوظ', statSold: 'فروخت',
     todayActions: '📋 آج کے کام',
     qaAdd: 'نیا کپڑا شامل کریں', qaWhatsapp: 'واٹس ایپ فہرست',
@@ -3534,7 +3538,7 @@ async function analyzePhoto() {
     const response = await callClaude(
       [{ role: 'user', content: [
         ...photoContent,
-        { type: 'text', text: `You are analyzing a Pakistani garment for Meraki by Sam, a clothing boutique.
+        { type: 'text', text: `You are analyzing a Pakistani garment for Meraki by Saima, a clothing boutique.
 Garment type: ${garmentType}${intakeSeason ? `, Occasion: ${intakeSeason}` : '. No occasion selected — keep all descriptions event-agnostic. Do NOT assume Eid, wedding, or any event.'}.
 
 PHOTO HIERARCHY — follow strictly:
@@ -6130,7 +6134,7 @@ async function generateCollectionPackage() {
   ).join('\n');
 
   const collName = name || 'Mixed Collection';
-  const prompt = `You are creating a marketing package for a Pakistani clothing boutique called "Meraki by Sam."
+  const prompt = `You are creating a marketing package for a Pakistani clothing boutique called "Meraki by Saima."
 
 This is for the entire "${collName}" collection, which contains these pieces:
 ${listing}
@@ -6410,14 +6414,14 @@ async function suggestCollectionNames() {
 
   try {
     const resp = await callClaude([{ role: 'user', content:
-      `Suggest 4 creative collection names for a Pakistani clothing boutique called "Meraki by Sam" based in New Jersey, selling to the Pakistani-American diaspora.
+      `Suggest 4 creative collection names for a Pakistani clothing boutique called "Meraki by Saima" based in New Jersey, selling to the Pakistani-American diaspora.
 
 Current context:
 - Month: ${now.toLocaleString('en-US', {month:'long'})} ${year}
 - Pakistani cultural calendar: ${pkContext}
 - Garment occasion/season setting: ${season}
 - Garment type: ${type}
-${seed ? `- Sam has already typed this seed/idea: "${seed}" — build on this direction, refine or complete it into 4 polished options. Keep her words or energy if possible.` : ''}
+${seed ? `- Saima has already typed this seed/idea: "${seed}" — build on this direction, refine or complete it into 4 polished options. Keep her words or energy if possible.` : ''}
 
 Rules:
 - Short (2-4 words), evocative, memorable
@@ -6425,7 +6429,7 @@ Rules:
 - Reference the actual cultural moment — Eid, shadi season, mehndi, Ramadan, etc. as appropriate
 - No generic names like "New Arrivals" or "Spring Collection"
 - Can reference colors, moods, times of day, Pakistani poetic imagery
-${seed ? '- At least 2 of the 4 suggestions should feel like completions or elevations of the seed text Sam typed' : ''}
+${seed ? '- At least 2 of the 4 suggestions should feel like completions or elevations of the seed text Saima typed' : ''}
 
 Respond with ONLY a JSON array of 4 strings. Example: ["Eid Glow 2026", "Raat Ki Raunak", "Dusk & Dew", "Pearl Season"]`
     }], '', 200);
@@ -6465,13 +6469,13 @@ async function suggestItemNames() {
 
   try {
     const resp = await callClaude([{ role: 'user', content:
-      `Suggest 5 short product names for a Pakistani clothing boutique called "Meraki by Sam" based in New Jersey.
+      `Suggest 5 short product names for a Pakistani clothing boutique called "Meraki by Saima" based in New Jersey.
 
 Garment details:
 - Type: ${type}
 ${season ? `- Occasion/season: ${season}` : '- No occasion selected — keep name event-agnostic'}
 ${collection ? `- Collection it belongs to: "${collection}"` : ''}
-${current ? `- Sam's current name idea: "${current}" — refine or offer alternatives in this direction` : ''}
+${current ? `- Saima's current name idea: "${current}" — refine or offer alternatives in this direction` : ''}
 ${analysis ? `- Garment analysis: ${analysis.slice(0, 400)}` : ''}
 
 Rules:
@@ -6480,7 +6484,7 @@ Rules:
 - Can blend English + Urdu naturally (not forced)
 - Should feel distinct from each other — range of moods/styles
 ${collection ? `- Names should feel like they belong in the "${collection}" collection` : ''}
-${current ? `- At least 2 should feel like refinements of Sam's current idea` : ''}
+${current ? `- At least 2 should feel like refinements of Saima's current idea` : ''}
 - Do NOT use "New", "Collection", "Suit", "Dress" as standalone words unless they add real meaning
 
 Respond with ONLY a JSON array of 5 strings. Example: ["Gulabi Shaam", "Rose Dusk", "Khilta Gulab", "Evening Bloom", "Rosé Twilight"]`
@@ -8017,7 +8021,7 @@ function _catalogWhatsAppMessage() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   const collName = catalogCollection || 'Collection';
   const lines = selected.map(p => `• ${p.name || 'Untitled'} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
-  return `*${collName}*\nMeraki by Sam\n\n${lines}\n\nDM to inquire about any piece ✨`;
+  return `*${collName}*\nMeraki by Saima\n\n${lines}\n\nDM to inquire about any piece ✨`;
 }
 
 // ─── CATALOG ENGINE ────────────────────────────────────────────────────────────
@@ -8052,7 +8056,7 @@ async function _buildCatalogPages() {
     mctx.font = `600 ${NAME_SIZE}px "Playfair Display", serif`;
     const nameLines = _ctxMeasureLines(mctx, safeName, W - PAD * 2).slice(0, 2);
     const rawBio = (p.description_en || p.catalog_blurb || p.share_blurb || '').trim();
-    const blurb = rawBio || `${safeName} — a beautiful piece from the Meraki by Sam collection.`;
+    const blurb = rawBio || `${safeName} — a beautiful piece from the Meraki by Saima collection.`;
     mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
     const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
     if (!p.model_photo && !p.photo) anyMissingData = true;
@@ -8158,7 +8162,7 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
     ctx.fillStyle = isLight ? theme.accent : 'rgba(255,255,255,0.9)';
     ctx.font = `italic 400 36px "Playfair Display", serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('Meraki by Sam', W / 2, cy);
+    ctx.fillText('Meraki by Saima', W / 2, cy);
     cy += 64;
   }
 
@@ -8201,7 +8205,7 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
   ctx.fillStyle = isLight ? 'rgba(60,40,20,0.35)' : 'rgba(255,255,255,0.28)';
   ctx.font = `300 22px Inter, sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-  ctx.fillText(`MERAKI BY SAM  ·  ${year}`, W / 2, H - M - 20);
+  ctx.fillText(`MERAKI BY SAIMA  ·  ${year}`, W / 2, H - M - 20);
 
   return canvas.toDataURL('image/jpeg', 0.93);
 }
@@ -8442,7 +8446,7 @@ async function shareCatalogWithAsset() {
 
   // Clean message — no blob URLs, no internal URLs
   const collName = catalogCollection || 'Collection';
-  const shareTitle = collName + ' — Meraki by Sam';
+  const shareTitle = collName + ' — Meraki by Saima';
   const shareText = _catalogWhatsAppMessage();
 
   try {
@@ -8761,13 +8765,13 @@ async function _shareItemCard(dataUrl, caption, productName) {
     try {
       const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], filename, { type: 'image/jpeg' });
-      const shareData = { files: [file], text: caption || '', title: 'Meraki by Sam — ' + (productName || '') };
+      const shareData = { files: [file], text: caption || '', title: 'Meraki by Saima — ' + (productName || '') };
       if (navigator.canShare && navigator.canShare(shareData)) {
         await navigator.share(shareData);
         return;
       }
       // Files not supported — share text only
-      await navigator.share({ text: caption || '', title: 'Meraki by Sam — ' + (productName || '') });
+      await navigator.share({ text: caption || '', title: 'Meraki by Saima — ' + (productName || '') });
       return;
     } catch(e) {
       if (e.name === 'AbortError') return; // user cancelled — not an error
@@ -9030,7 +9034,7 @@ async function generateMarketingPackage() {
     ? `The selected occasion is "${p.occasion}". Use occasion-specific language ONLY where it fits naturally — do not force it into every field.`
     : 'No specific occasion is set. Keep all copy garment-focused and event-agnostic. Do NOT invent or assign an occasion (e.g. do not say "perfect for Eid" unless Eid is the selected occasion).';
 
-  const prompt = `You are creating a complete marketing package for a Pakistani clothing boutique called "Meraki by Sam."
+  const prompt = `You are creating a complete marketing package for a Pakistani clothing boutique called "Meraki by Saima."
 
 Garment details:
 - Name: ${p.name}
@@ -9910,7 +9914,7 @@ async function generateWhatsAppCatalog() {
   textEl.textContent = 'Generating catalog...';
   const listing = avail.slice(0, 15).map(p => `• ${p.name} (${p.sku}) — ${p.price ? '$' + p.price : 'Price on request'} — ${p.colors || ''} — ${p.occasion || ''}`).join('\n');
   try {
-    const msg = await callClaude([{ role: 'user', content: `Create a WhatsApp catalog message for Meraki by Sam Pakistani clothing boutique. Make it warm, inviting, and professional. Include the items listed below. Add a header greeting and a footer with a call to action to DM for details.\n\nItems:\n${listing}` }]);
+    const msg = await callClaude([{ role: 'user', content: `Create a WhatsApp catalog message for Meraki by Saima Pakistani clothing boutique. Make it warm, inviting, and professional. Include the items listed below. Add a header greeting and a footer with a call to action to DM for details.\n\nItems:\n${listing}` }]);
     textEl.textContent = msg;
     document.getElementById('catalogWhatsAppLink').href = 'https://wa.me/?text=' + encodeURIComponent(msg);
   } catch(e) { textEl.textContent = 'Error: ' + e.message; }
@@ -10287,7 +10291,7 @@ async function generateCustomerWhatsApp() {
   output.style.display = 'block';
   textEl.textContent = 'Generating...';
   const items = avail.map(p => `${p.name} — $${p.price || '?'}`).join('\n');
-  const prompt = `Write a personalized WhatsApp message from Meraki by Sam to customer ${c.name}. Mention their preferences (${c.preferred_colors || 'elegant colors'}, ${c.preferred_occasions || 'special occasions'}). Suggest a few pieces naturally. Keep it warm, brief, and conversational. Mention they can DM to see photos.\n\nAvailable pieces:\n${items}`;
+  const prompt = `Write a personalized WhatsApp message from Meraki by Saima to customer ${c.name}. Mention their preferences (${c.preferred_colors || 'elegant colors'}, ${c.preferred_occasions || 'special occasions'}). Suggest a few pieces naturally. Keep it warm, brief, and conversational. Mention they can DM to see photos.\n\nAvailable pieces:\n${items}`;
   try {
     const msg = await callClaude([{ role: 'user', content: prompt }]);
     textEl.textContent = msg;
@@ -10350,7 +10354,7 @@ async function analyzeWhatsAppChat() {
       source: { type: 'base64', media_type: s.file.type || 'image/jpeg', data: s.dataUrl.split(',')[1] }
     }));
 
-    const prompt = `These are screenshots of a WhatsApp conversation from a Pakistani clothing boutique owner named Sam.
+    const prompt = `These are screenshots of a WhatsApp conversation from a Pakistani clothing boutique owner named Saima.
 
 Read all the messages carefully and extract as much customer information as you can. Return ONLY valid JSON in this exact format:
 
@@ -10361,7 +10365,7 @@ Read all the messages carefully and extract as much customer information as you 
   "budget": "maximum budget in USD as a number if mentioned, otherwise null",
   "preferred_colors": "colors they liked or asked about, comma-separated, otherwise null",
   "preferred_occasions": "occasions mentioned (Eid, Wedding, Mehndi, Casual, Formal etc), comma-separated, otherwise null",
-  "notes": "a 2-3 sentence summary of what this customer is looking for, what they discussed, any important details Sam should remember. Be specific and practical.",
+  "notes": "a 2-3 sentence summary of what this customer is looking for, what they discussed, any important details Saima should remember. Be specific and practical.",
   "items_discussed": "names or descriptions of specific items discussed in the chat, comma-separated, otherwise null",
   "language": "en or ur depending on what language the customer writes in"
 }`;
