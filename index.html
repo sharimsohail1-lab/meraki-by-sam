@@ -3074,11 +3074,53 @@ function _photosStatus(msg) {
 // Detail thumbnails request a transformed width so the grid never pulls a 2400 px
 // master. Supabase Storage honours ?width= on its public object URLs; a legacy
 // data URL or any non-Supabase src is returned untouched.
+// Supabase serves resized images from /storage/v1/render/image/public/, but that
+// endpoint is a paid add-on: on the free tier it errors instead of returning an
+// image, which renders as a broken thumbnail. So transformations are OFF by
+// default and the raw public object URL is used.
+//
+// Flip STORAGE_TRANSFORMS_ENABLED to true once the plan supports it and thumbnails
+// start being served at 400 px instead of full masters. Everything else — the
+// resolver, the grid, the abstraction — is unchanged either way.
+const STORAGE_TRANSFORMS_ENABLED = false;
+
+// Raw, always-valid public URL for an image. Never transformed.
+function rawImageUrl(src) {
+  return src || null;
+}
+
 function thumbUrl(src, width = 400) {
   if (!src || src.startsWith('data:')) return src;
+  if (!STORAGE_TRANSFORMS_ENABLED) return src;
   if (!/\/storage\/v1\/object\/public\//.test(src)) return src;
   const rendered = src.replace('/object/public/', '/render/image/public/');
-  return `${rendered}${rendered.includes('?') ? '&' : '?'}width=${width}&quality=78&resize=contain`;
+  // width alone is enough; resize modes need both dimensions to be meaningful and
+  // can themselves be rejected when only one is supplied.
+  return `${rendered}${rendered.includes('?') ? '&' : '?'}width=${width}&quality=78`;
+}
+
+// One-step fallback: transformed URL -> raw public URL -> clean unavailable state.
+// dataset.imgFallback makes the progression one-way, so a permanently failing URL
+// cannot loop.
+function _photoImgFallback(el, rawSrc) {
+  if (el.dataset.imgFallback === 'raw' || !rawSrc || el.src === rawSrc) {
+    el.dataset.imgFallback = 'failed';
+    el.onerror = null;
+    console.warn('[photos] image unavailable:', el.getAttribute('src'));
+    const holder = el.parentElement;
+    el.style.display = 'none';
+    if (holder && !holder.querySelector('.img-unavailable')) {
+      const d = document.createElement('div');
+      d.className = 'img-unavailable';
+      d.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-size:10px;text-align:center;padding:6px';
+      d.innerHTML = '<i class="ti ti-photo-off" style="font-size:18px"></i><span>Image unavailable</span>';
+      holder.appendChild(d);
+    }
+    return;
+  }
+  el.dataset.imgFallback = 'raw';
+  console.warn('[photos] thumbnail failed, falling back to full image:', el.getAttribute('src'));
+  el.src = rawSrc;
 }
 
 async function renderProductPhotos(p, { force = false } = {}) {
@@ -3105,12 +3147,13 @@ async function renderProductPhotos(p, { force = false } = {}) {
 
   grid.innerHTML = images.map((img, i) => {
     const src = thumbUrl(img.src, 400);
+    const raw = rawImageUrl(img.src);
     const roleOpts = imageRoleOptions().map(o =>
       `<option value="${_esc(o.value)}"${o.value === img.role ? ' selected' : ''}>${_esc(o.label)}</option>`).join('');
     return `
     <div style="border:1px solid ${img.is_primary ? 'var(--burgundy)' : 'var(--border)'};border-radius:10px;overflow:hidden;background:#fff">
       <div style="position:relative;aspect-ratio:3/4;background:var(--sand-light)">
-        ${src ? `<img src="${_esc(src)}" loading="lazy" alt="${_esc(img.alt || '')}" style="width:100%;height:100%;object-fit:cover;display:block">`
+        ${src ? `<img src="${_esc(src)}" loading="lazy" alt="${_esc(img.alt || '')}" onerror="_photoImgFallback(this, ${_esc(JSON.stringify(raw || ''))})" style="width:100%;height:100%;object-fit:cover;display:block">`
               : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)"><i class="ti ti-photo-off"></i></div>'}
         ${img.is_primary ? '<div style="position:absolute;top:6px;left:6px;background:var(--burgundy);color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">HERO</div>' : ''}
         ${img.legacy ? '<div style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:3px 7px;border-radius:10px">Legacy</div>' : ''}
