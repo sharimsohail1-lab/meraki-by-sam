@@ -1946,11 +1946,17 @@ let _cardImagePending = new Set();
 // Single source of truth for all availability logic.
 // Products WITHOUT size_inventory fall back to the status field so old data never breaks.
 
+// The one authoritative size vocabulary and ordering for the whole app.
+// Products (SIZE_ORDER) and standalone Exhibition items (EXH_SIZES) both point
+// here, so there is a single place to change the list.
+// Customers and Leads still have their own pill lists — a later phase.
+const MERAKI_SIZES = ['38', '40', '42', '44', '46', '48', '50', '52', 'Free Size'];
+
 // Canonical Product sizing. Numeric from Phase 2 onward.
 // Legacy letter products keep whatever they already store until Saima explicitly
 // saves the numeric size editor for that product — see _collectProductDetailDraft.
 // The helpers below never treat this as a whitelist, so legacy keys still render.
-const SIZE_ORDER = ['38', '40', '42', '44', '46', '48', '50', '52', 'Free Size'];
+const SIZE_ORDER = MERAKI_SIZES;
 
 // A product still on the old letter system, i.e. carrying keys outside SIZE_ORDER.
 // Its stored inventory is left untouched until the numeric editor is saved.
@@ -2179,6 +2185,10 @@ let _exhAddSizes = {};       // size counts in Add/Edit Item form
 let _exhAddPhoto = null;     // compressed data URL for item photo
 let _exhSaleSize = '';       // selected size in Log Sale sheet
 let _exhSaleQty = 1;
+// 'item'    = standalone exh_items row (exhibition-local stock)
+// 'product' = catalogue product imported via exhibition_items (products.size_inventory)
+let _exhSaleMode = 'item';
+let _exhSaleProduct = null;
 let _exhInventorySort = localStorage.getItem('exhInventorySort') || 'default';
 let currentCustomer = null;
 let selectedZones = new Set();
@@ -10765,19 +10775,32 @@ async function openExhibitionDetail(id) {
   // Items list
   const itemsList = document.getElementById('exhItemsList');
   if (itemProducts.length) {
-    itemsList.innerHTML = itemProducts.map(ei => `
+    itemsList.innerHTML = itemProducts.map(ei => {
+      const p = ei.product;
+      // Product inventory is the source of truth — no copy lives on the join row.
+      // getAvailableSizeSummary is union-based, so a product still on letter
+      // sizes shows "S ×1 · M ×2" rather than breaking.
+      const summary  = getAvailableSizeSummary(p);
+      const soldOut  = isProductSoldOut(p);
+      const canSell  = !soldOut && getAvailableSizeLabels(p).length > 0;
+      const sizeLine = soldOut
+        ? '<div class="exh-item-sizes" style="font-size:11px;color:var(--muted)">Sold Out</div>'
+        : (summary ? `<div class="exh-item-sizes" style="font-size:11px;color:var(--muted)">${summary}</div>` : '');
+      return `
       <div class="exh-item-row">
-        ${ei.product.photo ? `<img src="${ei.product.photo}" class="exh-item-thumb" alt="">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'}
+        ${p.photo ? `<img src="${p.photo}" class="exh-item-thumb" alt="">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'}
         <div class="exh-item-info">
-          <div class="exh-item-name">${ei.product.name}</div>
-          <div class="exh-item-sku">${ei.product.sku}</div>
-          <span class="status-pill status-${ei.product.status}">${ei.product.status}</span>
+          <div class="exh-item-name">${p.name}</div>
+          <div class="exh-item-sku">${p.sku}</div>
+          ${sizeLine}
+          <span class="status-pill status-${p.status}">${p.status}</span>
         </div>
         <div class="exh-action-btns">
-          ${ei.product.status !== 'sold' ? `<button class="exh-btn-sold" onclick="markExhItemStatus('${ei.product.id}','sold')">Sold</button>` : ''}
-          ${ei.product.status !== 'reserved' ? `<button class="exh-btn-res" onclick="markExhItemStatus('${ei.product.id}','reserved')">Reserve</button>` : ''}
+          ${canSell ? `<button class="exh-btn-sold" id="exhSellProd-${p.id}" onclick="openLogExhSaleProduct('${p.id}')">Log Sale</button>` : ''}
+          ${p.status !== 'reserved' && !soldOut ? `<button class="exh-btn-res" onclick="markExhItemStatus('${p.id}','reserved')">Reserve</button>` : ''}
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } else {
     itemsList.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:10px 0">No items assigned yet.</div>';
   }
@@ -10852,7 +10875,8 @@ async function setExhStatus(status) {
 }
 
 // ── Exhibition Inventory Tracker ─────────────────────────────────────────────
-const EXH_SIZES = ['38','40','42','44','46','48','50','Free Size'];
+// Same canonical list as Products. 52 arrived here in Phase 3.
+const EXH_SIZES = MERAKI_SIZES;
 let _exhSelectedPayment = '';
 
 // Explicit column list for first load (includes photo).
@@ -11292,9 +11316,13 @@ function _exhSalesHTML() {
   }
   window._exhSaleIds = [];
   return [...exhSales].reverse().map(s => {
-    const item = exhItems.find(i => i.id === s.item_id);
-    const itemName = item?.name || 'Unknown item';
-    const photo = item ? _getExhItemPhoto(item) : null;
+    const item = s.item_id ? exhItems.find(i => i.id === s.item_id) : null;
+    // Sales of imported catalogue products carry product_id instead of item_id.
+    const soldProduct = (!item && s.product_id) ? inventory.find(p => p.id === s.product_id) : null;
+    const itemName = item?.name || soldProduct?.name || 'Unknown item';
+    const photo = item ? _getExhItemPhoto(item)
+                : soldProduct ? (_cardImageCache[soldProduct.id]?.model_photo || _cardImageCache[soldProduct.id]?.photo || null)
+                : null;
     const dt = new Date(s.created_at);
     const timeStr = dt.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
     const thumbIdx = window._exhSaleIds.length;
@@ -11579,6 +11607,8 @@ async function openLogExhSale(itemId) {
     if (logBtn) { logBtn.disabled = false; logBtn.innerHTML = originalBtnHTML; }
   }
 
+  _exhSaleMode = 'item';
+  _exhSaleProduct = null;
   _exhItem = item;
   _exhSaleSize = '';
   _exhSaleQty = 1;
@@ -11606,6 +11636,120 @@ async function openLogExhSale(itemId) {
   openSheet('logExhSaleSheet');
 }
 
+// Imported-product sale. The server owns the decrement so a stale client cannot
+// oversell, and rolls the stock back if the sale row fails to insert.
+async function _saveExhProductSale() {
+  const product = _exhSaleProduct;
+  if (!product || !currentExhibition) return;
+  if (!_exhSaleSize) { showToast('Select a size'); return; }
+  const price = parseFloat(document.getElementById('exhSalePriceInput').value);
+  if (!price || price <= 0) { showToast('Enter sold price'); return; }
+  const btn = document.querySelector('#logExhSaleSheet .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const r = await fetch('/api/exhibition-sell-product', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exhibitionId: currentExhibition.id,
+        productId: product.id,
+        size: _exhSaleSize,
+        quantity: _exhSaleQty,
+        soldPriceUsd: price,
+        paymentMethod: _exhSelectedPayment || 'Unaccounted',
+        notes: document.getElementById('exhSaleNotesInput').value.trim() || null,
+      }),
+    });
+    const json = await r.json();
+    if (json.error) throw new Error(json.error);
+
+    if (json.sale) exhSales.push(json.sale);
+    // Product row is authoritative — refresh every place it is held.
+    if (json.product) {
+      const idx = inventory.findIndex(p => p.id === json.product.id);
+      if (idx >= 0) inventory[idx] = { ...inventory[idx], ...json.product };
+      if (currentProduct?.id === json.product.id) currentProduct = inventory[idx] || currentProduct;
+      _cardImageCache[json.product.id] = _cardImageCache[json.product.id] || undefined;
+    }
+    _stampExhLastUpdated();
+    closeSheet('logExhSaleSheet');
+    _exhSaleMode = 'item';
+    _exhSaleProduct = null;
+    await openExhibitionDetail(currentExhibition.id);
+    renderInventory();
+    _invalidateMktPreview();
+    showToast(json.remaining === 0 ? 'Sale logged — product now Sold Out' : 'Sale logged ✓');
+  } catch (e) {
+    console.warn('[EXH PRODUCT SALE]', e.message);
+    showToast(e.message || 'Could not log sale');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-receipt"></i> Save Sale'; }
+  }
+}
+
+// Sell one size of an imported catalogue product. Reuses the standalone sale
+// sheet; only the stock source and the save endpoint differ.
+async function openLogExhSaleProduct(productId) {
+  const btn = document.getElementById('exhSellProd-' + productId);
+  const originalHTML = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Checking…'; }
+
+  // Re-read the product so the size buttons reflect current stock, not a stale card.
+  let product = null;
+  try {
+    const rows = await db('select', 'products', { filter: { id: productId }, columns: 'id,sku,name,status,sold_at,price,size_inventory' });
+    product = Array.isArray(rows) ? rows[0] : null;
+  } catch (e) {
+    console.warn('[EXH PRODUCT SALE] inventory check failed', e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = originalHTML; }
+  }
+  if (!product) { showToast('Could not check latest inventory. Please try again.'); return; }
+
+  // Keep the in-memory copy honest before rendering.
+  const idx = inventory.findIndex(p => p.id === productId);
+  if (idx >= 0) { inventory[idx] = { ...inventory[idx], ...product }; product = inventory[idx]; }
+
+  _exhSaleMode = 'product';
+  _exhSaleProduct = product;
+  _exhItem = null;
+  _exhSaleSize = '';
+  _exhSaleQty = 1;
+  _exhSelectedPayment = '';
+
+  document.getElementById('logExhSaleTitle').textContent = 'Log Sale — ' + product.name;
+  document.getElementById('exhSaleQtyDisplay').textContent = '1';
+  document.getElementById('exhSalePriceInput').value = product.price || '';
+  document.getElementById('exhSaleNotesInput').value = '';
+  document.querySelectorAll('.exh-pay-btn').forEach(b => {
+    b.style.background = '#fff'; b.style.borderColor = 'var(--border)'; b.style.fontWeight = '400';
+  });
+
+  // Only sizes with stock. Whatever key is stored is offered verbatim, so a
+  // legacy letter product can still be sold without any mapping.
+  const inv = getSizeInventory(product) || {};
+  const available = getAvailableSizeLabels(product);
+  const sizesBtns = document.getElementById('exhSaleSizeButtons');
+  if (!available.length) {
+    sizesBtns.innerHTML = '<div style="font-size:13px;color:var(--muted)">No stock remaining</div>';
+  } else {
+    sizesBtns.innerHTML = available.map(s =>
+      `<button onclick="selectExhSaleSize('${s}')" id="exhSaleSize_${s}" style="padding:10px 16px;border:2px solid var(--border);border-radius:8px;background:#fff;font-size:14px;font-weight:500;cursor:pointer;touch-action:manipulation">${s} <span style="font-size:11px;color:var(--muted)">(${inv[s]})</span></button>`
+    ).join('');
+    if (available.length === 1) selectExhSaleSize(available[0]);
+  }
+  openSheet('logExhSaleSheet');
+}
+
+// Remaining stock for the currently selected size, whichever mode we are in.
+function _exhSaleStockFor(size) {
+  if (!size) return 99;
+  const inv = _exhSaleMode === 'product'
+    ? (getSizeInventory(_exhSaleProduct) || {})
+    : (_exhItem?.size_inventory || {});
+  return Math.max(0, parseInt(inv[size], 10) || 0);
+}
+
 function selectExhSaleSize(size) {
   _exhSaleSize = size;
   document.querySelectorAll('[id^="exhSaleSize_"]').forEach(b => {
@@ -11616,13 +11760,13 @@ function selectExhSaleSize(size) {
     b.style.fontWeight = isSelected ? '700' : '500';
   });
   // Clamp qty to remaining for this size
-  const maxQty = Number((_exhItem?.size_inventory || {})[size]) || 1;
+  const maxQty = _exhSaleStockFor(size) || 1;
   _exhSaleQty = Math.min(_exhSaleQty, maxQty);
   document.getElementById('exhSaleQtyDisplay').textContent = _exhSaleQty;
 }
 
 function _exhSaleQtyChange(delta) {
-  const maxQty = _exhSaleSize ? (Number((_exhItem?.size_inventory || {})[_exhSaleSize]) || 99) : 99;
+  const maxQty = _exhSaleSize ? (_exhSaleStockFor(_exhSaleSize) || 99) : 99;
   _exhSaleQty = Math.max(1, Math.min(maxQty, _exhSaleQty + delta));
   document.getElementById('exhSaleQtyDisplay').textContent = _exhSaleQty;
 }
@@ -11639,7 +11783,9 @@ function selectExhPayment(method) {
 }
 
 async function saveExhSale() {
-  if (!_exhItem || !currentExhibition) return;
+  if (!currentExhibition) return;
+  if (_exhSaleMode === 'product') return _saveExhProductSale();
+  if (!_exhItem) return;
   if (!_exhSaleSize) { showToast('Select a size'); return; }
   const price = parseFloat(document.getElementById('exhSalePriceInput').value);
   if (!price || price <= 0) { showToast('Enter sold price'); return; }
