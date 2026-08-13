@@ -1085,6 +1085,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
       <div class="field-label" style="margin-top:4px">Sizes</div>
+      <div id="detailLegacySizeNote" style="display:none;font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:6px;padding:8px 10px;margin-bottom:8px;line-height:1.5"></div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
       <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
       <div class="field-label">Price</div>
@@ -1940,7 +1941,19 @@ let _cardImagePending = new Set();
 // Single source of truth for all availability logic.
 // Products WITHOUT size_inventory fall back to the status field so old data never breaks.
 
-const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+// Canonical Product sizing. Numeric from Phase 2 onward.
+// Legacy letter products keep whatever they already store until Saima explicitly
+// saves the numeric size editor for that product — see _collectProductDetailDraft.
+// The helpers below never treat this as a whitelist, so legacy keys still render.
+const SIZE_ORDER = ['38', '40', '42', '44', '46', '48', '50', '52', 'Free Size'];
+
+// A product still on the old letter system, i.e. carrying keys outside SIZE_ORDER.
+// Its stored inventory is left untouched until the numeric editor is saved.
+function hasLegacySizeKeys(p) {
+  const inv = getSizeInventory(p);
+  if (!inv) return false;
+  return Object.keys(inv).some(s => !SIZE_ORDER.includes(s));
+}
 
 // Parse size_inventory safely; always returns a plain object with only numeric values, or null.
 function getSizeInventory(p) {
@@ -2080,9 +2093,15 @@ function renderSizeSteppers(containerId, sizeState, onChangeCallback) {
 
 window._sizeStates = {};
 
+// Tracks whether the user actually touched a size grid this session.
+// Product Detail only writes size_inventory when its grid is dirty, so editing
+// price or notes on a legacy product cannot silently wipe its letter sizes.
+window._sizeStateDirty = {};
+
 function _sizeStep(containerId, size, delta) {
   const state = window._sizeStates[containerId];
   if (!state) return;
+  window._sizeStateDirty[containerId] = true;
   state[size] = Math.max(0, (state[size] || 0) + delta);
   const el = document.getElementById(`sz-${containerId}-${size}`);
   if (el) el.textContent = state[size];
@@ -2097,19 +2116,37 @@ function _updateSizeTotalNote(containerId, state) {
 }
 
 function initIntakeSizeSteppers() {
-  window._sizeStates['intakeSizeGrid'] = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
-  renderSizeSteppers('intakeSizeGrid', window._sizeStates['intakeSizeGrid']);
+  const state = {};
+  SIZE_ORDER.forEach(s => state[s] = 0);
+  window._sizeStates['intakeSizeGrid'] = state;
+  window._sizeStateDirty['intakeSizeGrid'] = false;
+  renderSizeSteppers('intakeSizeGrid', state);
 }
 
+// The editor only ever offers the canonical sizes. Any legacy letter quantity is
+// ignored here (not deleted — it stays in the database until an explicit save)
+// because no approved letter-to-number mapping exists.
 function initDetailSizeSteppers(p) {
   const inv = getSizeInventory(p) || {};
   const state = {};
   SIZE_ORDER.forEach(s => state[s] = _safeSizeQty(inv[s]));
-  // Carry over any non-canonical key the product already has, so it stays
-  // editable and survives the next save.
-  Object.keys(inv).forEach(s => { if (!(s in state)) state[s] = _safeSizeQty(inv[s]); });
   window._sizeStates['detailSizeGrid'] = state;
+  window._sizeStateDirty['detailSizeGrid'] = false;
   renderSizeSteppers('detailSizeGrid', state);
+  _renderLegacySizeNotice(p);
+}
+
+// Quiet one-liner shown only while a product still holds letter sizes.
+function _renderLegacySizeNotice(p) {
+  const el = document.getElementById('detailLegacySizeNote');
+  if (!el) return;
+  if (hasLegacySizeKeys(p)) {
+    el.textContent = 'Sizes are now tracked numerically. Enter the current quantities below and save to update this product.';
+    el.style.display = 'block';
+  } else {
+    el.textContent = '';
+    el.style.display = 'none';
+  }
 }
 let uploadedPhotos = {}; // { slotId: { file, dataUrl, label } }
 let extraSlots = [];
@@ -7413,11 +7450,25 @@ function _collectProductDetailDraft() {
   const collection_name = _collArr[0] || null;
   const collection_names = JSON.stringify(_collArr);
   const rawSizeState = window._sizeStates['detailSizeGrid'] || {};
-  const detailSizeState = normalizeSizeInventory(rawSizeState);
-  const hasSizes = orderedSizeKeys(detailSizeState).some(s => _safeSizeQty(detailSizeState[s]) > 0);
+  // Canonical-only object: exactly the SIZE_ORDER keys, nothing else. Saving this
+  // is the deliberate reset that drops any legacy letter keys.
+  const detailSizeState = {};
+  SIZE_ORDER.forEach(s => detailSizeState[s] = _safeSizeQty(rawSizeState[s]));
+
+  const hasSizes = SIZE_ORDER.some(s => detailSizeState[s] > 0);
   const hadSizesBefore = !!getSizeInventory(currentProduct);
-  const size_inventory = (hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null;
-  return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState };
+
+  // Protect a legacy product whose size grid the user never touched: omit
+  // size_inventory entirely so a price/notes/collection edit leaves the stored
+  // letter quantities alone. Touching any stepper opts into the numeric reset.
+  const gridTouched = !!window._sizeStateDirty['detailSizeGrid'];
+  const protectLegacy = !gridTouched && hasLegacySizeKeys(currentProduct);
+
+  const size_inventory = protectLegacy
+    ? undefined
+    : ((hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null);
+
+  return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState, protectLegacy };
 }
 
 function _hasPendingProductDetailChanges() {
@@ -7427,8 +7478,12 @@ function _hasPendingProductDetailChanges() {
   if (String(draft.price || '') !== snap.price) return true;
   if ((draft.notes || '') !== snap.notes) return true;
   if (JSON.stringify(draft._collArr.slice().sort()) !== snap.collection_names) return true;
-  const draftSizeKey = JSON.stringify(normalizeSizeInventory(draft.size_inventory ? JSON.parse(draft.size_inventory) : {}));
-  if (draftSizeKey !== snap.size_inventory) return true;
+  // A protected legacy product is not writing sizes at all, so its untouched
+  // grid must not register as a pending change.
+  if (!draft.protectLegacy) {
+    const draftSizeKey = JSON.stringify(normalizeSizeInventory(draft.size_inventory ? JSON.parse(draft.size_inventory) : {}));
+    if (draftSizeKey !== snap.size_inventory) return true;
+  }
   return false;
 }
 
@@ -7442,27 +7497,40 @@ async function saveProductEdits(opts) {
   if (!silent && btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
 
   const draft = _collectProductDetailDraft();
-  const { price, notes, collection_name, collection_names, size_inventory, detailSizeState } = draft;
+  const { price, notes, collection_name, collection_names, size_inventory, detailSizeState, protectLegacy } = draft;
 
   let status = currentProduct.status;
   let sold_at = currentProduct.sold_at;
-  if (size_inventory !== null) {
+  // Only re-derive status when we are actually writing sizes. A protected legacy
+  // product keeps whatever status its stored letter inventory implies.
+  if (!protectLegacy && size_inventory !== null) {
     status = deriveStatusFromInventory(currentProduct, detailSizeState);
     if (status === 'sold' && currentProduct.status !== 'sold') sold_at = new Date().toISOString();
     if (status === 'available' && currentProduct.status === 'sold') sold_at = null;
   }
 
+  // size_inventory is omitted entirely when protected, so the stored letter
+  // quantities are left exactly as they are.
+  const _payload = { price, notes, collection_name, collection_names, status, sold_at };
+  if (!protectLegacy) _payload.size_inventory = size_inventory;
+
   try {
-    await db('update', 'products', { id: currentProduct.id, data: { price, notes, collection_name, collection_names, size_inventory, status, sold_at } });
+    await db('update', 'products', { id: currentProduct.id, data: _payload });
     const idx = inventory.findIndex(p => p.id === currentProduct.id);
-    inventory[idx] = { ...inventory[idx], price, notes, collection_name, collection_names, size_inventory, status, sold_at };
+    inventory[idx] = { ...inventory[idx], ..._payload };
     currentProduct = inventory[idx];
     ['available','reserved','sold'].forEach(s => {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
-    _updateSizeTotalNote('detailSizeGrid', detailSizeState);
+    if (!protectLegacy) {
+      // The numeric inventory is now the stored truth — grid is clean again and
+      // the legacy notice no longer applies.
+      window._sizeStateDirty['detailSizeGrid'] = false;
+      _updateSizeTotalNote('detailSizeGrid', detailSizeState);
+      _renderLegacySizeNotice(currentProduct);
+    }
     const _masr2 = document.getElementById('markAllSoldRow');
-    if (_masr2) _masr2.style.display = size_inventory ? 'block' : 'none';
+    if (_masr2) _masr2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
     _invalidateMktPreview();
     renderCollections();
     // Refresh snapshot so subsequent checks start clean
