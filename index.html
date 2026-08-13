@@ -1087,7 +1087,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="field-label" style="margin-top:4px">Sizes</div>
       <div id="detailLegacySizeNote" style="display:none;font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:6px;padding:8px 10px;margin-bottom:8px;line-height:1.5"></div>
       <div class="size-stepper-grid" id="detailSizeGrid"></div>
-      <div style="font-size:11px;color:var(--muted);margin:4px 0 12px" id="detailSizeTotalNote"></div>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0 6px" id="detailSizeTotalNote"></div>
+      <!-- Secondary to Save — the deliberate way to clear a product, and the only
+           way a legacy product may be converted to an all-zero numeric inventory. -->
+      <div id="detailSizeSoldOutRow" style="display:none;margin:0 0 12px">
+        <button onclick="openMarkAllSoldConfirm()" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--muted);cursor:pointer;padding:5px 12px">Mark All Sold Out</button>
+      </div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
       <div class="field-label">Collections</div>
@@ -1362,7 +1367,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   <div class="sheet" style="min-height:auto">
     <div class="sheet-handle"></div>
     <div style="font-weight:600;font-size:15px;margin-bottom:10px">Mark the entire product as sold?</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will set every remaining size quantity to 0 and show the item as sold in future marketing materials.</div>
+    <div id="markAllSoldCopy" style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">This will set every remaining size quantity to 0 and show the item as sold in future marketing materials.</div>
     <button class="btn btn-primary" id="markAllSoldConfirmBtn" onclick="_confirmMarkAllSold(this)" style="width:100%;margin-bottom:8px;background:var(--burgundy);color:#fff">Mark sold and clear remaining inventory</button>
     <button class="btn btn-secondary" onclick="closeSheet('markAllSoldSheet')" style="width:100%">Cancel</button>
   </div>
@@ -7233,6 +7238,8 @@ function _openProductDetailUI(p) {
   document.getElementById('reservedForInput').value = p.reserved_for || '';
   const _masr = document.getElementById('markAllSoldRow');
   if (_masr) _masr.style.display = getSizeInventory(p) ? 'block' : 'none';
+  const _sor = document.getElementById('detailSizeSoldOutRow');
+  if (_sor) _sor.style.display = getSizeInventory(p) ? 'block' : 'none';
   ['available','reserved','sold'].forEach(s => {
     document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (p.status === s ? ' active-' + s : '');
   });
@@ -7398,17 +7405,27 @@ async function _confirmSoldNoInventory(btn) {
 
 async function openMarkAllSoldConfirm() {
   if (!currentProduct) return;
+  const _isLegacy = hasLegacySizeKeys(currentProduct);
   if (_hasPendingProductDetailChanges()) {
     showToast('Saving inventory changes…');
     try {
-      await saveProductEdits({ silent: true, reason: 'before-mark-all-sold' });
+      // skipSizes: this flow overwrites size_inventory itself a moment later, and
+      // without it an all-zero legacy grid would trip the accidental-wipe guard.
+      await saveProductEdits({ silent: true, reason: 'before-mark-all-sold', skipSizes: true });
     } catch(e) {
       showToast('Could not save changes. Please try again.');
       return;
     }
   }
+  // Spell out the consequence when this is the first conversion off letter sizes.
+  const _copy = document.getElementById('markAllSoldCopy');
+  if (_copy) {
+    _copy.textContent = _isLegacy
+      ? 'Mark this product sold out in all sizes? This will replace the old letter-size inventory with the new numeric size system at zero quantity.'
+      : 'This will set every remaining size quantity to 0 and show the item as sold in future marketing materials.';
+  }
   const btn = document.getElementById('markAllSoldConfirmBtn');
-  if (btn) { btn.disabled = false; btn.innerHTML = 'Mark sold and clear remaining inventory'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = _isLegacy ? 'Mark Sold Out' : 'Mark sold and clear remaining inventory'; }
   openSheet('markAllSoldSheet');
 }
 
@@ -7416,9 +7433,10 @@ async function _confirmMarkAllSold(btn) {
   if (!currentProduct) return;
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Marking sold…'; }
   closeSheet('markAllSoldSheet');
-  const inv = normalizeSizeInventory(getSizeInventory(currentProduct) || {});
-  // Zero every size key, canonical or not
-  Object.keys(inv).forEach(s => { inv[s] = 0; });
+  // Write the canonical numeric set at zero. For a legacy product this is the
+  // deliberate conversion: old letter keys are dropped here, not silently on save.
+  const inv = {};
+  SIZE_ORDER.forEach(s => { inv[s] = 0; });
   const update = {
     size_inventory: JSON.stringify(inv),
     status: 'sold',
@@ -7462,13 +7480,20 @@ function _collectProductDetailDraft() {
   // size_inventory entirely so a price/notes/collection edit leaves the stored
   // letter quantities alone. Touching any stepper opts into the numeric reset.
   const gridTouched = !!window._sizeStateDirty['detailSizeGrid'];
-  const protectLegacy = !gridTouched && hasLegacySizeKeys(currentProduct);
+  const isLegacy = hasLegacySizeKeys(currentProduct);
+  const protectLegacy = !gridTouched && isLegacy;
+
+  // Guard against an accidental wipe: the grid was touched but ended back at all
+  // zeroes, which would replace real letter stock with an empty numeric object and
+  // mark the product sold. Clearing a legacy product must go through the explicit
+  // Mark All Sold Out action instead.
+  const blockLegacyWipe = gridTouched && isLegacy && !hasSizes;
 
   const size_inventory = protectLegacy
     ? undefined
     : ((hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null);
 
-  return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState, protectLegacy };
+  return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState, protectLegacy, blockLegacyWipe };
 }
 
 function _hasPendingProductDetailChanges() {
@@ -7497,13 +7522,25 @@ async function saveProductEdits(opts) {
   if (!silent && btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
 
   const draft = _collectProductDetailDraft();
-  const { price, notes, collection_name, collection_names, size_inventory, detailSizeState, protectLegacy } = draft;
+  const { price, notes, collection_name, collection_names, size_inventory, detailSizeState, protectLegacy, blockLegacyWipe } = draft;
+
+  // Refuse the whole save — atomic — until the size state is resolved. Nothing is
+  // written, so the stored letter inventory and every entered value survive.
+  // opts.skipSizes is used by the Mark All Sold Out path, which overwrites sizes
+  // itself immediately afterwards.
+  if (blockLegacyWipe && !opts?.skipSizes) {
+    _saveInProgress = false;
+    if (!silent && btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes'; }
+    showToast('Enter at least one size quantity, or choose Mark All Sold Out.');
+    return;
+  }
 
   let status = currentProduct.status;
   let sold_at = currentProduct.sold_at;
+  const _writeSizes = !protectLegacy && !opts?.skipSizes;
   // Only re-derive status when we are actually writing sizes. A protected legacy
   // product keeps whatever status its stored letter inventory implies.
-  if (!protectLegacy && size_inventory !== null) {
+  if (_writeSizes && size_inventory !== null) {
     status = deriveStatusFromInventory(currentProduct, detailSizeState);
     if (status === 'sold' && currentProduct.status !== 'sold') sold_at = new Date().toISOString();
     if (status === 'available' && currentProduct.status === 'sold') sold_at = null;
@@ -7512,7 +7549,7 @@ async function saveProductEdits(opts) {
   // size_inventory is omitted entirely when protected, so the stored letter
   // quantities are left exactly as they are.
   const _payload = { price, notes, collection_name, collection_names, status, sold_at };
-  if (!protectLegacy) _payload.size_inventory = size_inventory;
+  if (_writeSizes) _payload.size_inventory = size_inventory;
 
   try {
     await db('update', 'products', { id: currentProduct.id, data: _payload });
@@ -7522,7 +7559,7 @@ async function saveProductEdits(opts) {
     ['available','reserved','sold'].forEach(s => {
       document.getElementById({available:'statusBtnAvail',reserved:'statusBtnRes',sold:'statusBtnSold'}[s]).className = 'status-btn' + (status === s ? ' active-' + s : '');
     });
-    if (!protectLegacy) {
+    if (_writeSizes) {
       // The numeric inventory is now the stored truth — grid is clean again and
       // the legacy notice no longer applies.
       window._sizeStateDirty['detailSizeGrid'] = false;
@@ -7531,6 +7568,8 @@ async function saveProductEdits(opts) {
     }
     const _masr2 = document.getElementById('markAllSoldRow');
     if (_masr2) _masr2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
+    const _sor2 = document.getElementById('detailSizeSoldOutRow');
+    if (_sor2) _sor2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
     _invalidateMktPreview();
     renderCollections();
     // Refresh snapshot so subsequent checks start clean
