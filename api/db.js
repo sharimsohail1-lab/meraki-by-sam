@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Columns added in later migrations that may not exist if schema cache is stale
-const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names', 'description_source'];
+const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names', 'description_source',
+  'fabric', 'pieces', 'color', 'made', 'care'];
 
 // Table-aware column allowlists — prevents arbitrary SQL injection via columns param
 const ALLOWED_COLUMNS_BY_TABLE = {
@@ -12,7 +13,13 @@ const ALLOWED_COLUMNS_BY_TABLE = {
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory','detail_photos',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
     'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb',
-    'description_source'
+    'description_source',
+    'fabric','pieces','color','made','care'
+  ]),
+  product_images: new Set([
+    'id','product_id','storage_provider','storage_key','public_url','image_role',
+    'sort_order','is_primary','show_on_website','alt_text',
+    'width','height','bytes','mime_type','created_at','updated_at'
   ]),
   exh_items: new Set([
     'id','exhibition_id','name','photo','price_usd','cost_pkr',

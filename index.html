@@ -1933,6 +1933,7 @@ const PRODUCT_SUMMARY_COLS = [
   'neckline','has_placket','has_dupatta','motifs',
   'size_inventory','collection_name','collection_names',
   'description_en','description_ur','description_source',
+  'fabric','pieces','color','made','care',
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at'
@@ -2588,12 +2589,31 @@ function resolveImageSrc(value) {
 // Uses progressive quality + scale reduction until under maxBytes.
 // Never writes to storage — callers decide where the result goes.
 // Returns: { blob, dataUrl, width, height, mimeType, bytes }
+// Master image settings for object storage.
+//
+// 2400 px / q0.88 replaces the old 1800 px / q0.84. That cap existed only because
+// images were base64'd into Postgres and pushed through Vercel's 4.5 MB ceiling —
+// a constraint that does not apply once bytes go straight to storage. This is a
+// clothing storefront and embroidery detail is the product, so the master is kept
+// generous and derivatives are produced at render time.
+//
+// MASTER_MAX_BYTES is a sanity ceiling against an absurd upload, not a compression
+// target: a 2400 px WebP at q0.88 normally lands around 600 KB to 1.2 MB.
+const MASTER_MAX_PX    = 2400;
+const MASTER_QUALITY   = 0.88;
+const MASTER_MAX_BYTES = 8_000_000;
+// Hard reject before decoding — protects against a multi-hundred-MB file.
+const UPLOAD_MAX_SOURCE_BYTES = 25_000_000;
+
 async function preparePersistentImage(src, {
-  maxPx    = 1800,
-  maxBytes = 1_500_000,
-  quality  = 0.84
+  maxPx    = MASTER_MAX_PX,
+  maxBytes = MASTER_MAX_BYTES,
+  quality  = MASTER_QUALITY
 } = {}) {
   if (!src) throw new Error('preparePersistentImage: no source provided');
+  if ((src instanceof File || src instanceof Blob) && src.size > UPLOAD_MAX_SOURCE_BYTES) {
+    throw new Error(`Image is too large (${Math.round(src.size / 1024 / 1024)} MB). Maximum is ${UPLOAD_MAX_SOURCE_BYTES / 1024 / 1024} MB.`);
+  }
 
   // Resolve input to a data URL the browser can load.
   let dataUrlSrc;
@@ -2676,35 +2696,219 @@ async function preparePersistentImage(src, {
 // All storage calls go through /api/storage (to be created when Supabase Storage
 // is ready) — the frontend never imports the Supabase JS SDK directly.
 //
-// NOTE: Supabase Storage upload is NOT yet wired up — these stubs define the
-// interface so product/gallery code can be written to it now without changes later.
+// Provider-specific behaviour lives only in here. Product, gallery and catalog
+// code calls these and never learns which provider is in use, so swapping
+// Supabase Storage for R2 later is a change to this module alone.
 
-async function uploadImage({ provider = 'supabase', fileOrBlob, key, contentType, cacheControl = '31536000' }) {
-  if (provider === 'supabase') {
-    // Future: POST /api/storage { action:'upload', key, contentType, cacheControl, data:<base64> }
-    throw new Error('uploadImage: Supabase Storage not yet configured — store base64 via /api/db for now');
-  }
-  throw new Error('uploadImage: unknown provider ' + provider);
+const STORAGE_PROVIDER = 'supabase';
+
+async function _storageCall(action, payload) {
+  const r = await fetch('/api/storage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const json = await r.json();
+  if (json.error) throw new Error(json.error);
+  return json;
 }
 
-async function deleteImage({ provider = 'supabase', key }) {
-  if (provider === 'supabase') {
-    throw new Error('deleteImage: Supabase Storage not yet configured');
-  }
-  throw new Error('deleteImage: unknown provider ' + provider);
+// Collision-safe, never-overwritten object key.
+// Replacing an image writes a NEW key and repoints the database row, so a stale
+// CDN copy of a replaced image cannot exist.
+function buildImageKey(productId, ext = 'webp') {
+  const uuid = (crypto.randomUUID && crypto.randomUUID()) ||
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  return `products/${productId}/${uuid}.${ext}`;
 }
 
-function getImageUrl({ provider = 'supabase', key, publicUrl }) {
+// Uploads bytes straight to object storage using a short-lived signed URL.
+// The bytes never traverse a Vercel function, so the 4.5 MB request ceiling
+// does not apply and no function egress is consumed.
+// Returns { provider, key, publicUrl, bytes, mimeType }.
+async function uploadImage({ provider = STORAGE_PROVIDER, blob, key, contentType, cacheControl = '31536000' }) {
+  if (provider !== 'supabase') throw new Error('uploadImage: unknown provider ' + provider);
+  if (!blob || !key) throw new Error('uploadImage: blob and key are required');
+
+  const type = contentType || blob.type || 'image/webp';
+  const { signedUrl, publicUrl } = await _storageCall('signUpload', { key, contentType: type });
+
+  const put = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': type, 'x-upsert': 'false', 'Cache-Control': 'max-age=' + cacheControl },
+    body: blob,
+  });
+  if (!put.ok) throw new Error('Upload failed (HTTP ' + put.status + ')');
+
+  return { provider, key, publicUrl, bytes: blob.size, mimeType: type };
+}
+
+async function deleteImage({ provider = STORAGE_PROVIDER, key }) {
+  if (provider !== 'supabase') throw new Error('deleteImage: unknown provider ' + provider);
+  return _storageCall('delete', { key });
+}
+
+// storage_key is authoritative; public_url is a denormalised convenience.
+// Prefer the stored URL so rendering never needs a round trip.
+function getImageUrl({ provider = STORAGE_PROVIDER, key, publicUrl }) {
   if (publicUrl) return publicUrl;
-  // Once Supabase Storage bucket "meraki-images" is set up this becomes:
-  // return `${SUPABASE_URL}/storage/v1/object/public/meraki-images/${key}`;
+  if (!key) return null;
+  // No cached URL: the caller must resolve it once via getImageUrlAsync.
   return null;
+}
+
+async function getImageUrlAsync({ provider = STORAGE_PROVIDER, key, publicUrl }) {
+  if (publicUrl) return publicUrl;
+  if (!key) return null;
+  const { publicUrl: url } = await _storageCall('publicUrl', { key });
+  return url;
 }
 
 // Normalise any image value from DB or localStorage to a usable src string.
 // Handles: legacy base64 data URLs, HTTPS CDN URLs, future storage objects.
 function getDisplaySrc(value) {
   return resolveImageSrc(value);
+}
+
+// ─── PRODUCT IMAGE RESOLVER (dual-read) ──────────────────────────────────────
+// The single place that answers "what images does this product have?".
+//
+// If the product has product_images rows those are canonical. Otherwise the same
+// normalised shape is synthesised from the legacy fields, so a product that has
+// never been migrated behaves identically to one that has.
+//
+// Reading NEVER migrates anything and NEVER writes.
+//
+// Returns: [{ id, src, storage_key, storage_provider, role, sort_order,
+//             is_primary, show_on_website, alt, width, height, mime_type, legacy }]
+
+const PRODUCT_IMAGE_COLS =
+  'id,product_id,storage_provider,storage_key,public_url,image_role,sort_order,' +
+  'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,created_at,updated_at';
+
+// Role ordering for synthesised legacy images and as a tiebreak for stored rows.
+// Mirrors the PHOTO_SLOTS priorities so a synthesised gallery reads sensibly.
+const IMAGE_ROLE_ORDER = [
+  'model', 'front', 'original', 'skirt-front', 'blouse', 'back', 'bottom', 'dupatta', 'full',
+  'neckline', 'sleeves', 'hemline', 'skirt-detail', 'border', 'embroidery', 'detail', 'gallery', 'other'
+];
+
+function _roleRank(role) {
+  const i = IMAGE_ROLE_ORDER.indexOf(role);
+  return i === -1 ? IMAGE_ROLE_ORDER.length : i;
+}
+
+function _sortProductImages(list) {
+  return list.slice().sort((a, b) =>
+    (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) ||
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+    _roleRank(a.role) - _roleRank(b.role)
+  );
+}
+
+// Build the normalised shape from the legacy columns. Pure — no DB access.
+function _legacyProductImages(p) {
+  if (!p) return [];
+  const out = [];
+  const push = (src, role, alt) => {
+    if (!src) return;
+    out.push({
+      id: `legacy:${role}:${out.length}`,
+      src,
+      storage_key: null,
+      storage_provider: null,
+      role,
+      sort_order: out.length,
+      is_primary: out.length === 0,
+      show_on_website: true,
+      alt: alt || null,
+      width: null, height: null, mime_type: null,
+      legacy: true,
+    });
+  };
+
+  // Model photo leads when present — it is what the app already treats as the hero.
+  push(p.model_photo, 'model', p.name || null);
+  push(p.photo, 'original', p.name || null);
+
+  let details = [];
+  try {
+    const raw = p.detail_photos;
+    details = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw.trim() ? JSON.parse(raw) : []);
+  } catch (_) { details = []; }
+  if (Array.isArray(details)) {
+    details.forEach(d => {
+      // Prefer the framing Saima chose, then the cleaned version, then the original.
+      push(d.croppedImage || d.cleanedImage || d.image, d.slot || 'detail', d.label || null);
+    });
+  }
+
+  return out;
+}
+
+// Normalise a stored product_images row into the shared shape.
+function _normalizeImageRow(row) {
+  return {
+    id: row.id,
+    src: getImageUrl({ provider: row.storage_provider, key: row.storage_key, publicUrl: row.public_url }),
+    storage_key: row.storage_key,
+    storage_provider: row.storage_provider || 'supabase',
+    role: row.image_role || 'gallery',
+    sort_order: row.sort_order ?? 0,
+    is_primary: !!row.is_primary,
+    show_on_website: row.show_on_website !== false,
+    alt: row.alt_text || null,
+    width: row.width ?? null,
+    height: row.height ?? null,
+    mime_type: row.mime_type || null,
+    legacy: false,
+  };
+}
+
+// Session cache so opening the same product repeatedly does not re-query.
+// Cleared whenever a product's images change.
+const _productImagesCache = {};
+function invalidateProductImages(productId) { delete _productImagesCache[productId]; }
+
+async function getProductImages(p, { force = false } = {}) {
+  if (!p?.id) return [];
+  if (!force && _productImagesCache[p.id]) return _productImagesCache[p.id];
+
+  let rows = [];
+  try {
+    rows = await db('select', 'product_images', { filter: { product_id: p.id }, columns: PRODUCT_IMAGE_COLS }) || [];
+  } catch (e) {
+    // Table absent (migration 019 not yet run) or query failed — fall back to legacy.
+    console.warn('[images] product_images unavailable, using legacy fields:', e.message);
+    rows = [];
+  }
+
+  const list = rows.length
+    ? _sortProductImages(rows.map(_normalizeImageRow))
+    : _sortProductImages(_legacyProductImages(p));
+
+  _productImagesCache[p.id] = list;
+  return list;
+}
+
+// Synchronous legacy-only view, for render paths that cannot await.
+// Phase 2 will convert these call sites to the async resolver.
+function getProductImagesSync(p) {
+  return _productImagesCache[p?.id] || _sortProductImages(_legacyProductImages(p));
+}
+
+// Hero image for a product — the one the gallery leads with.
+function getPrimaryProductImage(p) {
+  const list = getProductImagesSync(p);
+  return list.find(i => i.is_primary) || list[0] || null;
+}
+
+// What the storefront will eventually receive: published images only, in order.
+function getWebsiteProductImages(p) {
+  return getProductImagesSync(p).filter(i => i.show_on_website && i.src);
 }
 
 // ─── FASHN COMPRESSION HELPER ────────────────────────────────────────────────
@@ -3369,6 +3573,9 @@ function handleSlotFile(slotId, input) {
   if (!file) return;
   const _slotDef = (PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other']).find(s => s.id === slotId);
   // Compress immediately so nothing above 1.5 MB can reach products.photo.
+  // Legacy path: this still base64s into products.photo, so it keeps the old
+  // 1800 px / 1.5 MB cap to stay under Vercel's 4.5 MB request ceiling. The
+  // larger MASTER_* settings apply once uploads move to object storage.
   preparePersistentImage(file, { maxPx: 1800, maxBytes: 1_500_000, quality: 0.84 })
     .then(({ dataUrl }) => {
       uploadedPhotos[slotId] = { file, dataUrl, label: _slotDef?.label || slotId };
@@ -7115,6 +7322,7 @@ function openProductDetail(id, opts) {
   const _DETAIL_CORE_COLS = [
     'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
     'description_en','description_ur','description_source','price','cost','status','reserved_for','customer_id',
+    'fabric','pieces','color','made','care',
     'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
