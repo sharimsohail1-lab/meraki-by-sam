@@ -1952,10 +1952,44 @@ function getSizeInventory(p) {
   } catch { return null; }
 }
 
-// Ensure every SIZE_ORDER key exists and is a non-negative integer. Safe to call on untrusted data.
+// Coerce any stored quantity to a non-negative integer.
+function _safeSizeQty(v) {
+  return Math.max(0, parseInt(v, 10) || 0);
+}
+
+// Keys of `inv` in display order: canonical sizes first (in SIZE_ORDER order),
+// then any other key the product actually carries, in insertion order.
+//
+// SIZE_ORDER is an ORDERING, not a whitelist. Every helper below iterates this
+// rather than SIZE_ORDER directly, so a numeric ('42') or special ('Free Size')
+// key is counted and rendered instead of being silently invisible. When
+// SIZE_ORDER later becomes numeric, legacy letter keys survive the same way.
+function orderedSizeKeys(inv) {
+  if (!inv || typeof inv !== 'object') return [];
+  const preferred = SIZE_ORDER.filter(s => s in inv);
+  const extras    = Object.keys(inv).filter(s => !SIZE_ORDER.includes(s));
+  return [...preferred, ...extras];
+}
+
+// True if the inventory already uses the canonical vocabulary at all.
+function _hasCanonicalSize(inv) {
+  return SIZE_ORDER.some(s => s in (inv || {}));
+}
+
+// Normalize quantities without ever dropping a key.
+//
+// Canonical keys are filled in at 0 only when the inventory is empty or already
+// canonical — so today's letter products keep their exact stored shape, while a
+// purely numeric product is not polluted with unrelated letter keys.
 function normalizeSizeInventory(inv) {
+  const src = (inv && typeof inv === 'object') ? inv : {};
   const out = {};
-  SIZE_ORDER.forEach(s => out[s] = Math.max(0, parseInt(inv?.[s] || 0, 10) || 0));
+  const keys = Object.keys(src);
+  if (!keys.length || _hasCanonicalSize(src)) {
+    SIZE_ORDER.forEach(s => { out[s] = _safeSizeQty(src[s]); });
+  }
+  // Every stored key is preserved, canonical or not.
+  keys.forEach(s => { out[s] = _safeSizeQty(src[s]); });
   return out;
 }
 
@@ -1963,14 +1997,14 @@ function normalizeSizeInventory(inv) {
 function getTotalAvailableQuantity(p) {
   const inv = getSizeInventory(p);
   if (!inv) return p.status === 'available' ? 1 : 0;
-  return SIZE_ORDER.reduce((sum, s) => sum + Math.max(0, inv[s] || 0), 0);
+  return orderedSizeKeys(inv).reduce((sum, s) => sum + _safeSizeQty(inv[s]), 0);
 }
 
 // True if product has at least one available unit (size-aware).
 function isProductAvailable(p) {
   const inv = getSizeInventory(p);
   if (!inv) return p.status === 'available';
-  return SIZE_ORDER.some(s => (inv[s] || 0) > 0);
+  return orderedSizeKeys(inv).some(s => _safeSizeQty(inv[s]) > 0);
 }
 
 // True if product is definitively sold out (size-aware).
@@ -1978,21 +2012,21 @@ function isProductSoldOut(p) {
   if (p.status === 'reserved') return false;
   const inv = getSizeInventory(p);
   if (!inv) return p.status === 'sold';
-  return !SIZE_ORDER.some(s => (inv[s] || 0) > 0);
+  return !orderedSizeKeys(inv).some(s => _safeSizeQty(inv[s]) > 0);
 }
 
 // Size labels with stock > 0, in canonical order.
 function getAvailableSizeLabels(p) {
   const inv = getSizeInventory(p);
   if (!inv) return [];
-  return SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  return orderedSizeKeys(inv).filter(s => _safeSizeQty(inv[s]) > 0);
 }
 
 // "S ×1 · M ×2" summary for stock cards, or null if no size_inventory.
 function getAvailableSizeSummary(p) {
   const inv = getSizeInventory(p);
   if (!inv) return null;
-  const sizes = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  const sizes = getAvailableSizeLabels(p);
   if (!sizes.length) return 'Sold Out';
   return sizes.map(s => `${s} ×${inv[s]}`).join(' · ');
 }
@@ -2008,7 +2042,7 @@ function decrementSizeInventory(p, size) {
 // Reserved status is always preserved — only available↔sold transitions happen here.
 function deriveStatusFromInventory(p, inv) {
   if (p.status === 'reserved') return p.status;
-  const total = SIZE_ORDER.reduce((sum, s) => sum + Math.max(0, inv[s] || 0), 0);
+  const total = orderedSizeKeys(inv).reduce((sum, s) => sum + _safeSizeQty(inv[s]), 0);
   if (total === 0) return 'sold';
   return 'available';
 }
@@ -2020,10 +2054,17 @@ const sizeSummaryText   = getAvailableSizeSummary;
 
 // ─── SIZE STEPPER COMPONENT ───────────────────────────────────────────────────
 // Renders size steppers into a container. sizeState is a plain object mutated in place.
+// Canonical sizes always get a stepper; any extra key already on the product
+// gets one too, so editing can never drop it.
+function sizeStepperKeys(state) {
+  const extras = Object.keys(state || {}).filter(s => !SIZE_ORDER.includes(s));
+  return [...SIZE_ORDER, ...extras];
+}
+
 function renderSizeSteppers(containerId, sizeState, onChangeCallback) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = SIZE_ORDER.map(s => {
+  el.innerHTML = sizeStepperKeys(sizeState).map(s => {
     const count = sizeState[s] || 0;
     return `<div class="size-stepper">
       <div class="size-label">${s}</div>
@@ -2049,7 +2090,7 @@ function _sizeStep(containerId, size, delta) {
 }
 
 function _updateSizeTotalNote(containerId, state) {
-  const total = SIZE_ORDER.reduce((sum, s) => sum + (state[s] || 0), 0);
+  const total = sizeStepperKeys(state).reduce((sum, s) => sum + _safeSizeQty(state[s]), 0);
   const noteId = containerId === 'intakeSizeGrid' ? 'intakeSizeTotalNote' : 'detailSizeTotalNote';
   const el = document.getElementById(noteId);
   if (el) el.textContent = total > 0 ? `Total available: ${total}` : 'No sizes added yet';
@@ -2063,7 +2104,10 @@ function initIntakeSizeSteppers() {
 function initDetailSizeSteppers(p) {
   const inv = getSizeInventory(p) || {};
   const state = {};
-  SIZE_ORDER.forEach(s => state[s] = inv[s] || 0);
+  SIZE_ORDER.forEach(s => state[s] = _safeSizeQty(inv[s]));
+  // Carry over any non-canonical key the product already has, so it stays
+  // editable and survives the next save.
+  Object.keys(inv).forEach(s => { if (!(s in state)) state[s] = _safeSizeQty(inv[s]); });
   window._sizeStates['detailSizeGrid'] = state;
   renderSizeSteppers('detailSizeGrid', state);
 }
@@ -3717,7 +3761,7 @@ async function _doSaveProduct() {
 
   // Collect size inventory from intake steppers (only save if any size > 0)
   const intakeSizeState = window._sizeStates['intakeSizeGrid'] || {};
-  const hasSizes = SIZE_ORDER.some(s => (intakeSizeState[s] || 0) > 0);
+  const hasSizes = sizeStepperKeys(intakeSizeState).some(s => _safeSizeQty(intakeSizeState[s]) > 0);
   const size_inventory = hasSizes ? JSON.stringify(intakeSizeState) : null;
 
   const price = parseInt(document.getElementById('priceInput').value) || null;
@@ -7224,7 +7268,7 @@ async function markSoldWithSizePicker() {
     openSheet('soldNoInventorySheet');
     return;
   }
-  const available = SIZE_ORDER.filter(s => (inv[s] || 0) > 0);
+  const available = orderedSizeKeys(inv).filter(s => _safeSizeQty(inv[s]) > 0);
   if (available.length === 0) {
     showToast('All inventory already at zero');
     return;
@@ -7287,7 +7331,7 @@ async function _markSizeAsSold(size, qty) {
   const inv = normalizeSizeInventory(getSizeInventory(currentProduct));
   inv[size] = Math.max(0, (inv[size] || 0) - qty);
   const newStatus = deriveStatusFromInventory(currentProduct, inv);
-  const total = SIZE_ORDER.reduce((sum, s) => sum + (inv[s] || 0), 0);
+  const total = orderedSizeKeys(inv).reduce((sum, s) => sum + _safeSizeQty(inv[s]), 0);
   const update = {
     size_inventory: JSON.stringify(inv),
     status: newStatus,
@@ -7336,8 +7380,8 @@ async function _confirmMarkAllSold(btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Marking sold…'; }
   closeSheet('markAllSoldSheet');
   const inv = normalizeSizeInventory(getSizeInventory(currentProduct) || {});
-  // Zero every size key
-  SIZE_ORDER.forEach(s => { inv[s] = 0; });
+  // Zero every size key, canonical or not
+  Object.keys(inv).forEach(s => { inv[s] = 0; });
   const update = {
     size_inventory: JSON.stringify(inv),
     status: 'sold',
@@ -7370,7 +7414,7 @@ function _collectProductDetailDraft() {
   const collection_names = JSON.stringify(_collArr);
   const rawSizeState = window._sizeStates['detailSizeGrid'] || {};
   const detailSizeState = normalizeSizeInventory(rawSizeState);
-  const hasSizes = SIZE_ORDER.some(s => detailSizeState[s] > 0);
+  const hasSizes = orderedSizeKeys(detailSizeState).some(s => _safeSizeQty(detailSizeState[s]) > 0);
   const hadSizesBefore = !!getSizeInventory(currentProduct);
   const size_inventory = (hasSizes || hadSizesBefore) ? JSON.stringify(detailSizeState) : null;
   return { price, notes, collection_name, collection_names, _collArr, size_inventory, detailSizeState };
