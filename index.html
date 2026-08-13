@@ -1121,7 +1121,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase">Photos</div>
           <span id="photosCountNote" style="font-size:11px;color:var(--muted)"></span>
         </div>
-        <div id="photosLegacyNote" style="display:none;font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:6px;padding:8px 10px;margin:6px 0;line-height:1.5"></div>
         <div id="photosGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:8px 0 10px"></div>
         <div id="photosStatus" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
         <button id="addPhotoBtn" class="btn" style="width:100%;background:var(--sand-light);color:var(--ink);border:1px dashed var(--border)" onclick="document.getElementById('galleryFileInput').click()"><i class="ti ti-plus"></i> Add Photo</button>
@@ -1963,9 +1962,6 @@ const PRODUCT_SUMMARY_COLS = [
   'is_archived','created_at','updated_at'
 ].join(',');
 
-// Session image cache — keyed by product id, value = { model_photo, photo } or null
-const _cardImageCache = {};
-let _cardImagePending = new Set();
 
 // ─── SIZE INVENTORY HELPERS ───────────────────────────────────────────────────
 // Single source of truth for all availability logic.
@@ -2329,83 +2325,10 @@ async function db(action, table, { id, data, filter, columns } = {}) {
   return json.data;
 }
 
-// ─── LAZY CARD IMAGE LOADING ──────────────────────────────────────────────────
-// Loads product thumbnail images on-demand as cards enter the viewport.
-// Max 3 concurrent fetches; each fetch gets only id+model_photo+photo for that one product.
-// Results cached in _cardImageCache for the session.
-let _lazyImgObserver = null;
-const _LAZY_MAX_CONCURRENT = 3;
-
-function _setupLazyCardImages() {
-  if (_lazyImgObserver) _lazyImgObserver.disconnect();
-  _lazyImgObserver = new IntersectionObserver(entries => {
-    entries.filter(e => e.isIntersecting).forEach(entry => {
-      const el = entry.target;
-      const id = el.dataset.lazyImg || el.dataset.lazyThumb;
-      if (!id) return;
-      _lazyImgObserver.unobserve(el);
-      _loadCardImage(id, el);
-    });
-  }, { rootMargin: '200px' });
-  document.querySelectorAll('[data-lazy-img],[data-lazy-thumb]').forEach(el => {
-    const id = el.dataset.lazyImg || el.dataset.lazyThumb;
-    if (id && !_cardImageCache[id]) _lazyImgObserver.observe(el);
-  });
-}
-
-async function _loadCardImage(id, el) {
-  if (_cardImageCache[id]) { _applyLazyImage(id, el, _cardImageCache[id]); return; }
-  if (_cardImagePending.has(id)) return;
-  if (_cardImagePending.size >= _LAZY_MAX_CONCURRENT) {
-    // Retry after current batch drains — re-observe so IntersectionObserver handles it
-    setTimeout(() => { if (_lazyImgObserver && el.isConnected) _lazyImgObserver.observe(el); }, 600);
-    return;
-  }
-  _cardImagePending.add(id);
-  try {
-    const rows = await db('select', 'products', { filter: { id }, columns: 'id,model_photo,photo' });
-    const row = rows?.[0];
-    const imgData = row ? { model_photo: row.model_photo || null, photo: row.photo || null } : null;
-    _cardImageCache[id] = imgData;
-    // Merge photos into inventory entry so product detail has them after lazy load
-    const invIdx = inventory.findIndex(x => x.id === id);
-    if (invIdx >= 0 && row) {
-      inventory[invIdx].model_photo = row.model_photo;
-      inventory[invIdx].photo = row.photo;
-    }
-    _applyLazyImage(id, el, imgData);
-  } catch(_) {
-    // silent failure — placeholder stays
-    _cardImageCache[id] = null;
-  } finally {
-    _cardImagePending.delete(id);
-  }
-}
-
-function _applyLazyImage(id, el, imgData) {
-  if (!imgData) return;
-  const src = imgData.model_photo || imgData.photo;
-  if (!src || !el.isConnected) return;
-  // Stock card thumb — data-lazy-img on .product-thumb div
-  if (el.dataset.lazyImg !== undefined && el.classList.contains('product-thumb')) {
-    const img = document.createElement('img');
-    img.src = src;
-    img.alt = '';
-    img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
-    el.insertBefore(img, el.firstChild);
-    const icon = el.querySelector('.ti-hanger');
-    if (icon) icon.style.display = 'none';
-  }
-  // Collection thumbnail — data-lazy-thumb on placeholder div
-  if (el.dataset.lazyThumb !== undefined) {
-    const img = document.createElement('img');
-    img.src = src;
-    img.className = el.className.includes('collection-thumb') || el.closest('.collection-thumb-row')
-      ? 'collection-thumb' : 'catalog-item-photo';
-    img.alt = '';
-    el.replaceWith(img);
-  }
-}
+// ─── CARD IMAGES ──────────────────────────────────────────────────────────────
+// There is no lazy per-card image fetch any more. product_images rows carry URLs
+// rather than bytes, so the whole table is loaded once at boot (see
+// preloadAllProductImages) and every card resolves its hero synchronously.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function callClaude(messages, system = '', maxTokens = 1024) {
@@ -2550,7 +2473,8 @@ function buildFashnPrompt(analysis, gType) {
 // Requires a model photo stored in localStorage under 'fashnModelPhoto'.
 // Generation is async — polls /api/fashn?id=xxx until completed or failed.
 // Returns a CDN URL; applyWatermark() proxies and watermarks it.
-// Returns ONE structural garment image for FASHN. Priority: front > full > first structural > product.photo.
+// Returns ONE structural garment image for FASHN. Priority: front > full >
+// first structural slot > the product's saved photography from product_images.
 // Never picks detail slots (neckline, sleeves, hemline, etc.).
 function selectFashnGarmentImage(photos, product) {
   const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
@@ -2570,7 +2494,9 @@ function selectFashnGarmentImage(photos, product) {
     if (photos[s.id]?.dataUrl) return { src: photos[s.id].dataUrl, slot: s.id };
   }
 
-  if (product?.photo) return { src: product.photo, slot: 'saved' };
+  // Fall back to the product's saved photography — the real garment, never the AI image.
+  const saved = product && (getOriginalProductImage(product) || getPrimaryProductImage(product));
+  if (saved) return { src: saved.src, slot: 'saved' };
   return null;
 }
 
@@ -2915,7 +2841,7 @@ const PRODUCT_IMAGE_COLS =
   'id,product_id,storage_provider,storage_key,public_url,image_role,sort_order,' +
   'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,created_at,updated_at';
 
-// Role ordering for synthesised legacy images and as a tiebreak for stored rows.
+// Role ordering, used as a tiebreak when sort_order matches.
 // Mirrors the PHOTO_SLOTS priorities so a synthesised gallery reads sensibly.
 const IMAGE_ROLE_ORDER = [
   'model', 'front', 'original', 'skirt-front', 'blouse', 'back', 'bottom', 'dupatta', 'full',
@@ -2933,46 +2859,6 @@ function _sortProductImages(list) {
     (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
     _roleRank(a.role) - _roleRank(b.role)
   );
-}
-
-// Build the normalised shape from the legacy columns. Pure — no DB access.
-function _legacyProductImages(p) {
-  if (!p) return [];
-  const out = [];
-  const push = (src, role, alt) => {
-    if (!src) return;
-    out.push({
-      id: `legacy:${role}:${out.length}`,
-      src,
-      storage_key: null,
-      storage_provider: null,
-      role,
-      sort_order: out.length,
-      is_primary: out.length === 0,
-      show_on_website: true,
-      alt: alt || null,
-      width: null, height: null, mime_type: null,
-      legacy: true,
-    });
-  };
-
-  // Model photo leads when present — it is what the app already treats as the hero.
-  push(p.model_photo, 'model', p.name || null);
-  push(p.photo, 'original', p.name || null);
-
-  let details = [];
-  try {
-    const raw = p.detail_photos;
-    details = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw.trim() ? JSON.parse(raw) : []);
-  } catch (_) { details = []; }
-  if (Array.isArray(details)) {
-    details.forEach(d => {
-      // Prefer the framing Saima chose, then the cleaned version, then the original.
-      push(d.croppedImage || d.cleanedImage || d.image, d.slot || 'detail', d.label || null);
-    });
-  }
-
-  return out;
 }
 
 // Normalise a stored product_images row into the shared shape.
@@ -2994,55 +2880,86 @@ function _normalizeImageRow(row) {
   };
 }
 
-// Session cache so opening the same product repeatedly does not re-query.
-// Cleared whenever a product's images change.
+// product_images is the ONLY source of product imagery. products.photo,
+// products.model_photo and products.detail_photos are dormant: still present in
+// the database as a backup of the pre-storage era, but nothing reads them and
+// nothing new is written to them. A product with no product_images rows shows a
+// placeholder — it never falls back to a legacy column.
+//
+// The whole table is small (URLs and metadata, no bytes) so every row is loaded
+// once at boot into this cache. That makes image lookup synchronous everywhere,
+// which is why the old per-card lazy image fetches are gone.
 const _productImagesCache = {};
+let _productImagesAllLoaded = false;
+
 function invalidateProductImages(productId) { delete _productImagesCache[productId]; }
+
+// Load every row in one query. Called at boot; failure is non-fatal — products
+// simply render placeholders until a per-product fetch succeeds.
+async function preloadAllProductImages() {
+  const rows = await db('select', 'product_images', { columns: PRODUCT_IMAGE_COLS }) || [];
+  const byProduct = {};
+  rows.forEach(r => { (byProduct[r.product_id] = byProduct[r.product_id] || []).push(r); });
+  Object.keys(byProduct).forEach(pid => {
+    _productImagesCache[pid] = { list: _sortProductImages(byProduct[pid].map(_normalizeImageRow)) };
+  });
+  _productImagesAllLoaded = true;
+  return rows.length;
+}
 
 async function getProductImages(p, { force = false } = {}) {
   if (!p?.id) return [];
-  // A cached entry computed before hydration is incomplete (the summary row
-  // carries no image columns), so it is replaced once a hydrated product arrives.
-  const cached = _productImagesCache[p.id];
-  if (!force && cached && (cached.hydrated || !p._hydrated)) return cached.list;
+  if (!force && _productImagesCache[p.id]) return _productImagesCache[p.id].list;
+  // A product absent from a completed preload genuinely has no images.
+  if (!force && _productImagesAllLoaded) return [];
 
   let rows = [];
   try {
     rows = await db('select', 'product_images', { filter: { product_id: p.id }, columns: PRODUCT_IMAGE_COLS }) || [];
   } catch (e) {
-    // Table absent (migration 019 not yet run) or query failed — fall back to legacy.
-    console.warn('[images] product_images unavailable, using legacy fields:', e.message);
-    rows = [];
+    console.warn('[images] product_images query failed:', e.message);
+    return _productImagesCache[p.id]?.list || [];
   }
 
-  // Mixed state: a product part-way through migration has storage rows AND legacy
-  // fields. Returning only the storage rows would make the rest of its photos
-  // vanish, so both are merged.
-  //
-  // Deduplication is by ROLE, not by bytes. Byte/hash comparison is not possible
-  // here — legacy values are base64 in Postgres while storage images are remote
-  // URLs, so comparing them would mean downloading every master on every open.
-  // Role is deterministic and matches how images are actually replaced: uploading
-  // a new 'neckline' is what supersedes the legacy neckline. A legacy image is
-  // hidden only once a storage-backed image claims its role.
-  const stored = rows.map(_normalizeImageRow);
-  const claimedRoles = new Set(stored.map(i => i.role));
-  const legacy = _legacyProductImages(p).filter(i => !claimedRoles.has(i.role));
-
-  // Storage rows lead; surviving legacy images follow, so a migrated hero stays
-  // the hero. Legacy images only claim primary when nothing is stored yet.
-  if (stored.length) legacy.forEach(i => { i.is_primary = false; });
-
-  const list = _sortProductImages(stored).concat(_sortProductImages(legacy));
-
-  _productImagesCache[p.id] = { list, hydrated: !!p._hydrated };
+  const list = _sortProductImages(rows.map(_normalizeImageRow));
+  _productImagesCache[p.id] = { list };
   return list;
 }
 
-// Synchronous legacy-only view, for render paths that cannot await.
-// Phase 2 will convert these call sites to the async resolver.
+// Synchronous view for render paths that cannot await. Empty until the boot
+// preload lands, which is the same placeholder state as a product with no photos.
 function getProductImagesSync(p) {
-  return _productImagesCache[p?.id]?.list || _sortProductImages(_legacyProductImages(p));
+  return _productImagesCache[p?.id]?.list || [];
+}
+
+// The one hero rule, used by every consumer: is_primary, else lowest sort_order,
+// else nothing. show_on_website is deliberately ignored — it governs storefront
+// eligibility only, never what Saima sees inside the app or in a catalog.
+function getPrimaryProductImage(p) {
+  const list = getProductImagesSync(p);
+  return list.find(i => i.is_primary) || list[0] || null;
+}
+
+// Hero src for cards, thumbnails and any other single-image surface.
+function productImageSrc(p) {
+  return getPrimaryProductImage(p)?.src || null;
+}
+
+// The AI-generated model image, if the product has one.
+function getModelProductImage(p) {
+  return getProductImagesSync(p).find(i => i.role === 'model') || null;
+}
+
+// A real photograph of the garment — anything that is not the AI model image.
+// Prefers the hero when the hero is itself a real photo.
+function getOriginalProductImage(p) {
+  const list = getProductImagesSync(p).filter(i => i.role !== 'model');
+  return list.find(i => i.is_primary) || list[0] || null;
+}
+
+// Images eligible for the public storefront. Separate from everything above.
+function getWebsiteProductImages(p) {
+  return getProductImagesSync(p).filter(i => i.show_on_website);
 }
 
 // ─── PRODUCT DETAIL PHOTOS ───────────────────────────────────────────────────
@@ -3129,14 +3046,6 @@ async function renderProductPhotos(p, { force = false } = {}) {
   const images = await getProductImages(p, { force });
   window._detailPhotos = images;
 
-  const legacyCount = images.filter(i => i.legacy).length;
-  const note = document.getElementById('photosLegacyNote');
-  if (note) {
-    if (legacyCount) {
-      note.textContent = `${legacyCount} photo${legacyCount > 1 ? 's are' : ' is'} from the older single-photo system. They still show everywhere, and stay until you replace them.`;
-      note.style.display = 'block';
-    } else note.style.display = 'none';
-  }
   const cnt = document.getElementById('photosCountNote');
   if (cnt) cnt.textContent = images.length ? `${images.length} photo${images.length > 1 ? 's' : ''}` : '';
 
@@ -3156,32 +3065,33 @@ async function renderProductPhotos(p, { force = false } = {}) {
         ${src ? `<img src="${_esc(src)}" loading="lazy" alt="${_esc(img.alt || '')}" onerror="_photoImgFallback(this, ${_esc(JSON.stringify(raw || ''))})" style="width:100%;height:100%;object-fit:cover;display:block">`
               : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)"><i class="ti ti-photo-off"></i></div>'}
         ${img.is_primary ? '<div style="position:absolute;top:6px;left:6px;background:var(--burgundy);color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">HERO</div>' : ''}
-        ${img.legacy ? '<div style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:3px 7px;border-radius:10px">Legacy</div>' : ''}
       </div>
       <div style="padding:8px">
-        ${img.legacy
-          ? `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">${_esc(_roleLabel(img.role))}</div>`
-          : `<select onchange="setPhotoRole('${img.id}',this.value)" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;margin-bottom:6px">${roleOpts}</select>`}
-        ${img.legacy ? '' : `
+        <select onchange="setPhotoRole('${img.id}',this.value)" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;margin-bottom:6px">${roleOpts}</select>
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer">
           <input type="checkbox" ${img.show_on_website ? 'checked' : ''} onchange="setPhotoWebsite('${img.id}',this.checked)" style="accent-color:var(--burgundy);width:14px;height:14px">
           Show on website
-        </label>`}
+        </label>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
           <button onclick="movePhoto(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Move earlier" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-arrow-left"></i></button>
           <button onclick="movePhoto(${i},1)" ${i === images.length - 1 ? 'disabled' : ''} title="Move later" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === images.length - 1 ? '.35' : '1'}"><i class="ti ti-arrow-right"></i></button>
-          ${img.legacy || img.is_primary ? '' : `<button onclick="setPhotoHero('${img.id}')" title="Set as hero" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--burgundy)"><i class="ti ti-star"></i></button>`}
+          ${img.is_primary ? '' : `<button onclick="setPhotoHero('${img.id}')" title="Set as hero" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--burgundy)"><i class="ti ti-star"></i></button>`}
           <button onclick="replacePhoto('${img.id}')" title="Replace" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink)"><i class="ti ti-refresh"></i></button>
-          ${img.legacy ? '' : `<button onclick="deletePhoto('${img.id}')" title="Delete" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:#c0392b"><i class="ti ti-trash"></i></button>`}
+          <button onclick="deletePhoto('${img.id}')" title="Delete" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:#c0392b"><i class="ti ti-trash"></i></button>
         </div>
       </div>
     </div>`;
   }).join('');
 }
 
+// Any change to a product's photos moves the hero, so the detail hero and every
+// list that shows a thumbnail are re-rendered from the refreshed cache.
 async function _refreshPhotos() {
   invalidateProductImages(currentProduct?.id);
   await renderProductPhotos(currentProduct, { force: true });
+  if (currentProduct) _applyPhotoView(_getPhotoViewPref(), currentProduct);
+  renderInventory();
+  _invalidateMktPreview();
 }
 
 // Prepare + upload + create the metadata row. Bytes go straight to storage.
@@ -3195,7 +3105,7 @@ async function _uploadGalleryImage(file, { role = 'gallery', makePrimary = false
   const up = await uploadImage({ blob: prepared.blob, key, contentType: prepared.mimeType });
 
   _photosStatus('Saving…');
-  const existing = (window._detailPhotos || []).filter(i => !i.legacy);
+  const existing = window._detailPhotos || [];
   const row = {
     product_id: currentProduct.id,
     storage_provider: up.provider,
@@ -3212,6 +3122,51 @@ async function _uploadGalleryImage(file, { role = 'gallery', makePrimary = false
   };
   const rows = await db('insert', 'product_images', { data: row });
   return { row: rows?.[0], upload: up };
+}
+
+// AI-generated model images land in product_images with role 'model', exactly
+// like every other photo. A product has at most one: an existing model row is
+// replaced (row repointed, old object deleted) rather than duplicated.
+// The model image becomes the hero, which is what Saima generates it for.
+async function saveModelImageToStorage(productId, src) {
+  if (!productId || !src) throw new Error('saveModelImageToStorage: missing product or image');
+  const prepared = await preparePersistentImage(src);
+  const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
+  const key = buildImageKey(productId, ext);
+  const up = await uploadImage({ blob: prepared.blob, key, contentType: prepared.mimeType });
+
+  const existing = getProductImagesSync({ id: productId });
+  const prevModel = existing.find(i => i.role === 'model');
+  const prevPrimary = existing.find(i => i.is_primary && i.id !== prevModel?.id);
+  const dims = { width: prepared.width, height: prepared.height, bytes: prepared.bytes, mime_type: prepared.mimeType };
+
+  // Clear the old hero first — the partial unique index allows only one.
+  if (prevPrimary) await db('update', 'product_images', { id: prevPrimary.id, data: { is_primary: false } });
+
+  if (prevModel) {
+    const oldKey = prevModel.storage_key;
+    await db('update', 'product_images', { id: prevModel.id, data: {
+      storage_key: up.key, public_url: up.publicUrl, is_primary: true,
+      updated_at: new Date().toISOString(), ...dims,
+    }});
+    if (oldKey && oldKey !== up.key) {
+      try { await deleteImage({ provider: prevModel.storage_provider, key: oldKey }); }
+      catch (e) { console.warn('[images] old model object left behind:', oldKey, e.message); }
+    }
+  } else {
+    await db('insert', 'product_images', { data: {
+      product_id: productId,
+      storage_provider: up.provider, storage_key: up.key, public_url: up.publicUrl,
+      image_role: 'model',
+      sort_order: existing.length,
+      is_primary: true,
+      show_on_website: true,
+      ...dims,
+    }});
+  }
+
+  invalidateProductImages(productId);
+  await getProductImages({ id: productId }, { force: true });
 }
 
 async function handleGalleryUpload(input) {
@@ -3242,7 +3197,7 @@ async function setPhotoHero(imageId) {
   if (!currentProduct || _photosBusy) return;
   _photosBusy = true;
   _photosStatus('Updating…');
-  const prev = (window._detailPhotos || []).find(i => i.is_primary && !i.legacy && i.id !== imageId);
+  const prev = (window._detailPhotos || []).find(i => i.is_primary && i.id !== imageId);
   try {
     if (prev) await db('update', 'product_images', { id: prev.id, data: { is_primary: false } });
     await db('update', 'product_images', { id: imageId, data: { is_primary: true } });
@@ -3278,14 +3233,12 @@ async function setPhotoWebsite(imageId, checked) {
   } catch (e) { _photosStatus(''); showToast('Could not update visibility: ' + e.message); await _refreshPhotos(); }
 }
 
-// Reorder writes sort_order for every stored image so the sequence stays dense.
-// Legacy images are display-only and cannot be moved.
+// Reorder writes sort_order for every image so the sequence stays dense.
 async function movePhoto(index, delta) {
   if (!currentProduct || _photosBusy) return;
-  const all = window._detailPhotos || [];
-  const stored = all.filter(i => !i.legacy);
-  const img = all[index];
-  if (!img || img.legacy) { showToast('Legacy photos cannot be reordered — replace it first'); return; }
+  const stored = window._detailPhotos || [];
+  const img = stored[index];
+  if (!img) return;
 
   const from = stored.findIndex(i => i.id === img.id);
   const to = from + delta;
@@ -3319,7 +3272,7 @@ async function movePhoto(index, delta) {
 async function deletePhoto(imageId) {
   if (!currentProduct || _photosBusy) return;
   const img = (window._detailPhotos || []).find(i => i.id === imageId);
-  if (!img || img.legacy) return;
+  if (!img) return;
   if (!confirm('Delete this photo? This cannot be undone.')) return;
 
   _photosBusy = true;
@@ -3341,8 +3294,6 @@ async function deletePhoto(imageId) {
 // Replace: upload to a NEW key, repoint the row, then delete the old object.
 // The product is never without an image, and the old key is never overwritten,
 // so a CDN copy of the previous image cannot go stale.
-// Replacing a legacy image creates a storage-backed image in its role — that is
-// the lazy migration path. The legacy column is left untouched.
 let _replaceTargetId = null;
 function replacePhoto(imageId) {
   _replaceTargetId = imageId;
@@ -3360,54 +3311,35 @@ async function handleGalleryReplace(input) {
   if (!img) return;
   _photosBusy = true;
   try {
-    if (img.legacy) {
-      // Lazy migration: the replacement becomes a storage image claiming this role.
-      await _uploadGalleryImage(file, { role: img.role, makePrimary: img.is_primary });
-      await _refreshPhotos();
-      _photosStatus('');
-      showToast('Replaced ✓ — now stored on the website system');
-    } else {
-      _photosStatus('Preparing…');
-      const prepared = await preparePersistentImage(file);
-      const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
-      const newKey = buildImageKey(currentProduct.id, ext);
+    _photosStatus('Preparing…');
+    const prepared = await preparePersistentImage(file);
+    const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
+    const newKey = buildImageKey(currentProduct.id, ext);
 
-      _photosStatus('Uploading…');
-      const up = await uploadImage({ blob: prepared.blob, key: newKey, contentType: prepared.mimeType });
+    _photosStatus('Uploading…');
+    const up = await uploadImage({ blob: prepared.blob, key: newKey, contentType: prepared.mimeType });
 
-      _photosStatus('Saving…');
-      const oldKey = img.storage_key;
-      await db('update', 'product_images', { id: targetId, data: {
-        storage_key: up.key, public_url: up.publicUrl,
-        width: prepared.width, height: prepared.height,
-        bytes: prepared.bytes, mime_type: prepared.mimeType,
-        updated_at: new Date().toISOString(),
-      }});
-      // Only now is the old object unreferenced.
-      try { await deleteImage({ provider: img.storage_provider, key: oldKey }); }
-      catch (objErr) { console.warn('[photos] old object left behind:', oldKey, objErr.message); }
+    _photosStatus('Saving…');
+    const oldKey = img.storage_key;
+    await db('update', 'product_images', { id: targetId, data: {
+      storage_key: up.key, public_url: up.publicUrl,
+      width: prepared.width, height: prepared.height,
+      bytes: prepared.bytes, mime_type: prepared.mimeType,
+      updated_at: new Date().toISOString(),
+    }});
+    // Only now is the old object unreferenced.
+    try { await deleteImage({ provider: img.storage_provider, key: oldKey }); }
+    catch (objErr) { console.warn('[photos] old object left behind:', oldKey, objErr.message); }
 
-      await _refreshPhotos();
-      _photosStatus('');
-      showToast('Replaced ✓');
-    }
+    await _refreshPhotos();
+    _photosStatus('');
+    showToast('Replaced ✓');
   } catch (e) {
     console.warn('[photos] replace failed', e);
     _photosStatus('');
     showToast('Could not replace photo: ' + e.message);
     await _refreshPhotos();
   } finally { _photosBusy = false; }
-}
-
-// Hero image for a product — the one the gallery leads with.
-function getPrimaryProductImage(p) {
-  const list = getProductImagesSync(p);
-  return list.find(i => i.is_primary) || list[0] || null;
-}
-
-// What the storefront will eventually receive: published images only, in order.
-function getWebsiteProductImages(p) {
-  return getProductImagesSync(p).filter(i => i.show_on_website && i.src);
 }
 
 // ─── FASHN COMPRESSION HELPER ────────────────────────────────────────────────
@@ -4460,62 +4392,29 @@ async function _doSaveProduct() {
   btn.disabled = true;
   btn.innerHTML = '<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Saving…';
 
-  // Structural photo for products.photo — front preferred
-  const uploadedPhoto = uploadedPhotos['front']?.dataUrl || uploadedPhotos[Object.keys(uploadedPhotos)[0]]?.dataUrl || null;
-  const modelPhoto = currentAnalysis._modelPhotoUrl || null;
-  // Always store original garment photo in products.photo so future regenerations
-  // reference the real garment, never an AI image. Display uses model_photo || photo.
-  const photo = uploadedPhoto;
+  // Intake no longer writes any base64 into products. Every uploaded photo goes
+  // to object storage after the row exists, because the storage key is derived
+  // from the product id. Ordering: 'front' leads and becomes the hero, then the
+  // remaining structural slots by priority, then detail close-ups, then the AI
+  // model image if one was generated during intake.
+  const _slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
+  const _slotMap = Object.fromEntries(_slots.map(sl => [sl.id, sl]));
+  const _extraLabel = id => extraSlots.find(sl => sl.id === id)?.label || id;
 
-  // Collect detail-role photos into a JSONB array by slot
-  const slots = PHOTO_SLOTS[garmentType] || PHOTO_SLOTS['other'];
-  const slotMap = Object.fromEntries(slots.map(s => [s.id, s]));
+  const _slotRank = id => {
+    if (id === 'front') return -2;
+    if (id === 'full') return -1;
+    const def = _slotMap[id];
+    if (!def) return 900;                       // custom extra slot
+    return def.role === 'structural' ? 100 - (def.priority || 0) : 500 - (def.priority || 0);
+  };
 
-  // Predefined detail slots (role === 'detail' in PHOTO_SLOTS)
-  const preDefinedDetails = Object.entries(uploadedPhotos)
-    .filter(([id, p]) => slotMap[id]?.role === 'detail' && p.dataUrl)
-    .map(([id, p]) => ({ _id: id, slot: id, label: slotMap[id].label, image: p.dataUrl, source: 'upload' }));
+  const _intakeImages = Object.entries(uploadedPhotos)
+    .filter(([, v]) => v?.dataUrl)
+    .sort(([a], [b]) => _slotRank(a) - _slotRank(b))
+    .map(([id, v]) => ({ src: v.dataUrl, role: id, alt: _slotMap[id]?.label || _extraLabel(id) }));
 
-  // Custom extra slots — treat as detail photos (they're close-ups Sam explicitly added)
-  const extraSlotIdSet = new Set(extraSlots.map(s => s.id));
-  const extraDetails = Object.entries(uploadedPhotos)
-    .filter(([id, p]) => extraSlotIdSet.has(id) && p.dataUrl)
-    .map(([id, p]) => {
-      const slotDef = extraSlots.find(s => s.id === id);
-      const label = slotDef?.label || id;
-      return { _id: id, slot: label.toLowerCase().replace(/[^a-z0-9]/g, '-'), label, image: p.dataUrl, source: 'upload' };
-    });
-
-  // Combine — predefined first (higher priority), then custom extras
-  const allDetails = [...preDefinedDetails, ...extraDetails];
-
-  // Auto-assign useAsInset: true to best detail photos.
-  // Custom extra slots Sam added always qualify (she explicitly created them for close-ups).
-  // Predefined detail slots qualify only when they match a known detail-area keyword.
-  // Front/back/full-look structural photos never become insets automatically.
-  const _INSET_PRIORITY_KEYS = ['embroidery', 'neckline', 'border', 'hemline', 'dupatta', 'sleeves', 'skirt-detail', 'skirt detail', 'buttons', 'mirror', 'cuff', 'daman', 'trouser', 'lace', 'sequin', 'zari', 'motif'];
-  const _sortedForInset = allDetails.slice().sort((a, b) => {
-    const la = (a.slot + ' ' + a.label).toLowerCase();
-    const lb = (b.slot + ' ' + b.label).toLowerCase();
-    const sa = _INSET_PRIORITY_KEYS.findIndex(k => la.includes(k));
-    const sb = _INSET_PRIORITY_KEYS.findIndex(k => lb.includes(k));
-    // Extra slots: score as 500 if no keyword match (still prefer over unmatched predefined)
-    const isExtraA = extraSlotIdSet.has(a._id);
-    const isExtraB = extraSlotIdSet.has(b._id);
-    return (sa === -1 ? (isExtraA ? 500 : 999) : sa) - (sb === -1 ? (isExtraB ? 500 : 999) : sb);
-  });
-  // Only auto-select photos that are true detail candidates (keyword match or custom extra slot)
-  const _insetCandidates = _sortedForInset.filter(e => {
-    const score = _INSET_PRIORITY_KEYS.findIndex(k => (e.slot + ' ' + e.label).toLowerCase().includes(k));
-    return score !== -1 || extraSlotIdSet.has(e._id);
-  });
-  const _insetSet = new Set(_insetCandidates.slice(0, 2).map(e => e._id));
-
-  // All onboarding detail photos save as useAsInset: false — Sam chooses in Product Detail
-  const detailPhotosArr = allDetails.map(e => ({
-    slot: e.slot, label: e.label, image: e.image, useAsInset: false, insetOrder: null, source: e.source
-  }));
-  const detail_photos = detailPhotosArr.length ? JSON.stringify(detailPhotosArr) : null;
+  const _intakeModelPhoto = currentAnalysis._modelPhotoUrl || null;
 
   // Collect size inventory from intake steppers (only save if any size > 0)
   const intakeSizeState = window._sizeStates['intakeSizeGrid'] || {};
@@ -4561,9 +4460,6 @@ async function _doSaveProduct() {
       price,
       cost,
       status: 'available',
-      photo,
-      model_photo: modelPhoto,
-      detail_photos: detail_photos,
       size_inventory: size_inventory,
       collection_name: collection,
       collection_names: collection ? JSON.stringify([collection]) : JSON.stringify([]),
@@ -4605,7 +4501,7 @@ async function _doSaveProduct() {
     return;
   }
 
-  console.log('[Meraki] Product saved as', _sku, '— photo:', photo ? 'garment (' + Math.round(photo.length/1024) + 'KB)' : 'none', '| model_photo:', modelPhoto ? 'AI model (' + Math.round(modelPhoto.length/1024) + 'KB)' : 'none');
+  console.log('[Meraki] Product saved as', _sku, '—', _intakeImages.length, 'photo(s) to upload |', _intakeModelPhoto ? 'AI model image' : 'no AI model image');
 
   // Tell Sam if the SKU moved on from the one shown during analysis.
   const _previewSku = currentAnalysis.sku;
@@ -4617,9 +4513,50 @@ async function _doSaveProduct() {
   currentAnalysis.sku = _sku;
 
   const saved = rows[0];
-  inventory.unshift(saved);
+  inventory.unshift({ ...saved, _hydrated: false });
   buildSmartRecommendations();
-  if (!_previewSku || _previewSku === _sku) showToast('Saved to inventory ✓');
+
+  // Photos go up one at a time so a single failure does not lose the rest.
+  // The product row already exists, so anything that fails here can be added
+  // afterwards from the Photos section — Saima is told exactly what is missing.
+  const _failed = [];
+  const _total = _intakeImages.length + (_intakeModelPhoto ? 1 : 0);
+  let _done = 0;
+  for (const im of _intakeImages) {
+    btn.innerHTML = `<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Uploading photo ${_done + 1} of ${_total}…`;
+    try {
+      const prepared = await preparePersistentImage(im.src);
+      const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
+      const up = await uploadImage({ blob: prepared.blob, key: buildImageKey(saved.id, ext), contentType: prepared.mimeType });
+      await db('insert', 'product_images', { data: {
+        product_id: saved.id,
+        storage_provider: up.provider, storage_key: up.key, public_url: up.publicUrl,
+        image_role: im.role,
+        sort_order: _done,
+        is_primary: _done === 0 && !_intakeModelPhoto,
+        show_on_website: true,
+        alt_text: im.alt || null,
+        width: prepared.width, height: prepared.height,
+        bytes: prepared.bytes, mime_type: prepared.mimeType,
+      }});
+    } catch (e) {
+      console.warn('[intake] photo upload failed', im.role, e.message);
+      _failed.push(im.alt || im.role);
+    }
+    _done++;
+  }
+
+  await getProductImages({ id: saved.id }, { force: true });
+
+  if (_intakeModelPhoto) {
+    btn.innerHTML = `<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Uploading photo ${_total} of ${_total}…`;
+    try { await saveModelImageToStorage(saved.id, _intakeModelPhoto); }
+    catch (e) { console.warn('[intake] model image upload failed', e.message); _failed.push('AI model photo'); }
+  }
+
+  if (_failed.length) showToast(`Saved, but ${_failed.length} photo${_failed.length > 1 ? 's' : ''} did not upload: ${_failed.join(', ')} — add them from Photos`);
+  else if (!_previewSku || _previewSku === _sku) showToast('Saved to inventory ✓');
+
   _intakeSaveInProgress = false;
   resetIntake();
   openProductDetail(saved.id);
@@ -4926,18 +4863,15 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
       try {
         _lastPhase = 'db-save-start';
         const _savePrefix = typeof watermarked === 'string' ? watermarked.slice(0, 40) : String(watermarked);
-        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, productId: currentProduct.id, updateKeys: ['model_photo'], modelPhotoType: _wmType, modelPhotoPrefix: _savePrefix, modelPhotoLen: _wmLen, isHttps: _wmIsHttps, isDataUrl: _wmIsJpeg || _wmIsPng });
-        await db('update', 'products', { id: currentProduct.id, data: { model_photo: watermarked } });
+        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, productId: currentProduct.id, target: 'product_images/model', modelPhotoType: _wmType, modelPhotoPrefix: _savePrefix, modelPhotoLen: _wmLen, isHttps: _wmIsHttps, isDataUrl: _wmIsJpeg || _wmIsPng });
+        await saveModelImageToStorage(currentProduct.id, watermarked);
         _lastPhase = 'db-save-done';
         console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
 
-        _lastPhase = 'state-inventory-update';
-        const idx = inventory.findIndex(p => p.id === currentProduct.id);
-        if (idx >= 0) {
-          inventory[idx] = { ...inventory[idx], model_photo: watermarked };
-          currentProduct = inventory[idx];
-        }
-        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, inventoryUpdated: idx >= 0 });
+        _lastPhase = 'state-refresh';
+        _applyPhotoView(_getPhotoViewPref(), currentProduct);
+        renderProductPhotos(currentProduct, { force: true }).catch(() => {});
+        renderInventory();
 
         _lastPhase = 'dom-null-state';
         const _nullState = document.getElementById('detailModelNullState');
@@ -4975,7 +4909,7 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
     }
 
     _lastPhase = 'post-save-complete';
-    console.log('[Meraki] Generation complete. model_photo and photo will be saved separately on Save.');
+    console.log('[Meraki] Generation complete. Images are saved to product_images on Save.');
     console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
 
     // Show indicator that stock will use this photo
@@ -5771,6 +5705,14 @@ async function _bootLoadData() {
   }
 
   try {
+    const n = await preloadAllProductImages();
+    console.log('[BOOT] product images loaded', n);
+  } catch(e) {
+    // Non-fatal: products render placeholders until a per-product fetch succeeds.
+    console.warn('[BOOT] product images failed', e?.message || e);
+  }
+
+  try {
     const custs = await db('select', 'customers');
     customers = custs || [];
     console.log('[BOOT] customers loaded', customers.length);
@@ -6019,9 +5961,8 @@ function renderCollections() {
       const collIdx = window._collActions.length;
       window._collActions.push(name);
       const thumbs = items.slice(0, 3).map(p => {
-        const cached = _cardImageCache[p.id];
-        const src = cached ? (cached.model_photo || cached.photo) : (p.model_photo || p.photo || null);
-        return src ? `<img class="collection-thumb" src="${src}" alt="">` : `<div class="collection-thumb-placeholder" data-lazy-thumb="${p.id}">👗</div>`;
+        const src = productImageSrc(p);
+        return src ? `<img class="collection-thumb" src="${_esc(src)}" alt="">` : `<div class="collection-thumb-placeholder"><i class="ti ti-hanger"></i></div>`;
       }).join('');
       html += `<div class="collection-card" onclick="openCollectionDetail(window._collActions[${collIdx}])" style="opacity:0.75">
         <div class="collection-thumb-row">${thumbs || '<div class="collection-thumb-placeholder">📦</div>'}</div>
@@ -6062,9 +6003,10 @@ function renderCollections() {
 
   let html = '';
   for (const [name, items] of collections) {
-    const thumbs = items.slice(0, 3).map(p =>
-      (p.model_photo||p.photo) ? `<img class="collection-thumb" src="${p.model_photo||p.photo}" alt="">` : `<div class="collection-thumb-placeholder">👗</div>`
-    ).join('');
+    const thumbs = items.slice(0, 3).map(p => {
+      const src = productImageSrc(p);
+      return src ? `<img class="collection-thumb" src="${_esc(src)}" alt="">` : `<div class="collection-thumb-placeholder"><i class="ti ti-hanger"></i></div>`;
+    }).join('');
     const hasPkg = items.some(p => p.caption_en);
     const available = items.filter(p => isProductAvailable(p)).length;
     const collIdx = window._collActions.length;
@@ -6149,7 +6091,7 @@ function openCollectionDetail(name) {
 function _collReadinessBadges(p) {
   const badges = [];
   if (!p.price) badges.push(`<span style="font-size:10px;background:#fff3cd;color:#856404;border-radius:3px;padding:1px 5px">No price</span>`);
-  if (!p.model_photo) badges.push(`<span style="font-size:10px;background:#f8f9fa;color:var(--muted);border-radius:3px;padding:1px 5px">No model photo</span>`);
+  if (!getPrimaryProductImage(p)) badges.push(`<span style="font-size:10px;background:#f8f9fa;color:var(--muted);border-radius:3px;padding:1px 5px">No photos</span>`);
   if (!getSizeInventory(p) && isProductAvailable(p)) badges.push(`<span style="font-size:10px;background:#fff3cd;color:#856404;border-radius:3px;padding:1px 5px">No sizes</span>`);
   if (!p.caption_en) badges.push(`<span style="font-size:10px;background:#f8f9fa;color:var(--muted);border-radius:3px;padding:1px 5px">No marketing</span>`);
   return badges.join('');
@@ -6164,11 +6106,10 @@ function _renderCollDetailItems(items) {
   window._collItemActions = [];
   itemsEl.innerHTML = items.map((p, i) => {
     window._collItemActions[i] = p.id;
-    const _cached = _cardImageCache[p.id];
-    const _dPhoto = _cached ? (_cached.model_photo || _cached.photo) : (p.model_photo || p.photo || null);
+    const _dPhoto = productImageSrc(p);
     const photoHTML = _dPhoto
-      ? `<div class="catalog-item-photo"><img src="${_dPhoto}" alt="${p.name}"></div>`
-      : `<div class="catalog-item-photo" style="display:flex;align-items:center;justify-content:center;font-size:24px" data-lazy-thumb="${p.id}">👗</div>`;
+      ? `<div class="catalog-item-photo"><img src="${_esc(_dPhoto)}" alt="${_esc(p.name || '')}"></div>`
+      : `<div class="catalog-item-photo" style="display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger" style="font-size:20px"></i></div>`;
     const meta = [p.garment_type, p.season].filter(Boolean).join(' · ');
     const sizeSummary = getAvailableSizeSummary(p);
     const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
@@ -6233,12 +6174,12 @@ function openCollAddPiecesSheet() {
     grid.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px 0">All items are already in this collection.</div>';
   } else {
     grid.innerHTML = candidates.map(p => {
-      const photo = p.model_photo || p.photo;
+      const photo = productImageSrc(p);
       const existingColls = getProductCollections(p);
       const collLabel = existingColls.length ? `<span style="font-size:10px;color:var(--muted)">In: ${existingColls.join(', ')}</span>` : '';
       const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
       return `<div id="collAddPiece_${p.id}" onclick="toggleCollAddPiece('${p.id}')" style="display:flex;gap:10px;align-items:center;padding:10px;background:white;border-radius:10px;border:2px solid var(--border);cursor:pointer">
-        ${photo ? `<img src="${photo}" style="width:48px;height:60px;object-fit:cover;border-radius:6px;flex-shrink:0">` : `<div style="width:48px;height:60px;border-radius:6px;flex-shrink:0;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:20px">👗</div>`}
+        ${photo ? `<img src="${_esc(photo)}" style="width:48px;height:60px;object-fit:cover;border-radius:6px;flex-shrink:0">` : `<div style="width:48px;height:60px;border-radius:6px;flex-shrink:0;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger" style="font-size:18px"></i></div>`}
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--ink)">${p.name}</div>
           <div style="font-size:11px;color:var(--muted)">${p.sku} · <span style="color:${statusColor}">${p.status}</span></div>
@@ -6402,12 +6343,12 @@ function _renderNewCollPieces() {
     return;
   }
   grid.innerHTML = activeInventory.map(p => {
-    const photo = p.model_photo || p.photo;
+    const photo = productImageSrc(p);
     const _nc = getProductCollections(p); const collLabel = _nc.length ? `<span style="font-size:10px;color:var(--muted)">In: ${_nc.join(', ')}</span>` : '';
     const statusColor = p.status === 'sold' ? 'var(--error,#c0392b)' : p.status === 'reserved' ? '#C08000' : 'var(--emerald-mid)';
     const sel = _newCollSelected.has(p.id);
     return `<div id="newCollPiece_${p.id}" onclick="toggleNewCollPiece('${p.id}')" style="display:flex;gap:10px;align-items:center;padding:10px;background:white;border-radius:10px;border:2px solid ${sel ? 'var(--burgundy)' : 'var(--border)'};cursor:pointer">
-      ${photo ? `<img src="${photo}" style="width:48px;height:60px;object-fit:cover;border-radius:6px;flex-shrink:0">` : `<div style="width:48px;height:60px;border-radius:6px;flex-shrink:0;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:20px">👗</div>`}
+      ${photo ? `<img src="${_esc(photo)}" style="width:48px;height:60px;object-fit:cover;border-radius:6px;flex-shrink:0" loading="lazy">` : `<div style="width:48px;height:60px;border-radius:6px;flex-shrink:0;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger" style="font-size:18px"></i></div>`}
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:var(--ink)">${p.name}</div>
         <div style="font-size:11px;color:var(--muted)">${p.sku} · <span style="color:${statusColor}">${p.status}</span></div>
@@ -6528,6 +6469,15 @@ function _renderDetailPhotoInsets() {
   const insetsEl = document.getElementById('detailPhotoInsets');
   if (!insetsEl) return;
   const photos = window._detailInsetPhotos || [];
+
+  // The inset strip is retired. It was the UI for products.detail_photos, which is
+  // now dormant, and the Photos section below manages every image. Hiding it here
+  // is what stops "Add detail" from writing to the legacy column; the rest of this
+  // function (crop, background clean, lightbox) is kept intact so it can be
+  // rebuilt on product_images without reconstructing it from scratch.
+  insetsEl.innerHTML = '';
+  insetsEl.style.display = 'none';
+  return;
 
   // Section header only when there are photos
   let html = '';
@@ -7337,13 +7287,12 @@ function renderInventory() {
       if (isProductAvailable(p)) return '<div class="size-summary" style="color:#C08000">No sizes added</div>';
       return '';
     })();
-    const cached = _cardImageCache[p.id];
-    const thumbSrc = cached ? (cached.model_photo || cached.photo) : (p.model_photo || p.photo || null);
+    const thumbSrc = productImageSrc(p);
     const thumbHTML = thumbSrc
-      ? `<img src="${thumbSrc}" alt="${p.name}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`
+      ? `<img src="${_esc(thumbSrc)}" alt="${_esc(p.name || '')}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`
       : '<i class="ti ti-hanger"></i>';
     return `<div class="product-card" onclick="openProductDetail(window._stockActions[${_si}])">
-      <div class="product-thumb" data-lazy-img="${thumbSrc ? '' : p.id}" style="position:relative">
+      <div class="product-thumb" style="position:relative">
         ${thumbHTML}
         <div class="product-sku">${p.sku}</div>
       </div>
@@ -7361,7 +7310,6 @@ function renderInventory() {
     </div>`;
   }).join('');
   window._stockActions = _stockActions;
-  _setupLazyCardImages();
 }
 
 function openAndMarket(id) {
@@ -7392,8 +7340,13 @@ function _setPhotoViewPref(v) {
   if (currentProduct) _applyPhotoView(v, currentProduct);
 }
 function _applyPhotoView(view, p) {
-  const hasAI = !!p.model_photo;
-  const hasOrig = !!p.photo;
+  // The hero is the product's primary image. The AI/Original switcher is only
+  // offered when the product actually has an AI model image to switch to.
+  const hero = getPrimaryProductImage(p);
+  const aiImg = getModelProductImage(p);
+  const origImg = getOriginalProductImage(p);
+  const hasAI = !!aiImg;
+  const hasOrig = !!origImg;
   const effective = view || (hasAI ? 'ai-only' : null);
 
   // Photo-view row: only show when AI photo exists (otherwise no choice to make)
@@ -7419,8 +7372,8 @@ function _applyPhotoView(view, p) {
   const viewOrigBtn = document.getElementById('detailViewOrigBtn');
 
   if (!hasAI) {
-    // No AI photo — simple mode: show original as hero, no view switcher
-    if (heroEl) { heroEl.src = p.photo || ''; heroEl.style.display = p.photo ? 'block' : 'none'; }
+    // No AI photo — simple mode: show the hero image, no view switcher
+    if (heroEl) { heroEl.src = hero?.src || ''; heroEl.style.display = hero ? 'block' : 'none'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'none';
     if (viewAiBtn) viewAiBtn.style.display = 'none';
@@ -7433,14 +7386,14 @@ function _applyPhotoView(view, p) {
   if (viewOrigBtn) viewOrigBtn.style.display = hasOrig ? 'flex' : 'none';
 
   if (effective === 'ai-original') {
-    if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
+    if (heroEl) { heroEl.src = aiImg.src; heroEl.style.display = 'block'; }
     if (origHeroSection) {
       origHeroSection.style.display = hasOrig ? 'block' : 'none';
-      if (origHeroImg && hasOrig) origHeroImg.src = p.photo;
+      if (origHeroImg && hasOrig) origHeroImg.src = origImg.src;
     }
     if (collapsedBar) collapsedBar.style.display = 'none';
   } else if (effective === 'original-only') {
-    if (heroEl) { heroEl.src = p.photo || ''; heroEl.style.display = hasOrig ? 'block' : 'none'; }
+    if (heroEl) { heroEl.src = origImg?.src || ''; heroEl.style.display = hasOrig ? 'block' : 'none'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'none';
   } else if (effective === 'collapsed') {
@@ -7450,7 +7403,7 @@ function _applyPhotoView(view, p) {
     if (collapsedSummary) collapsedSummary.textContent = [hasAI && 'AI', hasOrig && 'Original'].filter(Boolean).join(' + ') + ' available';
   } else {
     // 'ai-only' or default
-    if (heroEl) { heroEl.src = p.model_photo; heroEl.style.display = 'block'; }
+    if (heroEl) { heroEl.src = aiImg.src; heroEl.style.display = 'block'; }
     if (origHeroSection) origHeroSection.style.display = 'none';
     if (collapsedBar) collapsedBar.style.display = 'none';
   }
@@ -7468,17 +7421,17 @@ function _togglePhotoTools() {
 function _updatePhotoToolsSummary(p) {
   const el = document.getElementById('detailPhotoToolsSummary');
   if (!el) return;
-  const parts = [];
-  if (p.model_photo) parts.push('AI: Generated');
-  else parts.push('AI: None');
-  if (p.photo) parts.push('Original: Saved');
+  const count = getProductImagesSync(p).length;
+  const parts = [getModelProductImage(p) ? 'AI: Generated' : 'AI: None'];
+  parts.push(count ? `${count} photo${count > 1 ? 's' : ''}` : 'No photos yet');
   el.textContent = parts.join(' · ');
 }
 
 function _openHeroLightbox(type) {
   const p = currentProduct;
   if (!p) return;
-  const src = type === 'original' ? p.photo : p.model_photo;
+  const src = (type === 'original' ? getOriginalProductImage(p) : getModelProductImage(p))?.src
+            || getPrimaryProductImage(p)?.src;
   if (!src) return;
   const lb = document.getElementById('detailHeroLightbox');
   const img = document.getElementById('detailHeroLightboxImg');
@@ -7816,18 +7769,18 @@ function openProductDetail(id, opts) {
     return;
   }
   // If this product hasn't been fully loaded yet, fetch the full row in the background.
-  // We use an explicit column list so we never pull unexpected future columns and avoid
-  // returning detail_photos (potentially large JSONB) until the detail photo section is opened.
+  // An explicit column list so we never pull unexpected future columns. The dormant
+  // image columns (photo, model_photo, detail_photos) are deliberately absent —
+  // imagery comes from product_images only.
   const _DETAIL_CORE_COLS = [
     'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
     'description_en','description_ur','description_source','price','cost','status','reserved_for','customer_id',
     'fabric','pieces','color','made','care',
-    'photo','model_photo','ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
+    'ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
     'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb'
   ].join(',');
-  // detail_photos is intentionally excluded — fetched on demand by _ensureDetailPhotosLoaded().
 
   if (!p._hydrated && _hydratingProductId !== id) {
     _hydratingProductId = id;
@@ -7839,8 +7792,6 @@ function openProductDetail(id, opts) {
         const idx = inventory.findIndex(x => x.id === id);
         if (idx >= 0) {
           inventory[idx] = { ...inventory[idx], ...full, _hydrated: true };
-          // Update card image cache with freshly loaded photos
-          _cardImageCache[id] = { model_photo: full.model_photo || null, photo: full.photo || null };
         }
         // Only update UI if this product is still open
         if (currentProduct?.id === id) {
@@ -7864,49 +7815,17 @@ function openProductDetail(id, opts) {
 function _openProductDetailUI(p) {
   // Photo view: determine effective preference and apply
   let _pvPref = _getPhotoViewPref();
-  if (!_pvPref) _pvPref = p.model_photo ? 'ai-only' : null;
+  if (!_pvPref) _pvPref = getModelProductImage(p) ? 'ai-only' : null;
   _applyPhotoView(_pvPref, p);
 
-  // Detail photo insets — always render with add button.
-  // detail_photos may be absent from the initial hydration (it's fetched on-demand
-  // to keep the core product-detail response small). If absent, we kick off a
-  // background fetch and re-render when it arrives.
-  if (p.detail_photos === undefined && p._hydrated && !p._detailPhotosLoaded) {
-    p._detailPhotosLoaded = true; // prevent duplicate fetches on re-render
-    db('select', 'products', { filter: { id: p.id }, columns: 'id,detail_photos' })
-      .then(rows => {
-        const dp = rows?.[0]?.detail_photos ?? null;
-        p.detail_photos = dp;
-        const idx = inventory.findIndex(x => x.id === p.id);
-        if (idx >= 0) inventory[idx].detail_photos = dp;
-        if (currentProduct?.id === p.id) {
-          currentProduct = { ...currentProduct, detail_photos: dp };
-          _openProductDetailUI(currentProduct);
-        }
-      })
-      .catch(() => {}); // silently ignore — insets stay empty; user can reload
-  }
-  const _dpRaw = p.detail_photos;
-  let _dpParsed = [];
-  try {
-    if (_dpRaw) _dpParsed = typeof _dpRaw === 'string' ? JSON.parse(_dpRaw) : _dpRaw;
-  } catch(_) {}
-  const _rawPhotos = Array.isArray(_dpParsed) ? _dpParsed : [];
-  // Assign stable IDs to any photo that lacks one — lives inside JSONB, persists on next save
-  let _idsAssigned = false;
-  _rawPhotos.forEach(d => {
-    if (!d.id) { d.id = 'detail_' + Math.random().toString(36).slice(2, 10); _idsAssigned = true; }
-  });
-  window._detailInsetPhotos = _rawPhotos;
-  // Reset pending state for this product session — clears any stuck flags from previous product
+  // The old detail-photo inset editor read products.detail_photos. That column is
+  // dormant, so the list is always empty and the inset strip renders nothing —
+  // the Photos section below is the one place photos are managed now. The editor's
+  // crop and background-clean tools still need rebuilding on top of product_images;
+  // until then this stays empty rather than showing retired legacy imagery.
+  window._detailInsetPhotos = [];
   window._detailPhotoPending = { add: false, toggle: new Set(), delete: new Set(), clean: new Set() };
   _renderDetailPhotoInsets();
-  // Persist newly assigned IDs without blocking the UI
-  if (_idsAssigned && p.id) {
-    const _idFixVal = _rawPhotos.length ? JSON.stringify(_rawPhotos) : null;
-    fetch('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', table: 'products', id: p.id, data: { detail_photos: _idFixVal } }) }).catch(() => {});
-  }
 
   document.getElementById('detailSKU').textContent = p.sku;
   document.getElementById('detailName').textContent = p.name;
@@ -7927,8 +7846,9 @@ function _openProductDetailUI(p) {
   // Photo tools disclosure: default collapsed when AI exists, expanded when not
   const _ptContent = document.getElementById('detailPhotoToolsContent');
   const _ptChevron = document.getElementById('detailPhotoToolsChevron');
-  if (_ptContent) _ptContent.style.display = p.model_photo ? 'none' : 'block';
-  if (_ptChevron) _ptChevron.style.transform = p.model_photo ? '' : 'rotate(180deg)';
+  const _hasModelImg = !!getModelProductImage(p);
+  if (_ptContent) _ptContent.style.display = _hasModelImg ? 'none' : 'block';
+  if (_ptChevron) _ptChevron.style.transform = _hasModelImg ? '' : 'rotate(180deg)';
   _updatePhotoToolsSummary(p);
 
   // Model photo section: hide output div (fresh generation state) on open; show null-state if no model photo
@@ -7942,10 +7862,10 @@ function _openProductDetailUI(p) {
   if (_dmo) _dmo.style.display = 'none';
   if (_dmi) _dmi.src = '';
   if (_dfr) _dfr.style.display = 'none';
-  if (_dmn) _dmn.style.display = p.model_photo ? 'none' : 'block';
+  if (_dmn) _dmn.style.display = _hasModelImg ? 'none' : 'block';
   // Original photo section in management block: show replace button when model_photo exists
   const _dop = document.getElementById('detailOriginalPhotoSection');
-  if (_dop) _dop.style.display = p.model_photo ? 'block' : 'none';
+  if (_dop) _dop.style.display = _hasModelImg ? 'block' : 'none';
   const _mso = document.getElementById('mktShareOutput');
   if (_mso) { _mso.style.display = 'none'; _mso.innerHTML = ''; }
   window._currentShareCardUrl = null;
@@ -8551,7 +8471,7 @@ function _catalogRenderSig() {
     sel: selected.map(p => {
       const ch = catalogImageChoices[p.id] || {};
       const blurb = (p.description_en || p.catalog_blurb || p.share_blurb || '').slice(0, 60);
-      const hasInsets = !!(p.detail_photos);
+      const hasInsets = _parseDetailPhotosForInsets(p).length > 0;
       return [p.id, p.name, p.price, p.status, p.size_inventory, blurb, hasInsets, ch.source || '', ch.blurFace || false, ch.blurredDataUrl ? ch.blurredDataUrl.length : 0];
     })
   });
@@ -8576,58 +8496,9 @@ function _invalidateCatalogCache(reason) {
   }
 }
 
-// Hydrate catalog images: fetch id+model_photo+photo for items missing both.
-// Uses _cardImageCache first, then batch-fetches with concurrency limit.
+// Catalog images need no hydration: every product_images row is already loaded.
+// Kept as the single entry point so callers do not have to change.
 async function _hydrateCatalogImages() {
-  const CONCURRENCY = 3;
-  // Build list of items that still need images
-  const needsFetch = catalogItems.filter(p => {
-    if (p.model_photo || p.photo) return false; // already on the object
-    const cached = _cardImageCache[p.id];
-    if (cached) {
-      // Apply cache to inventory object
-      if (cached.model_photo !== undefined) p.model_photo = cached.model_photo;
-      if (cached.photo !== undefined) p.photo = cached.photo;
-      return false;
-    }
-    return true;
-  });
-  if (!needsFetch.length) {
-    _initCatalogImageChoices();
-    renderCatalogSelection();
-    return;
-  }
-
-  // Fetch in batches
-  let i = 0;
-  async function fetchOne(p) {
-    try {
-      const rows = await db('select', 'products', { filter: { id: p.id }, columns: 'id,model_photo,photo' });
-      const row = rows?.[0];
-      if (row) {
-        p.model_photo = row.model_photo || null;
-        p.photo = row.photo || null;
-        _cardImageCache[p.id] = { model_photo: p.model_photo, photo: p.photo };
-        // Patch inventory too
-        const idx = inventory.findIndex(x => x.id === p.id);
-        if (idx >= 0) { inventory[idx].model_photo = p.model_photo; inventory[idx].photo = p.photo; }
-      }
-    } catch(_) { /* silent — catalog shows unavailable */ }
-    // Re-render this single item row
-    _refreshCatalogSelItem(p.id);
-  }
-
-  // Kick off up to CONCURRENCY at a time
-  const queue = [...needsFetch];
-  const runners = [];
-  async function drain() {
-    while (queue.length) {
-      const item = queue.shift();
-      await fetchOne(item);
-    }
-  }
-  for (let j = 0; j < Math.min(CONCURRENCY, queue.length); j++) runners.push(drain());
-  await Promise.allSettled(runners);
   _initCatalogImageChoices();
   renderCatalogSelection();
 }
@@ -8637,7 +8508,7 @@ function _initCatalogImageChoices() {
   catalogItems.forEach(p => {
     if (catalogImageChoices[p.id]) return; // already set (e.g. user toggled before hydration finished)
     catalogImageChoices[p.id] = {
-      source: p.model_photo ? 'model' : (p.photo ? 'original' : 'none'),
+      source: getModelProductImage(p) ? 'model' : (getOriginalProductImage(p) ? 'original' : 'none'),
       blurFace: false,
       blurredDataUrl: null
     };
@@ -8673,11 +8544,12 @@ function _setCatalogBlurFace(id, val) {
 
 async function _catalogPrepareBlur(id) {
   const p = catalogItems.find(x => x.id === id);
-  if (!p || !p.photo) { showToast('No original photo available'); return; }
+  const orig = p && getOriginalProductImage(p);
+  if (!orig) { showToast('No original photo available'); return; }
   const ch = catalogImageChoices[id];
   if (!ch) return;
   try {
-    const result = await _openBlurEditor(p.photo);
+    const result = await _openBlurEditor(orig.src);
     ch.blurredDataUrl = result;
     _refreshCatalogSelItem(id);
     _invalidateCatalogCache('blur-prepared');
@@ -8697,7 +8569,7 @@ function goToCatalogPreview() {
 
   // Block if any selected product has no image at all
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
-  const noImage = selected.filter(p => !p.model_photo && !p.photo);
+  const noImage = selected.filter(p => !getPrimaryProductImage(p));
   if (noImage.length) {
     showToast(`${noImage.length} product${noImage.length > 1 ? 's' : ''} have no image — exclude them first`);
     return;
@@ -8723,10 +8595,9 @@ function _showCatalogPreview() {
     count: selected.length,
     products: selected.map(p => ({
       id: p.id, name: p.name,
-      hasModelPhoto: !!p.model_photo, hasPhoto: !!p.photo,
-      price: p.price,
-      detailPhotosType: typeof p.detail_photos,
-      detailPhotos: p.detail_photos
+      images: getProductImagesSync(p).length,
+      hasModel: !!getModelProductImage(p), hasOriginal: !!getOriginalProductImage(p),
+      price: p.price
     }))
   });
   document.getElementById('catalogSelScreen').style.display = 'none';
@@ -8739,8 +8610,8 @@ function _showCatalogPreview() {
 
 function _catalogImgCtrlHTML(p) {
   const ch = catalogImageChoices[p.id];
-  const hasModel = !!p.model_photo;
-  const hasOrig = !!p.photo;
+  const hasModel = !!getModelProductImage(p);
+  const hasOrig = !!getOriginalProductImage(p);
   if (!hasModel && !hasOrig) {
     return '<div class="cat-no-image"><i class="ti ti-photo-off"></i> No image — exclude to preview</div>';
   }
@@ -8766,6 +8637,17 @@ function _catalogImgCtrlHTML(p) {
   return html;
 }
 
+// The src a catalog row shows for the chosen source, honouring a prepared blur.
+// Catalog imagery is never filtered by show_on_website — the catalog and the
+// website are separate outputs.
+function _catalogDisplaySrc(p, ch) {
+  if (ch?.source === 'original') {
+    if (ch.blurFace && ch.blurredDataUrl) return ch.blurredDataUrl;
+    return getOriginalProductImage(p)?.src || null;
+  }
+  return (getModelProductImage(p) || getPrimaryProductImage(p))?.src || null;
+}
+
 function renderCatalogSelection() {
   const count = catalogSelected.size;
   document.getElementById('catalogSelCount').textContent = `${count} of ${catalogItems.length} selected`;
@@ -8779,10 +8661,10 @@ function renderCatalogSelection() {
   list.innerHTML = '<div style="background:white">' + catalogItems.map((p, i) => {
     const on = catalogSelected.has(p.id);
     const ch = catalogImageChoices[p.id];
-    const displaySrc = ch?.source === 'original' ? p.photo : (p.model_photo || p.photo);
+    const displaySrc = _catalogDisplaySrc(p, ch);
     const noPrice = !p.price;
     return `<div class="catalog-sel-item" onclick="toggleCatalogItem('${p.id}',${i})">
-      <div class="catalog-sel-thumb">${displaySrc ? `<img src="${displaySrc}" alt="">` : '<span style="font-size:20px">👗</span>'}</div>
+      <div class="catalog-sel-thumb">${displaySrc ? `<img src="${_esc(displaySrc)}" alt="" loading="lazy">` : '<i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i>'}</div>
       <div class="catalog-sel-info">
         <div class="catalog-sel-name">${p.name}</div>
         <div class="catalog-sel-meta">${[p.garment_type, p.season].filter(Boolean).join(' · ')}</div>
@@ -8861,7 +8743,7 @@ function getCatalogCoverTheme(name) {
 async function renderCatalogPreview() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   const noPrice = selected.filter(p => !p.price);
-  const noModel = selected.filter(p => !p.model_photo);
+  const noModel = selected.filter(p => !getModelProductImage(p));
 
   // Warnings
   const warnEl = document.getElementById('catalogWarnings');
@@ -8930,7 +8812,7 @@ async function _buildCatalogPages() {
     const blurb = rawBio || `${safeName} — a beautiful piece from the Meraki by Saima collection.`;
     mctx.font = `italic ${BIO_SIZE}px Inter, sans-serif`;
     const bioLines = _ctxMeasureLines(mctx, blurb, W - PAD * 2);
-    if (!p.model_photo && !p.photo) anyMissingData = true;
+    if (!getPrimaryProductImage(p)) anyMissingData = true;
     if (!p.price) anyMissingData = true;
     const isSoldOut = !isProductAvailable(p);
     const priceBlockH = isSoldOut ? 36 : 42 + 32;
@@ -9084,23 +8966,16 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
 // Single product page canvas — full bio, no truncation, same dimensions as cover
 // Returns up to 2 inset photos ready to draw. If none are explicitly marked,
 // auto-picks the best 1 by label match (read-only, does not save changes).
+// Catalog insets now come from product_images: the gallery images that follow the
+// hero, excluding the AI model image. Saima controls which ones appear by
+// reordering photos, so there is no separate "use as inset" flag to maintain.
+// products.detail_photos is never read.
 function _parseDetailPhotosForInsets(p) {
-  let arr = [];
-  try {
-    const raw = p.detail_photos;
-    if (!raw) return [];
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!Array.isArray(parsed)) return [];
-    // Accept photos that have any usable image source
-    arr = parsed.filter(d => d && (d.image || d.croppedImage || d.cleanedImage));
-  } catch(_) { return []; }
-  if (!arr.length) return [];
-
-  // Only render insets Sam explicitly enabled — no auto-pick fallback
-  const insets = arr
-    .filter(d => d.useAsInset === true)
-    .sort((a, b) => (a.insetOrder ?? 999) - (b.insetOrder ?? 999));
-  return insets.slice(0, 2);
+  const hero = getPrimaryProductImage(p);
+  return getProductImagesSync(p)
+    .filter(i => i.role !== 'model' && i.id !== hero?.id && i.src)
+    .slice(0, 2)
+    .map(i => ({ image: i.src, label: i.alt || _roleLabel(i.role), slot: i.role }));
 }
 
 // Draws up to 2 detail insets into the image area of a catalog or share card canvas.
@@ -9203,16 +9078,7 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
   ctx.fillRect(0, 0, W, IMG_H);
 
   const ch = catalogImageChoices[p.id] || {};
-  let imgSrc;
-  if (ch.source === 'original') {
-    if (ch.blurFace) {
-      imgSrc = ch.blurredDataUrl || null; // should be prepared; block is in goToCatalogPreview
-    } else {
-      imgSrc = p.photo || null;
-    }
-  } else {
-    imgSrc = p.model_photo || p.photo || null; // default: AI, fallback original
-  }
+  const imgSrc = _catalogDisplaySrc(p, ch);
   let imgLoaded = false;
   if (imgSrc) {
     try {
@@ -9501,8 +9367,8 @@ async function _buildItemShareCard(p, opts) {
   // Contract: blurred-original must not be the same as the stored original or model photo
   if (sourceType === 'blurred-original') {
     if (!blurRevision) throw new Error('[ShareCard] blurred-original missing blurRevision');
-    if (explicitSrc === p.photo) throw new Error('[ShareCard] blurred-original imageSrc is identical to p.photo — blur was not applied');
-    if (explicitSrc === p.model_photo) throw new Error('[ShareCard] blurred-original imageSrc is identical to p.model_photo');
+    if (explicitSrc === getOriginalProductImage(p)?.src) throw new Error('[ShareCard] blurred-original imageSrc is identical to the original image — blur was not applied');
+    if (explicitSrc === getModelProductImage(p)?.src) throw new Error('[ShareCard] blurred-original imageSrc is identical to the model image');
   }
 
   // Load image — for data: URLs skip crossOrigin to avoid SecurityError on Safari
@@ -9544,7 +9410,7 @@ async function _buildItemShareCard(p, opts) {
         const sSample = ctx.getImageData(Math.max(0, sCx - 2), Math.max(0, sCy - 2), 5, 5).data;
         let checksum = 0;
         for (let i = 0; i < sSample.length; i += 4) checksum += sSample[i] + sSample[i+1] + sSample[i+2];
-        console.log('[ShareCard] blurred-original draw checksum=' + checksum + ' decoded=' + imgEl.naturalWidth + 'x' + imgEl.naturalHeight + ' srcLength=' + explicitSrc.length + ' photoLength=' + (p.photo ? p.photo.length : 0));
+        console.log('[ShareCard] blurred-original draw checksum=' + checksum + ' decoded=' + imgEl.naturalWidth + 'x' + imgEl.naturalHeight + ' srcLength=' + explicitSrc.length);
       } catch(diagErr) {
         console.warn('[ShareCard] checksum skipped (tainted canvas?)', diagErr.message);
       }
@@ -9678,8 +9544,8 @@ async function openMktShareWorkspace() {
   output.style.display = 'block';
 
   // Reset marketing image choice for this product
-  const hasModel = !!p.model_photo;
-  const hasOrig = !!p.photo;
+  const hasModel = !!getModelProductImage(p);
+  const hasOrig = !!getOriginalProductImage(p);
   currentMarketingImageChoice = {
     source: hasModel ? 'model' : (hasOrig ? 'original' : 'none'),
     blurFace: false,
@@ -9727,7 +9593,7 @@ async function openMktShareWorkspace() {
 
   // If AI source selected, auto-build the card immediately
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, { imageSrc: p.model_photo, sourceType: 'model' });
+    _mktBuildAndShowCard(p, { imageSrc: getModelProductImage(p)?.src, sourceType: 'model' });
   }
 }
 
@@ -9746,7 +9612,7 @@ function _setMktImgSource(source) {
   if (source === 'model') {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Building share card…</div>';
     const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
-    _mktBuildAndShowCard(p, { imageSrc: p?.model_photo, sourceType: 'model' });
+    _mktBuildAndShowCard(p, { imageSrc: getModelProductImage(p)?.src, sourceType: 'model' });
   } else {
     if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Tap Generate Share Card to continue.</div>';
   }
@@ -9781,7 +9647,7 @@ async function _mktGenerateCard() {
   const p = inventory.find(x => x.id === currentProduct?.id) || currentProduct;
   if (!p) return;
   if (currentMarketingImageChoice.source === 'model') {
-    _mktBuildAndShowCard(p, { imageSrc: p.model_photo, sourceType: 'model' });
+    _mktBuildAndShowCard(p, { imageSrc: getModelProductImage(p)?.src, sourceType: 'model' });
     return;
   }
   // Original selected — if blur is already prepared, use it directly without re-asking
@@ -9791,7 +9657,7 @@ async function _mktGenerateCard() {
     return;
   }
   // First time — ask about privacy
-  if (!p.photo) { showToast('No original photo saved for this product'); return; }
+  if (!getOriginalProductImage(p)) { showToast('No original photo saved for this product'); return; }
   openSheet('mktPhotoPrivacySheet');
 }
 
@@ -9804,7 +9670,7 @@ async function _mktPrivacyChoice(choice) {
     currentMarketingImageChoice.blurFace = false;
     currentMarketingImageChoice.blurredDataUrl = null;
     currentMarketingImageChoice.blurRevision = 0;
-    _mktBuildAndShowCard(p, { imageSrc: p.photo, sourceType: 'original' });
+    _mktBuildAndShowCard(p, { imageSrc: getOriginalProductImage(p)?.src, sourceType: 'original' });
   } else if (choice === 'blur') {
     await _mktRePrepareBlur(p);
   }
@@ -9812,11 +9678,12 @@ async function _mktPrivacyChoice(choice) {
 
 async function _mktRePrepareBlur(p) {
   p = p || inventory.find(x => x.id === currentProduct?.id) || currentProduct;
-  if (!p?.photo) { showToast('No original photo'); return; }
+  const _origImg = p && getOriginalProductImage(p);
+  if (!_origImg) { showToast('No original photo'); return; }
   const cardArea = document.getElementById('mktCardArea');
   if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Preparing blur editor…</div>';
   try {
-    const blurred = await _openBlurEditor(p.photo);
+    const blurred = await _openBlurEditor(_origImg.src);
     const rev = ++_blurRevisionCounter;
     currentMarketingImageChoice.source = 'original';
     currentMarketingImageChoice.blurFace = true;
@@ -9847,7 +9714,7 @@ async function _mktBuildAndShowCard(p, opts) {
   const sourceType = opts?.sourceType || 'unknown';
   const blurRevision = opts?.blurRevision || 0;
   const _p = inventory.find(x => x.id === p?.id) || p;
-  console.log('[mkt] building card token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' imageLength=' + (imageSrc ? imageSrc.length : 0) + ' isPhoto=' + (imageSrc === _p?.photo) + ' isModel=' + (imageSrc === _p?.model_photo) + ' isBlurred=' + (imageSrc === currentMarketingImageChoice?.blurredDataUrl));
+  console.log('[mkt] building card token=' + myToken + ' source=' + sourceType + (blurRevision ? ' rev=' + blurRevision : '') + ' imageLength=' + (imageSrc ? imageSrc.length : 0) + ' isBlurred=' + (imageSrc === currentMarketingImageChoice?.blurredDataUrl));
   const cardArea = document.getElementById('mktCardArea');
   if (cardArea) cardArea.innerHTML = '<div style="font-size:12px;color:var(--muted)">Generating marketing image…</div>';
   try {
@@ -10061,7 +9928,7 @@ async function _submitAmendAnalysis(btn) {
         catalog_blurb: p.catalog_blurb || '',
         share_blurb: p.share_blurb || '',
       };
-      photoDataUrl = p.photo || null;
+      photoDataUrl = (getOriginalProductImage(p) || getPrimaryProductImage(p))?.src || null;
       currentName = p.name || '';
       nameWasManual = true;
     }
@@ -10484,13 +10351,11 @@ async function _openBioRegenerate(style, confirmed) {
     ? motifsList.map(m => (m.type && m.placement) ? `${m.type} at ${m.placement}` : (m.type || String(m))).join(', ')
     : null;
 
-  // Parse detail photo labels — saved as JSON string
-  let detailLabels = [];
-  try {
-    const raw = p.detail_photos;
-    const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' && raw.trim() ? JSON.parse(raw) : []);
-    if (Array.isArray(arr)) detailLabels = arr.map(d => d.label || d.slot).filter(Boolean);
-  } catch (_) {}
+  // Detail photo labels come from the product's image roles.
+  const detailLabels = getProductImagesSync(p)
+    .filter(i => i.role !== 'model')
+    .map(i => i.alt || _roleLabel(i.role))
+    .filter(Boolean);
 
   // Structural fields saved from original upload analysis
   const structural = [
@@ -10726,7 +10591,7 @@ async function generateDetailModelPhoto() {
   currentAnalysis = {
     ideogramPrompt: currentProduct.ideogram_prompt,
     sku: currentProduct.sku,
-    _uploadedPhotoB64: currentProduct.photo || null,
+    _uploadedPhotoB64: (getOriginalProductImage(currentProduct) || getPrimaryProductImage(currentProduct))?.src || null,
     neckline: currentProduct.neckline || null,
     has_placket: currentProduct.has_placket ?? null,
     has_dupatta: currentProduct.has_dupatta ?? null,
@@ -10760,12 +10625,12 @@ async function saveDetailModelPhoto(btn) {
   btn.disabled = true;
   btn.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
   try {
-    await db('update', 'products', { id: currentProduct.id, data: { model_photo: src } });
-    const idx = inventory.findIndex(p => p.id === currentProduct.id);
-    inventory[idx] = { ...inventory[idx], model_photo: src };
-    currentProduct = inventory[idx];
-    document.getElementById('detailPhoto').src = src;
+    await saveModelImageToStorage(currentProduct.id, src);
+    const _saved = getModelProductImage(currentProduct);
+    document.getElementById('detailPhoto').src = _saved?.src || src;
     document.getElementById('detailPhoto').style.display = 'block';
+    await renderProductPhotos(currentProduct, { force: true });
+    renderInventory();
     _invalidateMktPreview();
     showToast('Model photo saved');
     btn.innerHTML = '<i class="ti ti-check"></i> Saved';
@@ -11498,7 +11363,7 @@ async function openExhibitionDetail(id) {
         : (summary ? `<div class="exh-item-sizes" style="font-size:11px;color:var(--muted)">${summary}</div>` : '');
       return `
       <div class="exh-item-row">
-        ${p.photo ? `<img src="${p.photo}" class="exh-item-thumb" alt="">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'}
+        ${(() => { const _s = productImageSrc(p); return _s ? `<img src="${_esc(_s)}" class="exh-item-thumb" alt="" loading="lazy">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'; })()}
         <div class="exh-item-info">
           <div class="exh-item-name">${p.name}</div>
           <div class="exh-item-sku">${p.sku}</div>
@@ -11522,11 +11387,10 @@ async function openExhibitionDetail(id) {
   const assignedIds = new Set(itemProducts.map(i => i.product.id));
   const available = inventory.filter(p => !isProductSoldOut(p));
   grid.innerHTML = available.map(p => {
-    const cached = _cardImageCache[p.id];
-    const thumbSrc = cached ? (cached.model_photo || cached.photo) : null;
+    const thumbSrc = productImageSrc(p);
     return `<div class="product-card ${assignedIds.has(p.id) ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${assignedIds.has(p.id) ? 'border-color:var(--burgundy);border-width:2px' : ''}">
       <div class="product-thumb">
-        ${thumbSrc ? `<img src="${thumbSrc}" alt="${p.name}">` : '<i class="ti ti-hanger"></i>'}
+        ${thumbSrc ? `<img src="${_esc(thumbSrc)}" alt="${_esc(p.name || '')}" loading="lazy">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
       </div>
       <div class="product-info"><div class="product-name">${p.name}</div></div>
@@ -12031,7 +11895,7 @@ function _exhSalesHTML() {
     const soldProduct = (!item && s.product_id) ? inventory.find(p => p.id === s.product_id) : null;
     const itemName = item?.name || soldProduct?.name || 'Unknown item';
     const photo = item ? _getExhItemPhoto(item)
-                : soldProduct ? (_cardImageCache[soldProduct.id]?.model_photo || _cardImageCache[soldProduct.id]?.photo || null)
+                : soldProduct ? productImageSrc(soldProduct)
                 : null;
     const dt = new Date(s.created_at);
     const timeStr = dt.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
@@ -12379,7 +12243,6 @@ async function _saveExhProductSale() {
       const idx = inventory.findIndex(p => p.id === json.product.id);
       if (idx >= 0) inventory[idx] = { ...inventory[idx], ...json.product };
       if (currentProduct?.id === json.product.id) currentProduct = inventory[idx] || currentProduct;
-      _cardImageCache[json.product.id] = _cardImageCache[json.product.id] || undefined;
     }
     _stampExhLastUpdated();
     closeSheet('logExhSaleSheet');
