@@ -246,6 +246,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 /* Photo slots */
 .slot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+.ws-err { display: none; font-size: 11px; color: #8a1f1f; margin: 3px 0 0; line-height: 1.4; }
 .photo-slot { border: 2px dashed var(--border); border-radius: var(--radius); overflow: hidden; position: relative; aspect-ratio: 3/4; background: var(--gold-pale); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .photo-slot.filled { border-color: var(--emerald-mid); border-style: solid; }
 .photo-slot.required-missing { border-color: var(--burgundy); }
@@ -818,9 +819,82 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button class="btn" onclick="closeModal('settingsModal');openModelTemplateSheet()" style="width:100%;background:var(--border);color:var(--ink)"><i class="ti ti-layout-grid"></i> Manage Model Templates</button>
       <p class="key-note" style="margin-top:6px">Generate or upload model photos for FASHN virtual try-on. Choose which to use at generation time.</p>
     </div>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+      <button class="btn" style="width:100%;background:var(--burgundy);color:#fff;font-weight:600" onclick="closeModal('settingsModal');openWebsiteSettings()"><i class="ti ti-world"></i> Website Settings</button>
+      <p class="key-note" style="margin-top:6px">Featured piece, contact details and service notes for merakibysaima.com.</p>
+    </div>
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
     </div>
+  </div>
+</div>
+
+<!-- WEBSITE SETTINGS SHEET -->
+<div class="sheet-overlay" id="websiteSettingsSheet">
+  <div class="sheet" style="height:88vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-world"></i> Website Settings</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('websiteSettingsSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">
+      Details shown across merakibysaima.com. Everything about an individual piece — price, photos, description — stays on that piece.
+    </div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Homepage</div>
+    <div class="field-label">Featured piece</div>
+    <div id="wsFeaturedDisplay" onclick="openFeaturedPicker()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:52px;margin-bottom:6px">
+      <div id="wsFeaturedThumb" style="flex-shrink:0"></div>
+      <span id="wsFeaturedLabel" style="flex:1;color:var(--muted);font-size:13px">Choose a piece</span>
+      <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+    </div>
+    <div id="wsFeaturedNote" style="font-size:11px;color:var(--muted);margin-bottom:18px;line-height:1.5"></div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;border-top:1px solid var(--border);padding-top:14px">Contact</div>
+    <div class="field-label">WhatsApp</div>
+    <input type="tel" id="wsWhatsapp" class="field-input" placeholder="+92 300 1234567" style="margin-bottom:2px">
+    <div class="ws-err" id="wsWhatsappErr"></div>
+    <p style="font-size:11px;color:var(--muted);margin:2px 0 10px">Include the country code.</p>
+
+    <div class="field-label">Email</div>
+    <input type="email" id="wsEmail" class="field-input" placeholder="hello@merakibysaima.com" autocapitalize="off" style="margin-bottom:2px">
+    <div class="ws-err" id="wsEmailErr"></div>
+
+    <div class="field-label" style="margin-top:10px">Instagram</div>
+    <input type="text" id="wsInstagram" class="field-input" placeholder="@merakibysaima" autocapitalize="off" style="margin-bottom:2px">
+    <div class="ws-err" id="wsInstagramErr"></div>
+    <p style="font-size:11px;color:var(--muted);margin:2px 0 18px">A link or a username — either works.</p>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;border-top:1px solid var(--border);padding-top:14px">Service</div>
+    <div class="field-label">Where you are</div>
+    <input type="text" id="wsLocation" class="field-input" placeholder="e.g. Lahore, Pakistan" style="margin-bottom:10px">
+
+    <div class="field-label">Usual made-to-order timing</div>
+    <input type="text" id="wsLeadTime" class="field-input" placeholder="e.g. 4–6 weeks" style="margin-bottom:2px">
+    <p style="font-size:11px;color:var(--muted);margin:2px 0 10px">General guidance shown around the site. A piece can still have its own delivery note.</p>
+
+    <div class="field-label">Sizes &amp; service note</div>
+    <input type="text" id="wsSizeNote" class="field-input" placeholder="e.g. Sizes 38–52 and custom" style="margin-bottom:10px">
+
+    <div class="field-label">Reply time</div>
+    <input type="text" id="wsInquiryNote" class="field-input" placeholder="e.g. We reply personally within one working day" style="margin-bottom:18px">
+
+    <div id="wsStatus" style="display:none;font-size:12px;text-align:center;margin-bottom:8px"></div>
+    <button class="btn btn-primary" id="wsSaveBtn" style="width:100%" onclick="saveWebsiteSettings(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<!-- FEATURED PRODUCT PICKER -->
+<div class="sheet-overlay" id="featuredPickerSheet" style="z-index:410">
+  <div class="sheet" style="height:80vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:16px;font-weight:700;color:var(--burgundy)">Featured piece</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('featuredPickerSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5">Only pieces published to the website can be featured.</div>
+    <div id="featuredPickerList"></div>
   </div>
 </div>
 
@@ -1126,6 +1200,16 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div class="field-label">Availability</div>
           <div id="websiteAvailRow" style="display:flex;gap:6px;margin-bottom:6px"></div>
           <div id="websiteAvailHelp" style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
+
+          <div class="field-label">Fulfilment note</div>
+          <textarea id="websiteFulfilInput" class="field-input" rows="2" dir="auto"
+            placeholder="e.g. Ships within 3 working days"
+            style="resize:vertical;min-height:38px;margin-bottom:6px"
+            oninput="_onFulfilInput()"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <div id="websiteFulfilHelp" style="flex:1;font-size:11px;color:var(--muted);line-height:1.5">Optional. Shown on the product page. Leave blank to show nothing.</div>
+            <button id="websiteFulfilSaveBtn" onclick="saveFulfillmentNote(this)" style="display:none;flex-shrink:0;padding:6px 14px;border:none;border-radius:16px;background:var(--burgundy);color:#fff;font-size:11px;font-weight:600;cursor:pointer">Save note</button>
+          </div>
 
           <div class="field-label">What the website will show</div>
           <div id="websitePreview" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--surface)"></div>
@@ -1969,7 +2053,8 @@ const PRODUCT_SUMMARY_COLS = [
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at',
-  'website_status','website_availability','website_published_at','slug'
+  'website_status','website_availability','website_published_at','slug',
+  'fulfillment_note'
 ].join(',');
 
 
@@ -3622,6 +3707,342 @@ const WEBSITE_AVAILABILITY = [
   { value: 'both',          label: 'Both',          help: 'Some sizes are ready now, others can be made to order.' },
 ];
 
+// ─── WEBSITE SETTINGS ────────────────────────────────────────────────────────
+// Global operational values for the public site: who to contact, where Saima is,
+// and the standing service notes. Deliberately NOT a CMS — brand and editorial
+// copy stays in the website's code until it actually starts changing.
+//
+// Product-specific values (price, description, photos, availability, the
+// fulfilment note) live on the product and are never duplicated here.
+//
+// One row, addressed by a fixed id so it never needs looking up.
+const WEBSITE_SETTINGS_ID = '00000000-0000-4000-8000-000000000001';
+
+const WEBSITE_SETTINGS_COLS =
+  'id,featured_product_id,whatsapp,contact_email,instagram_url,location_label,' +
+  'made_to_order_lead_time,size_service_note,inquiry_response_note,updated_at';
+
+let websiteSettings = null;
+
+function _blankWebsiteSettings() {
+  return {
+    id: WEBSITE_SETTINGS_ID,
+    featured_product_id: null,
+    whatsapp: null,
+    contact_email: null,
+    instagram_url: null,
+    location_label: null,
+    made_to_order_lead_time: null,
+    size_service_note: null,
+    inquiry_response_note: null,
+  };
+}
+
+// Loaded at boot. A missing row is normal on a fresh database and is treated as
+// "everything blank" rather than an error — the row is created on first save.
+async function loadWebsiteSettings() {
+  try {
+    const rows = await db('select', 'website_settings', { columns: WEBSITE_SETTINGS_COLS });
+    // _exists distinguishes "row loaded" from "nothing saved yet", which decides
+    // insert vs update on the first save.
+    websiteSettings = rows?.[0]
+      ? { ..._blankWebsiteSettings(), ...rows[0], _exists: true }
+      : _blankWebsiteSettings();
+  } catch (e) {
+    console.warn('[website] settings unavailable:', e.message);
+    websiteSettings = _blankWebsiteSettings();
+  }
+  return websiteSettings;
+}
+
+// ── Contact normalisation ───────────────────────────────────────────────────
+// WhatsApp is stored as international digits only — no plus, no spaces, no URL.
+// One canonical value the website can turn into a wa.me link, a tel: link or a
+// printed number, instead of a stored URL that only works for one of those and
+// has to be parsed to reuse. Saima can type it however she likes.
+function normalizeWhatsapp(raw) {
+  const digits = String(raw || '').replace(/[^\d]/g, '');
+  return digits || null;
+}
+
+function validateWhatsapp(raw) {
+  if (!String(raw || '').trim()) return null;                 // optional
+  const d = normalizeWhatsapp(raw);
+  if (!d) return 'Enter a WhatsApp number using digits.';
+  // E.164 allows 8–15 digits including country code.
+  if (d.length < 8 || d.length > 15) return 'That WhatsApp number looks too short or too long. Include the country code.';
+  return null;
+}
+
+// Display form, so Saima sees what she typed rather than a bare digit string.
+function formatWhatsapp(stored) {
+  return stored ? '+' + stored : '';
+}
+
+function normalizeEmail(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  return v || null;
+}
+
+function validateEmail(raw) {
+  const v = normalizeEmail(raw);
+  if (!v) return null;                                        // optional
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return 'That email address does not look right.';
+  return null;
+}
+
+// Instagram is stored as a full canonical URL. Saima can paste a link, type a
+// handle, or type @handle — all three normalise to the same thing, so the
+// website never has to guess which form it has.
+function normalizeInstagram(raw) {
+  let v = String(raw || '').trim();
+  if (!v) return null;
+  v = v.replace(/^@+/, '');
+  const m = v.match(/instagram\.com\/([^/?#\s]+)/i);
+  const handle = (m ? m[1] : v).replace(/^\/+|\/+$/g, '');
+  if (!handle) return null;
+  return 'https://instagram.com/' + handle;
+}
+
+function validateInstagram(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return null;                                        // optional
+  const url = normalizeInstagram(v);
+  if (!url) return 'Enter an Instagram link or username.';
+  const handle = url.split('/').pop();
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(handle)) return 'That Instagram username contains characters Instagram does not allow.';
+  return null;
+}
+
+// ── Featured product ────────────────────────────────────────────────────────
+// Stored by product id only. Name, slug, price and images are never copied here
+// — the storefront resolves them from the product record, so a rename or a slug
+// change can never leave stale duplicated data behind.
+//
+// A product is only eligible while it is genuinely on the site. Hidden, draft
+// and archived products are filtered at read time rather than cleared on write,
+// because all three are reversible: unhide the product and it is featured again
+// without Saima having to re-pick it. A deleted product is cleared by the
+// foreign key instead.
+function isFeaturableProduct(p) {
+  return !!p && !p.is_archived && websiteStatus(p) === 'published';
+}
+
+function getFeaturedProduct() {
+  const id = websiteSettings?.featured_product_id;
+  if (!id) return null;
+  const p = inventory.find(x => x.id === id);
+  return isFeaturableProduct(p) ? p : null;
+}
+
+// Why the chosen product is not currently showing, in Saima's terms. Null when
+// nothing is wrong.
+function featuredProductIssue() {
+  const id = websiteSettings?.featured_product_id;
+  if (!id) return null;
+  const p = inventory.find(x => x.id === id);
+  if (!p) return 'The piece you chose is no longer in your stock, so the homepage has no featured piece.';
+  if (p.is_archived) return `“${p.name}” is archived, so it is not showing on the homepage.`;
+  if (websiteStatus(p) !== 'published') return `“${p.name}” is not published to the website, so it is not showing on the homepage.`;
+  return null;
+}
+
+// ── The public settings contract ────────────────────────────────────────────
+// What the storefront reads. An explicit allowlist, built by naming each field,
+// so a column added later cannot leak. No raw row, no timestamps, no ids beyond
+// the featured product reference.
+//
+// featured_product_id is null unless the product is genuinely published and
+// unarchived, so the storefront never has to re-check.
+function buildPublicWebsiteSettings() {
+  const s = websiteSettings || _blankWebsiteSettings();
+  const featured = getFeaturedProduct();
+  return {
+    featured_product_id: featured ? featured.id : null,
+    whatsapp: s.whatsapp || null,
+    contact_email: s.contact_email || null,
+    instagram_url: s.instagram_url || null,
+    location: s.location_label || null,
+    made_to_order_lead_time: s.made_to_order_lead_time || null,
+    size_service_note: s.size_service_note || null,
+    inquiry_response_note: s.inquiry_response_note || null,
+  };
+}
+
+// ── Website Settings UI ─────────────────────────────────────────────────────
+// One screen, one Save button. Nothing here mentions databases, ids or URLs.
+let _wsBusy = false;
+
+const _WS_FIELDS = [
+  { el: 'wsWhatsapp',    col: 'whatsapp',                err: 'wsWhatsappErr',  validate: validateWhatsapp,   normalize: normalizeWhatsapp,  display: formatWhatsapp },
+  { el: 'wsEmail',       col: 'contact_email',           err: 'wsEmailErr',     validate: validateEmail,      normalize: normalizeEmail },
+  { el: 'wsInstagram',   col: 'instagram_url',           err: 'wsInstagramErr', validate: validateInstagram,  normalize: normalizeInstagram },
+  { el: 'wsLocation',    col: 'location_label' },
+  { el: 'wsLeadTime',    col: 'made_to_order_lead_time' },
+  { el: 'wsSizeNote',    col: 'size_service_note' },
+  { el: 'wsInquiryNote', col: 'inquiry_response_note' },
+];
+
+async function openWebsiteSettings() {
+  openSheet('websiteSettingsSheet');
+  if (!websiteSettings) await loadWebsiteSettings();
+  renderWebsiteSettings();
+}
+
+function renderWebsiteSettings() {
+  const s = websiteSettings || _blankWebsiteSettings();
+  _WS_FIELDS.forEach(f => {
+    const el = document.getElementById(f.el);
+    if (el) el.value = f.display ? f.display(s[f.col]) : (s[f.col] || '');
+    const err = document.getElementById(f.err);
+    if (err) err.style.display = 'none';
+  });
+  _renderFeaturedDisplay();
+  _wsStatus('');
+}
+
+function _renderFeaturedDisplay() {
+  const label = document.getElementById('wsFeaturedLabel');
+  const thumb = document.getElementById('wsFeaturedThumb');
+  const note  = document.getElementById('wsFeaturedNote');
+  if (!label) return;
+
+  const id = websiteSettings?.featured_product_id;
+  const p = id ? inventory.find(x => x.id === id) : null;
+
+  label.textContent = p ? p.name : 'Choose a piece';
+  label.style.color = p ? 'var(--ink)' : 'var(--muted)';
+
+  const src = p ? productImageSrc(p) : null;
+  if (thumb) {
+    thumb.innerHTML = src
+      ? `<img src="${_esc(src)}" alt="" loading="lazy" style="width:34px;height:44px;object-fit:cover;border-radius:5px;border:1px solid var(--border)">`
+      : (p ? `<div style="width:34px;height:44px;border-radius:5px;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger" style="font-size:14px"></i></div>` : '');
+  }
+
+  if (note) {
+    const issue = featuredProductIssue();
+    if (issue) { note.textContent = issue; note.style.color = '#7a4500'; }
+    else if (p) { note.textContent = 'Shown on the homepage.'; note.style.color = 'var(--muted)'; }
+    else { note.textContent = 'No piece is featured on the homepage right now.'; note.style.color = 'var(--muted)'; }
+  }
+}
+
+function openFeaturedPicker() {
+  const list = document.getElementById('featuredPickerList');
+  if (!list) return;
+  const eligible = inventory.filter(isFeaturableProduct);
+  const currentId = websiteSettings?.featured_product_id || null;
+
+  if (!eligible.length) {
+    list.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:24px 8px;line-height:1.6">No pieces are on the website yet.<br>Publish a piece from its Website section first.</div>';
+  } else {
+    const rows = eligible.map(p => {
+      const src = productImageSrc(p);
+      const on = p.id === currentId;
+      return `<div onclick="setFeaturedProduct('${p.id}')" style="display:flex;gap:10px;align-items:center;padding:10px;background:#fff;border-radius:10px;border:2px solid ${on ? 'var(--burgundy)' : 'var(--border)'};cursor:pointer;margin-bottom:8px">
+        ${src ? `<img src="${_esc(src)}" alt="" loading="lazy" style="width:44px;height:56px;object-fit:cover;border-radius:6px;flex-shrink:0">`
+              : `<div style="width:44px;height:56px;border-radius:6px;flex-shrink:0;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger"></i></div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${_esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--muted)">${_esc(p.sku)}${p.price ? ' · $' + p.price : ''}</div>
+        </div>
+        ${on ? '<i class="ti ti-circle-check" style="font-size:20px;color:var(--burgundy);flex-shrink:0"></i>'
+             : '<i class="ti ti-circle" style="font-size:20px;color:var(--border);flex-shrink:0"></i>'}
+      </div>`;
+    }).join('');
+    const clear = currentId
+      ? `<button onclick="setFeaturedProduct(null)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;font-size:12px;color:var(--muted);cursor:pointer;margin-top:4px">Remove featured piece</button>`
+      : '';
+    list.innerHTML = rows + clear;
+  }
+  openSheet('featuredPickerSheet');
+}
+
+// Chosen immediately — a picker that needs a second Save elsewhere is a trap.
+async function setFeaturedProduct(productId) {
+  if (_wsBusy) return;
+  _wsBusy = true;
+  try {
+    await _persistWebsiteSettings({ featured_product_id: productId });
+    closeSheet('featuredPickerSheet');
+    _renderFeaturedDisplay();
+    showToast(productId ? 'Featured piece updated ✓' : 'Featured piece removed ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally { _wsBusy = false; }
+}
+
+function _wsStatus(msg, colour) {
+  const el = document.getElementById('wsStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = colour || 'var(--muted)';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+// Insert on first save, update thereafter. The row is created lazily so a fresh
+// database needs no seeding.
+async function _persistWebsiteSettings(patch) {
+  const payload = { ...patch, updated_at: new Date().toISOString() };
+  const exists = !!websiteSettings?._exists;
+  if (exists) {
+    await db('update', 'website_settings', { id: WEBSITE_SETTINGS_ID, data: payload });
+  } else {
+    try {
+      await db('insert', 'website_settings', { data: { id: WEBSITE_SETTINGS_ID, ...payload } });
+    } catch (e) {
+      // Another device created the row first — fall through to an update.
+      if (e?.code !== '23505') throw e;
+      await db('update', 'website_settings', { id: WEBSITE_SETTINGS_ID, data: payload });
+    }
+  }
+  websiteSettings = { ...(websiteSettings || _blankWebsiteSettings()), ...patch, _exists: true };
+  return websiteSettings;
+}
+
+async function saveWebsiteSettings(btn) {
+  if (_wsBusy) return;
+
+  // Validate everything first so Saima sees every problem at once.
+  let firstBad = null;
+  const patch = {};
+  for (const f of _WS_FIELDS) {
+    const el = document.getElementById(f.el);
+    const errEl = document.getElementById(f.err);
+    const raw = el ? el.value : '';
+    const msg = f.validate ? f.validate(raw) : null;
+    if (errEl) {
+      errEl.textContent = msg || '';
+      errEl.style.display = msg ? 'block' : 'none';
+    }
+    if (msg) { firstBad = firstBad || f; continue; }
+    patch[f.col] = f.normalize ? f.normalize(raw) : (String(raw || '').trim() || null);
+  }
+  if (firstBad) {
+    _wsStatus('Please check the highlighted fields.', '#8a1f1f');
+    document.getElementById(firstBad.el)?.focus();
+    return;
+  }
+
+  _wsBusy = true;
+  const label = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    await _persistWebsiteSettings(patch);
+    // Re-render so normalised values are visible: a pasted Instagram link becomes
+    // the tidy one that was actually stored.
+    renderWebsiteSettings();
+    _wsStatus('Saved ✓', 'var(--emerald-mid)');
+    showToast('Website settings saved ✓');
+  } catch (e) {
+    _wsStatus('Could not save. ' + e.message, '#8a1f1f');
+  } finally {
+    _wsBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
+  }
+}
+
 // ── Product slug ────────────────────────────────────────────────────────────
 // The customer-facing route segment. Derived from the app's own product name —
 // the app is the source of truth. No value here is taken from, matched against,
@@ -3829,6 +4250,11 @@ function buildPublicProductPayload(p) {
       };
     }),
 
+    // Customer-facing and product-specific. Null when blank — the storefront
+    // then shows no fulfilment line at all rather than a generic sentence.
+    // Never derived from availability, never filled from the global lead time.
+    fulfillment_note: (p.fulfillment_note || '').trim() || null,
+
     published_at: p.website_published_at || null,
   };
 }
@@ -3864,6 +4290,7 @@ function websitePublishIssues(p) {
   if (!p.price)                          blocking.push('Add a price before publishing.');
   if (!(p.description_en || '').trim())  blocking.push('Add a description before publishing.');
 
+  if (p.is_archived) blocking.push('This piece is archived. Restore it before putting it on the website.');
   if (!(p.slug || '').trim()) blocking.push('Add a website address before publishing.');
 
   const visible = websiteImages(p);
@@ -3956,6 +4383,15 @@ function renderWebsiteSection(p) {
       || 'Choose how customers can buy this piece. This is never guessed from stock.';
   }
 
+  // Fulfilment note. Only repopulated when Saima is not mid-edit, so a render
+  // triggered by another save cannot wipe what she is typing.
+  const fulfilInput = document.getElementById('websiteFulfilInput');
+  if (fulfilInput && document.activeElement !== fulfilInput) {
+    fulfilInput.value = p.fulfillment_note || '';
+    const fb = document.getElementById('websiteFulfilSaveBtn');
+    if (fb) fb.style.display = 'none';
+  }
+
   // Informational preview of the canonical data the website will read.
   const prev = document.getElementById('websitePreview');
   if (prev) {
@@ -3981,6 +4417,7 @@ function renderWebsiteSection(p) {
       row('Description', payload.description ? _esc(payload.description) : '<span style="color:var(--muted)">Not added</span>') +
       row('Collection', payload.collection_names.length ? _esc(payload.collection_names.join(', ')) : '<span style="color:var(--muted)">None</span>') +
       row('Sizes', payload.sizes.length ? _esc(payload.sizes.join(', ')) : '<span style="color:var(--muted)">None in stock</span>') +
+      (payload.fulfillment_note ? row('Delivery', _esc(payload.fulfillment_note)) : '') +
       (gd.length ? gd.map(f => row(f.label, _esc(payload.garment_details[f.key]))).join('') : '');
   }
 
@@ -4017,6 +4454,32 @@ function renderWebsiteSection(p) {
       primary('Republish to Website', 'publishProductToWebsite()', 'ti-world-upload') +
       `<button class="btn" style="width:100%;background:none;border:none;color:var(--muted);font-size:12px" onclick="_websiteMsg('Still hidden — nothing changed.')">Keep Hidden</button>`;
   }
+}
+
+// ── Fulfilment note ─────────────────────────────────────────────────────────
+// Optional, customer-facing, and completely independent of availability. Saving
+// it never publishes the product and never changes availability; changing
+// availability never touches it. The global lead-time setting is guidance for
+// the site's editorial copy and never populates this field.
+function _onFulfilInput() {
+  const input = document.getElementById('websiteFulfilInput');
+  const btn = document.getElementById('websiteFulfilSaveBtn');
+  if (!input || !btn || !currentProduct) return;
+  const changed = input.value.trim() !== (currentProduct.fulfillment_note || '').trim();
+  btn.style.display = changed ? 'block' : 'none';
+}
+
+async function saveFulfillmentNote(btn) {
+  if (!currentProduct || _websiteBusy) return;
+  const input = document.getElementById('websiteFulfilInput');
+  if (!input) return;
+  const value = input.value.trim();
+  if (btn) btn.disabled = true;
+  // Written as null when blank so the payload omits the line entirely.
+  const ok = await _saveWebsiteFields({ fulfillment_note: value || null },
+    { busyMsg: 'Saving…', doneMsg: value ? 'Note saved ✓' : 'Note removed ✓' });
+  if (btn) btn.disabled = false;
+  if (!ok && input) input.value = value;   // keep what was typed for a retry
 }
 
 // ── Website address editing ─────────────────────────────────────────────────
@@ -6537,6 +7000,13 @@ async function _bootLoadData() {
   }
 
   try {
+    await loadWebsiteSettings();
+    console.log('[BOOT] website settings loaded');
+  } catch(e) {
+    console.warn('[BOOT] website settings failed', e?.message || e);
+  }
+
+  try {
     const n = await backfillProductSlugs();
     if (n) console.log('[BOOT] product slugs backfilled', n);
   } catch(e) {
@@ -8560,7 +9030,8 @@ function openProductDetail(id, opts) {
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
     'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb',
-    'website_status','website_availability','website_published_at','slug'
+    'website_status','website_availability','website_published_at','slug',
+    'fulfillment_note'
   ].join(',');
 
   if (!p._hydrated && _hydratingProductId !== id) {
@@ -9050,14 +9521,30 @@ async function archiveProduct(btn) {
   const defaultHTML = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Archiving…'; }
   try {
-    await db('update', 'products', { id: currentProduct.id, data: { is_archived: true } });
+    // Archiving withdraws a piece from the shop, so it must withdraw it from the
+    // website too. is_archived = true with website_status = published is not a
+    // supported state: it would leave an archived piece publicly for sale.
+    //
+    // Hidden rather than draft, because hidden is the reversible state that
+    // remembers the piece was once published — restoring and republishing keeps
+    // the original first-published date. website_published_at is untouched.
+    const wasPublished = websiteStatus(currentProduct) === 'published';
+    const data = { is_archived: true };
+    if (wasPublished) data.website_status = 'hidden';
+
+    await db('update', 'products', { id: currentProduct.id, data });
     currentProduct.is_archived = true;
+    if (wasPublished) currentProduct.website_status = 'hidden';
+    const _ai = inventory.findIndex(x => x.id === currentProduct.id);
+    if (_ai >= 0) inventory[_ai] = { ...inventory[_ai], ...data };
+
     const restBtn = document.getElementById('restoreProductBtn');
     if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.innerHTML = defaultHTML; }
     if (restBtn) { restBtn.style.display = 'block'; restBtn.disabled = false; }
     renderInventory();
     renderCollections();
-    showToast('Product archived');
+    renderWebsiteSection(currentProduct);
+    showToast(wasPublished ? 'Product archived and hidden from the website' : 'Product archived');
   } catch(e) {
     if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
     showToast('Could not archive: ' + e.message);
@@ -9069,13 +9556,19 @@ async function restoreProduct(btn) {
   const defaultHTML = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Restoring…'; }
   try {
+    // Restoring does NOT republish. The piece comes back hidden, and putting it
+    // back on the website stays a deliberate tap in the Website section — the
+    // same rule as everywhere else here.
     await db('update', 'products', { id: currentProduct.id, data: { is_archived: false } });
     currentProduct.is_archived = false;
+    const _ri = inventory.findIndex(x => x.id === currentProduct.id);
+    if (_ri >= 0) inventory[_ri] = { ...inventory[_ri], is_archived: false };
     const archBtn = document.getElementById('archiveProductBtn');
     if (btn) { btn.style.display = 'none'; btn.disabled = false; btn.innerHTML = defaultHTML; }
     if (archBtn) { archBtn.style.display = 'block'; archBtn.disabled = false; }
     renderInventory();
     renderCollections();
+    renderWebsiteSection(currentProduct);
     showToast('Product restored');
   } catch(e) {
     if (btn) { btn.disabled = false; btn.innerHTML = defaultHTML; }
