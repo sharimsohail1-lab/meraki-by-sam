@@ -1141,6 +1141,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
             Website publishing controls are ready. Connecting the storefront is the next setup step, so publishing here does not change merakibysaima.com yet.
           </div>
 
+          <div class="field-label">Website address</div>
+          <div id="websiteSlugRow" style="margin-bottom:14px"></div>
+
           <div class="field-label">Availability</div>
           <div id="websiteAvailRow" style="display:flex;gap:6px;margin-bottom:6px"></div>
           <div id="websiteAvailHelp" style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
@@ -1987,7 +1990,7 @@ const PRODUCT_SUMMARY_COLS = [
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at',
-  'website_status','website_availability','website_published_at'
+  'website_status','website_availability','website_published_at','slug'
 ].join(',');
 
 
@@ -3383,6 +3386,114 @@ const WEBSITE_AVAILABILITY = [
   { value: 'both',          label: 'Both',          help: 'Some sizes are ready now, others can be made to order.' },
 ];
 
+// ── Product slug ────────────────────────────────────────────────────────────
+// The customer-facing route segment. Derived from the app's own product name —
+// the app is the source of truth. No value here is taken from, matched against,
+// or reconciled with the storefront's current static product catalogue.
+//
+// The route the website will serve.
+const WEBSITE_ROUTE_PREFIX = '#/product/';
+
+function websiteProductPath(p) {
+  const slug = (p?.slug || '').trim();
+  return slug ? WEBSITE_ROUTE_PREFIX + slug : null;
+}
+
+// Normalise a name into a URL-safe segment: lowercase, every run of characters
+// outside a-z0-9 becomes one hyphen, no leading or trailing hyphen. Returns ''
+// when nothing usable survives, which callers treat as "cannot derive".
+function slugifyName(name) {
+  return String(name == null ? '' : name)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// Every slug currently spoken for, optionally ignoring one product (so editing a
+// product's own slug does not collide with itself).
+function _takenSlugs(excludeId) {
+  const taken = new Set();
+  inventory.forEach(p => {
+    if (p.id === excludeId) return;
+    const s = (p.slug || '').trim();
+    if (s) taken.add(s);
+  });
+  return taken;
+}
+
+// Find a free slug for `base`, appending -2, -3 … until one is unused.
+// Collisions are resolved against the FINAL candidate, not the base, so a
+// product literally named "Noor 2" and the second product named "Noor" cannot
+// both land on "noor-2".
+function _uniqueSlug(base, excludeId) {
+  if (!base) return '';
+  const taken = _takenSlugs(excludeId);
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// Allocate a slug from a product name. Falls back to the SKU when the name
+// yields nothing usable (punctuation-only or blank), so a product is never
+// left unpublishable for want of a route.
+function allocateProductSlug(name, { excludeId = null, sku = null } = {}) {
+  const base = slugifyName(name) || slugifyName(sku) || '';
+  return _uniqueSlug(base, excludeId);
+}
+
+// One-time backfill for products that predate the slug column. Runs after boot.
+//
+// Slugs are generated from each product's CURRENT APP NAME, in creation order so
+// the oldest product keeps the bare slug and the result is stable across runs.
+// A product that already has a non-blank slug is never touched — that is what
+// makes a slug stable when the product is later renamed.
+async function backfillProductSlugs() {
+  const missing = inventory
+    .filter(p => !(p.slug || '').trim())
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  if (!missing.length) return 0;
+
+  let filled = 0;
+  for (const p of missing) {
+    // Allocated one at a time: each write updates local state, so the next
+    // product sees the slug just taken.
+    const slug = allocateProductSlug(p.name, { excludeId: p.id, sku: p.sku });
+    if (!slug) continue;
+    try {
+      await db('update', 'products', { id: p.id, data: { slug } });
+      const idx = inventory.findIndex(x => x.id === p.id);
+      if (idx >= 0) inventory[idx].slug = slug;
+      filled++;
+    } catch (e) {
+      // A unique violation means another session took it. Nothing is broken:
+      // the product keeps a null slug and is retried on the next boot.
+      console.warn('[slug] backfill failed for', p.sku, e.message);
+    }
+  }
+  return filled;
+}
+
+// Next candidate after a slug was rejected by the database. Skips everything
+// already known taken locally and everything the database has just refused.
+function _nextFreeSlug(current, rejected) {
+  const base = String(current || '').replace(/-\d+$/, '') || current;
+  const blocked = new Set([..._takenSlugs(), ...(rejected || []), current]);
+  if (!blocked.has(base)) return base;
+  let n = 2;
+  while (blocked.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// Validate a manually entered slug. Returns an error string, or null when valid.
+function validateSlugInput(raw, product) {
+  const slug = slugifyName(raw);
+  if (!slug) return 'Enter a website address using letters and numbers.';
+  if (_takenSlugs(product?.id).has(slug)) return 'That website address is already used by another product.';
+  return null;
+}
+
 // Existing products have no value until migration 024 runs, and the column is
 // NOT NULL DEFAULT 'draft' afterwards. Reading through this keeps "unset means
 // draft" in exactly one place.
@@ -3435,6 +3546,8 @@ function websiteGarmentDetails(p) {
 // naming each field explicitly — never by copying the product and deleting keys,
 // because that leaks any column added later.
 //
+// slug is public by design: it is the storefront URL.
+//
 // Deliberately absent: cost, notes, customer_id, reserved_for, status,
 // ideogram_prompt, every marketing/caption field, exhibition and sale fields,
 // exact size quantities, and the dormant legacy image columns.
@@ -3442,6 +3555,8 @@ function buildPublicProductPayload(p) {
   if (!p) return null;
   return {
     id: p.id,
+    // Customer-facing route segment. Stable across renames.
+    slug: (p.slug || '').trim() || null,
     sku: p.sku,
     name: p.name || null,
     description: p.description_en || null,
@@ -3498,6 +3613,8 @@ function websitePublishIssues(p) {
   if (!(p.name || '').trim())            blocking.push('Add a name before publishing.');
   if (!p.price)                          blocking.push('Add a price before publishing.');
   if (!(p.description_en || '').trim())  blocking.push('Add a description before publishing.');
+
+  if (!(p.slug || '').trim()) blocking.push('Add a website address before publishing.');
 
   const visible = websiteImages(p);
   if (!visible.length) blocking.push('Add at least one website-visible photo before publishing.');
@@ -3557,6 +3674,23 @@ function renderWebsiteSection(p) {
 
   const sum = document.getElementById('websiteSummary');
   if (sum) sum.textContent = _websiteSummaryText(p);
+
+  // Website address. Read-only by default: the route is meant to be stable, so
+  // changing it is a deliberate act, not an editable field sitting open.
+  const slugRow = document.getElementById('websiteSlugRow');
+  if (slugRow && !_websiteSlugEditing) {
+    const path = websiteProductPath(p);
+    slugRow.innerHTML = path
+      ? `<div style="display:flex;align-items:center;gap:8px">
+           <code style="flex:1;min-width:0;font-size:12px;color:var(--ink);background:var(--sand-light);border-radius:6px;padding:7px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(path)}</code>
+           <button onclick="startWebsiteSlugEdit()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:5px 13px">Edit</button>
+         </div>
+         <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5">This stays the same if you rename the piece, so shared links keep working.</div>`
+      : `<div style="display:flex;align-items:center;gap:8px">
+           <span style="flex:1;font-size:12px;color:var(--muted)">Not set yet</span>
+           <button onclick="startWebsiteSlugEdit()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:5px 13px">Set</button>
+         </div>`;
+  }
 
   // Availability
   const availRow = document.getElementById('websiteAvailRow');
@@ -3635,6 +3769,77 @@ function renderWebsiteSection(p) {
   }
 }
 
+// ── Website address editing ─────────────────────────────────────────────────
+let _websiteSlugEditing = false;
+
+function startWebsiteSlugEdit() {
+  if (!currentProduct || _websiteBusy) return;
+  _websiteSlugEditing = true;
+  const row = document.getElementById('websiteSlugRow');
+  if (!row) return;
+  const current = (currentProduct.slug || '').trim()
+    || allocateProductSlug(currentProduct.name, { excludeId: currentProduct.id, sku: currentProduct.sku });
+  row.innerHTML =
+    `<div style="display:flex;align-items:center;gap:6px;border:1.5px solid var(--border);border-radius:8px;padding:0 10px;background:var(--surface)">
+       <span style="font-size:12px;color:var(--muted);flex-shrink:0">${_esc(WEBSITE_ROUTE_PREFIX)}</span>
+       <input id="websiteSlugInput" type="text" value="${_esc(current)}" autocapitalize="off" autocorrect="off" spellcheck="false"
+              oninput="_previewWebsiteSlug()" style="flex:1;min-width:0;border:none;outline:none;background:none;font-size:13px;padding:9px 0;color:var(--ink)">
+     </div>
+     <div id="websiteSlugHint" style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5"></div>
+     <div style="display:flex;gap:6px;margin-top:8px">
+       <button onclick="cancelWebsiteSlugEdit()" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12px;color:var(--muted);cursor:pointer">Cancel</button>
+       <button id="websiteSlugSaveBtn" onclick="saveWebsiteSlug(this)" style="flex:2;padding:8px;border:none;border-radius:8px;background:var(--burgundy);color:#fff;font-size:12px;font-weight:600;cursor:pointer">Save address</button>
+     </div>`;
+  _previewWebsiteSlug();
+  document.getElementById('websiteSlugInput')?.focus();
+}
+
+// Live feedback: shows exactly what will be saved after normalisation, so the
+// result is never a surprise.
+function _previewWebsiteSlug() {
+  const input = document.getElementById('websiteSlugInput');
+  const hint = document.getElementById('websiteSlugHint');
+  const btn = document.getElementById('websiteSlugSaveBtn');
+  if (!input || !hint) return;
+  const err = validateSlugInput(input.value, currentProduct);
+  const normalised = slugifyName(input.value);
+  if (err) {
+    hint.textContent = err;
+    hint.style.color = '#8a1f1f';
+  } else {
+    hint.textContent = 'Will be saved as ' + WEBSITE_ROUTE_PREFIX + normalised;
+    hint.style.color = 'var(--muted)';
+  }
+  if (btn) { btn.disabled = !!err; btn.style.opacity = err ? '.5' : '1'; }
+}
+
+function cancelWebsiteSlugEdit() {
+  _websiteSlugEditing = false;
+  if (currentProduct) renderWebsiteSection(currentProduct);
+}
+
+async function saveWebsiteSlug(btn) {
+  if (!currentProduct || _websiteBusy) return;
+  const input = document.getElementById('websiteSlugInput');
+  if (!input) return;
+  const err = validateSlugInput(input.value, currentProduct);
+  if (err) { _previewWebsiteSlug(); showToast(err); return; }
+  const slug = slugifyName(input.value);
+  if (slug === (currentProduct.slug || '').trim()) { cancelWebsiteSlugEdit(); return; }
+  if (btn) btn.disabled = true;
+
+  _websiteSlugEditing = false;
+  const okSave = await _saveWebsiteFields({ slug }, { busyMsg: 'Saving…', doneMsg: 'Website address saved ✓' });
+  if (!okSave) {
+    // Keep what was typed so it can be corrected rather than retyped.
+    _websiteSlugEditing = true;
+    startWebsiteSlugEdit();
+    const again = document.getElementById('websiteSlugInput');
+    if (again) again.value = slug;
+    _previewWebsiteSlug();
+  }
+}
+
 // One write path for every website field, so local state and the database can
 // never disagree. On failure nothing local is mutated and the chosen values
 // survive for a retry.
@@ -3656,7 +3861,12 @@ async function _saveWebsiteFields(data, { busyMsg, doneMsg }) {
     return true;
   } catch (e) {
     _websiteMsg('');
-    showToast('Could not save: ' + e.message);
+    // A unique violation on the slug is the one failure with a plain-language
+    // cause worth naming. Everything else keeps its message.
+    const dupSlug = e?.code === '23505' || /products_slug/i.test(e?.message || '');
+    showToast(dupSlug && 'slug' in data
+      ? 'That website address is already used by another product.'
+      : 'Could not save: ' + e.message);
     return false;
   } finally { _websiteBusy = false; }
 }
@@ -4791,9 +5001,14 @@ async function _doSaveProduct() {
     return;
   }
 
-  const _buildRow = sku => ({
+  // The customer-facing route, from the app's own product name.
+  const _rejectedSlugs = [];
+  let _slug = allocateProductSlug(name, { sku: _sku });
+
+  const _buildRow = (sku, slug) => ({
       sku,
       name,
+      slug: slug || null,
       garment_type: garmentType,
       season: intakeSeason,
       colors: currentAnalysis.colors,
@@ -4815,24 +5030,38 @@ async function _doSaveProduct() {
       collection_names: collection ? JSON.stringify([collection]) : JSON.stringify([]),
   });
 
-  // Unique violation on products.sku is the only error worth retrying: it means
-  // someone else took the number between our lookup and our insert. Every other
-  // failure is surfaced immediately with the form left intact.
+  // Two unique constraints can reject this insert, and both surface as 23505:
+  // products.sku and the partial unique index on products.slug. They need
+  // different recovery, so the constraint name decides which. A bare 23505 with
+  // no recognisable name is treated as an SKU clash, which is the historical
+  // behaviour and the far more likely cause.
+  const _violates = (err, re) =>
+    err?.code === '23505' && re.test(err?.message || '');
+  const _isDuplicateSlug = err => _violates(err, /products_slug/i);
   const _isDuplicateSku = err =>
-    err?.code === '23505' ||
+    _violates(err, /products_sku/i) ||
+    (err?.code === '23505' && !_isDuplicateSlug(err)) ||
     /duplicate key value.*products_sku|products_sku_key/i.test(err?.message || '');
 
-  const MAX_SKU_RETRIES = 2;
+  const MAX_INSERT_RETRIES = 2;
   let rows = null, lastErr = null;
 
-  for (let attempt = 0; attempt <= MAX_SKU_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= MAX_INSERT_RETRIES; attempt++) {
     try {
-      rows = await db('insert', 'products', { data: _buildRow(_sku) });
+      rows = await db('insert', 'products', { data: _buildRow(_sku, _slug) });
       break;
     } catch (e) {
       lastErr = e;
-      if (!_isDuplicateSku(e) || attempt === MAX_SKU_RETRIES) break;
-      console.warn('[SKU]', _sku, 'was taken — reallocating (attempt', attempt + 1, 'of', MAX_SKU_RETRIES + ')');
+      if (attempt === MAX_INSERT_RETRIES) break;
+      if (_isDuplicateSlug(e)) {
+        // Another product took this route between our check and our insert.
+        _rejectedSlugs.push(_slug);
+        _slug = _nextFreeSlug(_slug, _rejectedSlugs);
+        console.warn('[slug] taken — retrying as', _slug);
+        continue;
+      }
+      if (!_isDuplicateSku(e)) break;
+      console.warn('[SKU]', _sku, 'was taken — reallocating (attempt', attempt + 1, 'of', MAX_INSERT_RETRIES + ')');
       _rejectedSkus.push(_sku);
       try {
         _sku = await allocateNextSku(_rejectedSkus);
@@ -4845,9 +5074,11 @@ async function _doSaveProduct() {
     _intakeSaveInProgress = false;
     btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save to Inventory';
     btn.disabled = false;
-    showToast(_isDuplicateSku(lastErr)
-      ? 'Could not find a free SKU — please try again.'
-      : 'Save failed: ' + (lastErr?.message || 'unknown error'));
+    showToast(_isDuplicateSlug(lastErr)
+      ? 'Could not find a free website address — please try again.'
+      : _isDuplicateSku(lastErr)
+        ? 'Could not find a free SKU — please try again.'
+        : 'Save failed: ' + (lastErr?.message || 'unknown error'));
     return;
   }
 
@@ -6052,6 +6283,14 @@ async function _bootLoadData() {
     renderHome();
     _bootInFlight = false;
     return; // stop — customers/exhibitions are useless without products context
+  }
+
+  try {
+    const n = await backfillProductSlugs();
+    if (n) console.log('[BOOT] product slugs backfilled', n);
+  } catch(e) {
+    // Non-fatal: products without a slug simply cannot publish until one exists.
+    console.warn('[BOOT] slug backfill failed', e?.message || e);
   }
 
   try {
@@ -8130,7 +8369,7 @@ function openProductDetail(id, opts) {
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
     'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb',
-    'website_status','website_availability','website_published_at'
+    'website_status','website_availability','website_published_at','slug'
   ].join(',');
 
   if (!p._hydrated && _hydratingProductId !== id) {
@@ -8188,6 +8427,7 @@ function _openProductDetailUI(p) {
   // Collapsed on every open — the Website section is a deliberate destination,
   // not something to scroll past.
   _websiteOpen = false;
+  _websiteSlugEditing = false;
   const _wc = document.getElementById('websiteContent');
   const _wch = document.getElementById('websiteChevron');
   if (_wc) _wc.style.display = 'none';

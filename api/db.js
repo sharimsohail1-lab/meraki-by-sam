@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // Columns added in later migrations that may not exist if schema cache is stale
 const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names', 'description_source',
   'fabric', 'pieces', 'color', 'made', 'care',
-  'website_status', 'website_availability', 'website_published_at'];
+  'website_status', 'website_availability', 'website_published_at', 'slug'];
 
 // Table-aware column allowlists — prevents arbitrary SQL injection via columns param
 const ALLOWED_COLUMNS_BY_TABLE = {
@@ -16,7 +16,7 @@ const ALLOWED_COLUMNS_BY_TABLE = {
     'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb',
     'description_source',
     'fabric','pieces','color','made','care',
-    'website_status','website_availability','website_published_at'
+    'website_status','website_availability','website_published_at','slug'
   ]),
   product_images: new Set([
     'id','product_id','storage_provider','storage_key','public_url','image_role',
@@ -122,10 +122,12 @@ export default async function handler(req, res) {
         console.warn('[db] Schema cache error on update, retrying without optional cols:', error.message);
         const fallback = stripOptionalCols(payload);
         const { data: r2, error: e2 } = await supabase.from(table).update(fallback).eq('id', id).select();
-        if (e2) { console.error('[db] update fallback error:', e2.message); return res.status(400).json({ error: e2.message }); }
+        if (e2) { console.error('[db] update fallback error:', e2.message); return res.status(400).json({ error: e2.message, code: e2.code || null }); }
         return res.status(200).json({ data: r2, warning: 'Updated without ' + OPTIONAL_COLS.join('/') + ' — run /api/migrate to fix schema cache' });
       }
-      if (error) { console.error('[db] update error:', error.message); return res.status(400).json({ error: error.message }); }
+      // code is forwarded for the same reason as on insert: the client branches on
+      // a unique violation (23505) rather than parsing message text.
+      if (error) { console.error('[db] update error:', error.message, '| code:', error.code); return res.status(400).json({ error: error.message, code: error.code || null }); }
       return res.status(200).json({ data: result });
     }
 
