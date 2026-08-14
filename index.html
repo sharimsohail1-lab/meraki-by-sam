@@ -959,28 +959,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
     <!-- ── PHOTO AREA ─────────────────────────────────────── -->
     <div id="detailPhotoArea">
-      <!-- Hero image (AI model or original depending on view) -->
-      <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none" onclick="_openHeroLightbox('ai')" title="Tap to view full image">
-      <div id="detailOriginalHeroSection" style="display:none;margin-top:8px">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">Original Garment</div>
-        <img id="detailOriginalHeroImg" src="" alt="Original garment photo" style="width:100%;height:auto;object-fit:contain;border-radius:10px;background:var(--sand-light);cursor:pointer" onclick="_openHeroLightbox('original')" title="Tap to view full image">
-      </div>
-      <div id="detailCollapsedBar" style="display:none;background:var(--sand-light);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--muted);margin-top:4px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span id="detailCollapsedSummary">Photos collapsed</span>
-          <button onclick="_setPhotoViewPref('ai-only')" style="background:none;border:none;font-size:11px;color:var(--burgundy);cursor:pointer;padding:0;font-weight:600">Show photos</button>
-        </div>
-      </div>
-
-      <!-- Photo view control (only when AI photo exists) -->
-      <div id="detailPhotoViewRow" style="display:none;margin:8px 0 0">
-        <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px">
-          <button id="pvBtn-ai-original" onclick="_setPhotoViewPref('ai-original')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);white-space:nowrap">AI + Original</button>
-          <button id="pvBtn-ai-only" onclick="_setPhotoViewPref('ai-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">AI only</button>
-          <button id="pvBtn-original-only" onclick="_setPhotoViewPref('original-only')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Original only</button>
-          <button id="pvBtn-collapsed" onclick="_setPhotoViewPref('collapsed')" style="flex:1;padding:5px 2px;border:none;background:none;cursor:pointer;color:var(--muted);border-left:1px solid var(--border);white-space:nowrap">Collapsed</button>
-        </div>
-      </div>
+      <!-- The product's canonical hero: the product_images row with
+           is_primary, else the lowest sort_order. Chosen in Photos below. -->
+      <img id="detailPhoto" class="detail-photo" src="" alt="" style="display:none" onclick="_openHeroLightbox()" title="Tap to view full image">
 
       <!-- Photo tools disclosure -->
       <div id="detailPhotoToolsRow" style="margin:8px 0 0;border:1px solid var(--border);border-radius:10px;overflow:hidden">
@@ -1032,8 +1013,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
           <!-- View full-screen shortcuts (only when photos exist) -->
           <div id="detailViewFullRow" style="display:none;display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-            <button id="detailViewAiBtn" onclick="_openHeroLightbox('ai')" style="display:none;flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:12px;color:var(--ink);cursor:pointer"><i class="ti ti-eye"></i> View AI photo</button>
-            <button id="detailViewOrigBtn" onclick="_openHeroLightbox('original')" style="display:none;flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:12px;color:var(--ink);cursor:pointer"><i class="ti ti-eye"></i> View original</button>
           </div>
 
           <!-- Original garment photo management -->
@@ -3082,9 +3061,12 @@ function _roleRank(role) {
   return i === -1 ? IMAGE_ROLE_ORDER.length : i;
 }
 
+// Gallery order is sort_order, and ONLY sort_order. Hero is a separate concept:
+// making an image the hero must not move it to the front of the gallery, and
+// reordering must not change which image is the hero. Role breaks ties so the
+// sequence is deterministic when two images share a sort_order.
 function _sortProductImages(list) {
   return list.slice().sort((a, b) =>
-    (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) ||
     (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
     _roleRank(a.role) - _roleRank(b.role)
   );
@@ -3183,9 +3165,18 @@ function getProductImagesSync(p) {
   return _productImagesCache[p?.id]?.list || [];
 }
 
-// The one hero rule, used by every consumer: is_primary, else lowest sort_order,
-// else nothing. show_on_website is deliberately ignored — it governs storefront
-// eligibility only, never what Saima sees inside the app or in a catalog.
+// THE canonical hero resolver. Every surface that shows one image for a product
+// resolves through this or through productImageSrc below — Stock, Collections,
+// Exhibitions, Catalog, Share Card and the Product Detail main image included.
+//
+// Resolution, in order:
+//   1. the image with is_primary === true      — authoritative
+//   2. otherwise the lowest sort_order          — the list is already sorted
+//   3. otherwise null                           — caller shows a placeholder
+//
+// Never the newest image, never an image because its role is 'model', and never
+// a legacy column. show_on_website is deliberately ignored here: it governs
+// storefront eligibility only, never what Saima sees inside the app.
 function getPrimaryProductImage(p) {
   const list = getProductImagesSync(p);
   return list.find(i => i.is_primary) || list[0] || null;
@@ -3194,6 +3185,30 @@ function getPrimaryProductImage(p) {
 // Hero src for cards, thumbnails and any other single-image surface.
 function productImageSrc(p) {
   return getPrimaryProductImage(p)?.src || null;
+}
+
+// Keep sort_order dense (0,1,2,…) so deletes do not leave widening gaps. Only
+// writes rows whose position actually changed.
+async function _normalizeSortOrders(productId) {
+  const list = getProductImagesSync({ id: productId });
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].sort_order !== i) {
+      await db('update', 'product_images', { id: list[i].id, data: { sort_order: i } });
+      list[i].sort_order = i;
+    }
+  }
+}
+
+// A product with photos should always have exactly one hero. Called after a
+// delete, which is the only operation that can remove the hero and leave others
+// behind. Promotes the lowest sort_order survivor. Returns the promoted image.
+async function _ensureHero(productId) {
+  const list = getProductImagesSync({ id: productId });
+  if (!list.length || list.some(i => i.is_primary)) return null;
+  const next = list[0];
+  await db('update', 'product_images', { id: next.id, data: { is_primary: true } });
+  next.is_primary = true;
+  return next;
 }
 
 // The AI-generated model image, if the product has one.
@@ -3340,7 +3355,7 @@ async function renderProductPhotos(p, { force = false } = {}) {
 async function _refreshPhotos() {
   invalidateProductImages(currentProduct?.id);
   await renderProductPhotos(currentProduct, { force: true });
-  if (currentProduct) { _applyPhotoView(_getPhotoViewPref(), currentProduct); renderWebsiteSection(currentProduct); }
+  if (currentProduct) { _applyPhotoView(null, currentProduct); renderWebsiteSection(currentProduct); }
   renderInventory();
   _invalidateMktPreview();
 }
@@ -3354,9 +3369,13 @@ async function _uploadGalleryImage(file, { role = 'gallery', makePrimary = false
   const row = {
     product_id: currentProduct.id,
     image_role: role,
-    sort_order: existing.length,
-    // Only claim primary when nothing stored is already primary — the partial
-    // unique index would reject a second one.
+    // Appended to the end of the gallery. sort_order is dense, so this is the
+    // next free slot.
+    sort_order: existing.length ? Math.max(...existing.map(i => i.sort_order ?? 0)) + 1 : 0,
+    // The first photo of a product becomes its hero with no extra tap. Later
+    // uploads never steal it — only an explicit tap on the star does that. The
+    // condition is "no hero exists" rather than "no images exist", so a product
+    // left heroless by an older bug repairs itself on the next upload.
     is_primary: makePrimary || !existing.some(i => i.is_primary),
     show_on_website: true,
     ...set.fields,
@@ -3376,23 +3395,29 @@ async function saveModelImageToStorage(productId, src) {
 
   const existing = getProductImagesSync({ id: productId });
   const prevModel = existing.find(i => i.role === 'model');
-  const prevPrimary = existing.find(i => i.is_primary && i.id !== prevModel?.id);
 
-  // Clear the old hero first — the partial unique index allows only one.
-  if (prevPrimary) await db('update', 'product_images', { id: prevPrimary.id, data: { is_primary: false } });
+  // Role is not hero. A generated model image does NOT take over as the main
+  // photo just because it is an AI render — that would be inferring hero from
+  // role, and it would silently override a hero Saima had chosen. It claims hero
+  // only when the product has none, exactly like any other first upload.
+  //
+  // Regenerating an existing model image keeps whatever hero state that row
+  // already had: if it was the hero it stays the hero, if it was not it does not
+  // become one.
+  const keepPrimary = prevModel ? !!prevModel.is_primary : !existing.some(i => i.is_primary);
 
   if (prevModel) {
     const oldKeys = imageObjectKeys(prevModel);
     await db('update', 'product_images', { id: prevModel.id, data: {
-      ...set.fields, is_primary: true, updated_at: new Date().toISOString(),
+      ...set.fields, is_primary: keepPrimary, updated_at: new Date().toISOString(),
     }});
     await deleteImageObjects(oldKeys.filter(k => k !== set.master.key), prevModel.storage_provider);
   } else {
     await db('insert', 'product_images', { data: {
       product_id: productId,
       image_role: 'model',
-      sort_order: existing.length,
-      is_primary: true,
+      sort_order: existing.length ? Math.max(...existing.map(i => i.sort_order ?? 0)) + 1 : 0,
+      is_primary: keepPrimary,
       show_on_website: true,
       ...set.fields,
     }});
@@ -3516,9 +3541,18 @@ async function deletePhoto(imageId) {
     // Master and every rendition. Partial cleanup leaves orphaned bytes, which is
     // wasteful but harmless — the row is already gone, so nothing points at them.
     await deleteImageObjects(imageObjectKeys(img), img.storage_provider);
+
+    // Re-read before repairing, so promotion and renumbering see the real
+    // remaining set rather than a stale cache.
+    invalidateProductImages(currentProduct.id);
+    await getProductImages(currentProduct, { force: true });
+    // Deleting the hero must not leave a product with photos and no hero.
+    const promoted = await _ensureHero(currentProduct.id);
+    await _normalizeSortOrders(currentProduct.id);
+
     await _refreshPhotos();
     _photosStatus('');
-    showToast('Deleted ✓');
+    showToast(promoted ? 'Deleted ✓ — main photo updated' : 'Deleted ✓');
   } catch (e) {
     _photosStatus('');
     showToast('Could not delete: ' + e.message);
@@ -3552,6 +3586,9 @@ async function handleGalleryReplace(input) {
 
     _photosStatus('Saving…');
     const oldKeys = imageObjectKeys(img);
+    // Only the stored bytes change. is_primary, sort_order, image_role and
+    // show_on_website are untouched, so replacing the hero yields a hero and the
+    // image keeps its place in the gallery.
     await db('update', 'product_images', { id: targetId, data: {
       ...set.fields,
       updated_at: new Date().toISOString(),
@@ -3779,7 +3816,12 @@ function buildPublicProductPayload(p) {
         alt: i.alt || p.name || null,
         width: i.width,
         height: i.height,
-        is_primary: i.id === websiteHeroImage(p)?.id,
+        // The internal hero flag exactly as stored. Deliberately NOT the
+        // website-facing fallback: the storefront applies that itself (visible
+        // is_primary, else first visible by sort_order). When the internal hero
+        // is hidden from the website every returned image is is_primary false,
+        // which is correct — it means "Saima did not pick any of these".
+        is_primary: !!i.is_primary,
         // Public rendition URLs by longest-side width. A width is absent when the
         // master was smaller, and the whole object is absent for images uploaded
         // before renditions existed — both cases fall back to src.
@@ -5661,7 +5703,7 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
         console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
 
         _lastPhase = 'state-refresh';
-        _applyPhotoView(_getPhotoViewPref(), currentProduct);
+        _applyPhotoView(null, currentProduct);
         renderProductPhotos(currentProduct, { force: true }).catch(() => {});
         renderInventory();
 
@@ -5683,9 +5725,7 @@ async function _runGenerateModelPhoto(targetImgId, outputDivId, btnId) {
 
         _lastPhase = 'dom-apply-photo-view';
         // Set default view to ai-only on first-time generation, then apply to hero
-        if (!_getPhotoViewPref()) localStorage.setItem('meraki_product_photo_view', 'ai-only');
-        console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase, pref: _getPhotoViewPref() });
-        _applyPhotoView(_getPhotoViewPref(), currentProduct);
+        _applyPhotoView(null, currentProduct);
 
         _lastPhase = 'dom-invalidate-mkt-preview';
         console.log('[genModelPhoto]', { rid: _rid, phase: _lastPhase });
@@ -8131,82 +8171,23 @@ function closeProductDetail() {
   }
 }
 
-function _getPhotoViewPref() {
-  return localStorage.getItem('meraki_product_photo_view') || null;
-}
-function _setPhotoViewPref(v) {
-  if (v) localStorage.setItem('meraki_product_photo_view', v);
-  else localStorage.removeItem('meraki_product_photo_view');
-  if (currentProduct) _applyPhotoView(v, currentProduct);
-}
+// The Product Detail main image is the canonical hero, full stop.
+//
+// This used to be a second main-image system: an AI/Original/Both/Collapsed
+// preference stored in localStorage that decided the large image independently
+// of is_primary. That meant Product Detail could show one image while Stock,
+// Collections and the catalog showed another, and a hero change did not
+// visibly take effect here. The switcher is retired — the Photos grid below is
+// where the main image is chosen now, and it applies everywhere at once.
 function _applyPhotoView(view, p) {
-  // The hero is the product's primary image. The AI/Original switcher is only
-  // offered when the product actually has an AI model image to switch to.
   const hero = getPrimaryProductImage(p);
-  const aiImg = getModelProductImage(p);
-  const origImg = getOriginalProductImage(p);
-  const hasAI = !!aiImg;
-  const hasOrig = !!origImg;
-  const effective = view || (hasAI ? 'ai-only' : null);
-
-  // Photo-view row: only show when AI photo exists (otherwise no choice to make)
-  const pvRow = document.getElementById('detailPhotoViewRow');
-  if (pvRow) pvRow.style.display = hasAI ? 'block' : 'none';
-
-  // Highlight active button
-  ['ai-original','ai-only','original-only','collapsed'].forEach(k => {
-    const btn = document.getElementById('pvBtn-' + k);
-    if (!btn) return;
-    const active = effective === k;
-    btn.style.background = active ? 'var(--burgundy)' : 'none';
-    btn.style.color = active ? '#fff' : 'var(--muted)';
-    btn.style.fontWeight = active ? '600' : 'normal';
-  });
 
   const heroEl = document.getElementById('detailPhoto');
-  const origHeroSection = document.getElementById('detailOriginalHeroSection');
-  const origHeroImg = document.getElementById('detailOriginalHeroImg');
-  const collapsedBar = document.getElementById('detailCollapsedBar');
-  const collapsedSummary = document.getElementById('detailCollapsedSummary');
-  const viewAiBtn = document.getElementById('detailViewAiBtn');
-  const viewOrigBtn = document.getElementById('detailViewOrigBtn');
-
-  if (!hasAI) {
-    // No AI photo — simple mode: show the hero image, no view switcher
-    if (heroEl) { heroEl.src = hero?.src || ''; heroEl.style.display = hero ? 'block' : 'none'; }
-    if (origHeroSection) origHeroSection.style.display = 'none';
-    if (collapsedBar) collapsedBar.style.display = 'none';
-    if (viewAiBtn) viewAiBtn.style.display = 'none';
-    if (viewOrigBtn) viewOrigBtn.style.display = hasOrig ? 'flex' : 'none';
-    return;
+  if (heroEl) {
+    heroEl.src = hero?.src || '';
+    heroEl.style.display = hero ? 'block' : 'none';
   }
 
-  // AI photo exists — apply selected view
-  if (viewAiBtn) viewAiBtn.style.display = 'flex';
-  if (viewOrigBtn) viewOrigBtn.style.display = hasOrig ? 'flex' : 'none';
-
-  if (effective === 'ai-original') {
-    if (heroEl) { heroEl.src = aiImg.src; heroEl.style.display = 'block'; }
-    if (origHeroSection) {
-      origHeroSection.style.display = hasOrig ? 'block' : 'none';
-      if (origHeroImg && hasOrig) origHeroImg.src = origImg.src;
-    }
-    if (collapsedBar) collapsedBar.style.display = 'none';
-  } else if (effective === 'original-only') {
-    if (heroEl) { heroEl.src = origImg?.src || ''; heroEl.style.display = hasOrig ? 'block' : 'none'; }
-    if (origHeroSection) origHeroSection.style.display = 'none';
-    if (collapsedBar) collapsedBar.style.display = 'none';
-  } else if (effective === 'collapsed') {
-    if (heroEl) { heroEl.src = ''; heroEl.style.display = 'none'; }
-    if (origHeroSection) origHeroSection.style.display = 'none';
-    if (collapsedBar) collapsedBar.style.display = 'block';
-    if (collapsedSummary) collapsedSummary.textContent = [hasAI && 'AI', hasOrig && 'Original'].filter(Boolean).join(' + ') + ' available';
-  } else {
-    // 'ai-only' or default
-    if (heroEl) { heroEl.src = aiImg.src; heroEl.style.display = 'block'; }
-    if (origHeroSection) origHeroSection.style.display = 'none';
-    if (collapsedBar) collapsedBar.style.display = 'none';
-  }
 }
 
 function _togglePhotoTools() {
@@ -8221,17 +8202,16 @@ function _togglePhotoTools() {
 function _updatePhotoToolsSummary(p) {
   const el = document.getElementById('detailPhotoToolsSummary');
   if (!el) return;
-  const count = getProductImagesSync(p).length;
+  const list = getProductImagesSync(p);
   const parts = [getModelProductImage(p) ? 'AI: Generated' : 'AI: None'];
-  parts.push(count ? `${count} photo${count > 1 ? 's' : ''}` : 'No photos yet');
+  parts.push(list.length ? `${list.length} photo${list.length > 1 ? 's' : ''}` : 'No photos yet');
   el.textContent = parts.join(' · ');
 }
 
-function _openHeroLightbox(type) {
+function _openHeroLightbox() {
   const p = currentProduct;
   if (!p) return;
-  const src = (type === 'original' ? getOriginalProductImage(p) : getModelProductImage(p))?.src
-            || getPrimaryProductImage(p)?.src;
+  const src = getPrimaryProductImage(p)?.src;
   if (!src) return;
   const lb = document.getElementById('detailHeroLightbox');
   const img = document.getElementById('detailHeroLightboxImg');
@@ -8615,9 +8595,7 @@ function openProductDetail(id, opts) {
 
 function _openProductDetailUI(p) {
   // Photo view: determine effective preference and apply
-  let _pvPref = _getPhotoViewPref();
-  if (!_pvPref) _pvPref = getModelProductImage(p) ? 'ai-only' : null;
-  _applyPhotoView(_pvPref, p);
+  _applyPhotoView(null, p);
 
   // The old detail-photo inset editor read products.detail_photos. That column is
   // dormant, so the list is always empty and the inset strip renders nothing —
@@ -9452,12 +9430,17 @@ function _catalogImgCtrlHTML(p) {
 // The src a catalog row shows for the chosen source, honouring a prepared blur.
 // Catalog imagery is never filtered by show_on_website — the catalog and the
 // website are separate outputs.
+// The catalog leads with the product's canonical hero. The AI/Original buttons
+// remain an explicit per-catalog override — chosen by Saima for one output,
+// usually to reach the face-blur workflow — but they no longer decide the
+// default, and nothing here infers a main image from the 'model' role.
 function _catalogDisplaySrc(p, ch) {
   if (ch?.source === 'original') {
     if (ch.blurFace && ch.blurredDataUrl) return ch.blurredDataUrl;
     return getOriginalProductImage(p)?.src || null;
   }
-  return (getModelProductImage(p) || getPrimaryProductImage(p))?.src || null;
+  if (ch?.source === 'model') return getModelProductImage(p)?.src || getPrimaryProductImage(p)?.src || null;
+  return getPrimaryProductImage(p)?.src || null;
 }
 
 function renderCatalogSelection() {
@@ -10358,8 +10341,13 @@ async function openMktShareWorkspace() {
   // Reset marketing image choice for this product
   const hasModel = !!getModelProductImage(p);
   const hasOrig = !!getOriginalProductImage(p);
+  // The share card starts from the product's canonical hero rather than from
+  // whichever image happens to be the AI render. The two buttons stay as an
+  // explicit per-card override — they are how Saima reaches the face-blur
+  // workflow — but the default now agrees with every other surface.
+  const _heroRole = getPrimaryProductImage(p)?.role;
   currentMarketingImageChoice = {
-    source: hasModel ? 'model' : (hasOrig ? 'original' : 'none'),
+    source: _heroRole === 'model' ? 'model' : (hasOrig ? 'original' : (hasModel ? 'model' : 'none')),
     blurFace: false,
     blurredDataUrl: null,
     blurRevision: 0,
@@ -10403,7 +10391,7 @@ async function openMktShareWorkspace() {
       </div>
     </div>`;
 
-  // If AI source selected, auto-build the card immediately
+  // Auto-build straight away when the starting source needs no privacy decision.
   if (currentMarketingImageChoice.source === 'model') {
     _mktBuildAndShowCard(p, { imageSrc: getModelProductImage(p)?.src, sourceType: 'model' });
   }
@@ -14010,7 +13998,7 @@ async function confirmReplaceOriginalPhoto() {
       currentProduct = inventory[idx];
     }
     // Refresh photo view after original photo replacement
-    _applyPhotoView(_getPhotoViewPref(), currentProduct);
+    _applyPhotoView(null, currentProduct);
     closeSheet('replaceOrigPhotoConfirmSheet');
     _replaceOrigPhotoPreview = null;
     _invalidateMktPreview();
@@ -14227,15 +14215,27 @@ async function labAddCurrentProduct() {
   if (!p) { showToast('Open a product detail first'); return; }
   if (!p.ideogram_prompt) { showToast('This product has no generation prompt'); return; }
   if (labGarments.find(g => g.product_id === p.id)) { showToast('Already in benchmarks'); return; }
+
+  // The reference garment comes from product_images, never from the dormant
+  // products.photo. Real photography is preferred over the AI render, falling
+  // back to the hero. Providers need base64, so the remote master is fetched and
+  // encoded once here rather than stored as a URL the provider cannot read.
+  const ref = getOriginalProductImage(p) || getPrimaryProductImage(p);
+  let photo = null;
+  if (ref?.src) {
+    try { photo = (await preparePersistentImage(ref.src)).dataUrl; }
+    catch (e) { console.warn('[lab] could not load reference image:', e.message); }
+  }
+
   await db('insert', 'benchmark_garments', { data: {
     name: p.name,
     category: p.category || null,
     notes: p.description_en || null,
-    photo: p.photo || null,
+    photo,
     prompt: p.ideogram_prompt,
     product_id: p.id
   }});
-  showToast('Added to benchmarks');
+  showToast(photo ? 'Added to benchmarks' : 'Added to benchmarks (no reference photo)');
   await labLoadGarments();
 }
 
