@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // Columns added in later migrations that may not exist if schema cache is stale
 const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names', 'description_source',
   'fabric', 'pieces', 'color', 'made', 'care',
-  'website_status', 'website_availability', 'website_published_at', 'slug'];
+  'website_status', 'website_availability', 'website_published_at', 'slug', 'variants'];
 
 // Table-aware column allowlists — prevents arbitrary SQL injection via columns param
 const ALLOWED_COLUMNS_BY_TABLE = {
@@ -21,7 +21,7 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   product_images: new Set([
     'id','product_id','storage_provider','storage_key','public_url','image_role',
     'sort_order','is_primary','show_on_website','alt_text',
-    'width','height','bytes','mime_type','created_at','updated_at'
+    'width','height','bytes','mime_type','variants','created_at','updated_at'
   ]),
   exh_items: new Set([
     'id','exhibition_id','name','photo','price_usd','cost_pkr',

@@ -16,9 +16,19 @@ import { createClient } from '@supabase/supabase-js';
 
 const BUCKET = 'product-images';
 
-// products/{uuid}/{uuid}.{ext} — anything else is rejected so a caller cannot
-// reach outside the product namespace or overwrite an unrelated object.
-const KEY_PATTERN = /^products\/[0-9a-f-]{36}\/[0-9a-z-]+\.(webp|jpg|jpeg|png)$/i;
+// Two accepted shapes, both confined to the product namespace so a caller cannot
+// reach outside it or overwrite an unrelated object:
+//
+//   products/{product_id}/{image_id}/master.webp   current — image and its
+//   products/{product_id}/{image_id}/560.webp      renditions share one folder
+//   products/{product_id}/{image_id}/960.webp
+//   products/{product_id}/{image_id}/1400.webp
+//
+//   products/{product_id}/{uuid}.{ext}             pre-rendition flat keys,
+//                                                  still accepted so existing
+//                                                  images can be deleted
+const KEY_PATTERN =
+  /^products\/[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\/(?:master|560|960|1400)\.webp|[0-9a-z-]+\.(?:webp|jpg|jpeg|png))$/i;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;

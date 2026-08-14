@@ -2586,6 +2586,179 @@ const MASTER_MAX_BYTES = 8_000_000;
 // Hard reject before decoding — protects against a multi-hundred-MB file.
 const UPLOAD_MAX_SOURCE_BYTES = 25_000_000;
 
+// ─── RESPONSIVE RENDITIONS ───────────────────────────────────────────────────
+// Every stored image gets a high-quality master plus three smaller WebP
+// renditions, generated once at upload time. The storefront builds a srcset from
+// them, so no Supabase image transformation and no resizing proxy is needed, and
+// a phone never downloads a 2400 px master.
+//
+// Widths are the LONGEST SIDE, so portrait and landscape both cap correctly and
+// aspect ratio is always preserved.
+//
+// Quality rises with width because the artefacts that matter in fashion
+// photography — embroidery stitching, fabric weave, gradients across silk — are
+// exactly what low quality destroys, and a 560 px image is viewed small enough to
+// hide a little of that while a 1400 px one is not. These are deliberately not
+// aggressive: bandwidth matters less than the garment looking right.
+const RENDITIONS = [
+  { width: 560,  quality: 0.78 },
+  { width: 960,  quality: 0.82 },
+  { width: 1400, quality: 0.85 },
+];
+
+function _canvasToBlob(canvas, mime, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), mime, quality);
+  });
+}
+
+// Master plus renditions from ONE decode.
+//
+// The source is decoded once, the master canvas is produced from it, and every
+// rendition is then drawn from that master canvas rather than from the original.
+// Downscaling from the 2400 px master is materially cheaper on a phone than
+// re-sampling the full-resolution original three more times, and with
+// high-quality smoothing the visible difference is nil.
+//
+// Renditions are never upscaled: a target wider than the master is skipped
+// entirely rather than fabricating pixels. That is why a small source simply has
+// fewer entries, and why the public payload omits missing widths instead of
+// pointing several of them at the same file.
+//
+// Returns { master: {blob,width,height,mimeType,bytes}, renditions: [{width,blob,...}] }
+async function prepareImageRenditions(src, opts = {}) {
+  const master = await preparePersistentImage(src, opts);
+
+  // WebP-only for renditions. If the browser could not produce WebP the master
+  // is a JPEG, and shipping a mixed set is worse than shipping none: the master
+  // alone still renders everywhere.
+  if (!/webp/.test(master.mimeType || '')) {
+    console.warn('[renditions] master is not WebP, skipping renditions');
+    return { master, renditions: [] };
+  }
+
+  const img = await loadImg(master.dataUrl);
+  const longest = Math.max(master.width, master.height);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const renditions = [];
+
+  for (const r of RENDITIONS) {
+    if (r.width >= longest) continue;              // never upscale
+    const scale = r.width / longest;
+    const w = Math.max(1, Math.round(master.width * scale));
+    const h = Math.max(1, Math.round(master.height * scale));
+    canvas.width = w;
+    canvas.height = h;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    try {
+      const blob = await _canvasToBlob(canvas, 'image/webp', r.quality);
+      renditions.push({ width: r.width, blob, w, h, bytes: blob.size, mimeType: 'image/webp' });
+    } catch (e) {
+      // One bad encode must not cost the whole image. The width is dropped.
+      console.warn('[renditions] encode failed at', r.width, e.message);
+    }
+  }
+
+  console.log('[renditions]', {
+    master: master.width + 'x' + master.height + ' ' + Math.round(master.bytes / 1024) + 'KB',
+    generated: renditions.map(r => r.width + ':' + Math.round(r.bytes / 1024) + 'KB').join(' ') || 'none',
+  });
+
+  return { master, renditions };
+}
+
+// Upload a prepared master and its renditions into one immutable namespace.
+//
+// The master goes first and is the only required object: if it fails the whole
+// save is abandoned so no database row can ever point at nothing. Renditions are
+// best-effort with a single retry each — a 560 px upload that fails twice is
+// omitted from `variants`, which costs the storefront one srcset entry and
+// nothing else.
+//
+// Returns { namespace, master: {...upload}, variants: {...}, missing: [widths] }
+async function uploadImageSet(productId, prepared, { onProgress } = {}) {
+  const namespace = buildImageNamespace(productId);
+
+  onProgress?.('Uploading…');
+  const master = await uploadImage({
+    blob: prepared.master.blob,
+    key: imageKeyIn(namespace, 'master'),
+    contentType: prepared.master.mimeType,
+  });
+
+  const variants = {};
+  const missing = [];
+  for (const r of prepared.renditions) {
+    const key = imageKeyIn(namespace, String(r.width));
+    let ok = null;
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      try {
+        ok = await uploadImage({ blob: r.blob, key, contentType: 'image/webp' });
+      } catch (e) {
+        console.warn('[renditions] upload failed at', r.width, 'attempt', attempt + 1, e.message);
+      }
+    }
+    if (ok) variants[String(r.width)] = { storage_key: ok.key, public_url: ok.publicUrl };
+    else missing.push(r.width);
+  }
+
+  return { namespace, master, variants, missing };
+}
+
+// Prepare + upload in one call. Every caller — Product Detail, replace, AI model
+// images and intake — goes through this, so there is exactly one compression and
+// rendition policy in the app.
+async function prepareAndUploadImageSet(productId, src, { onProgress } = {}) {
+  onProgress?.('Preparing…');
+  const prepared = await prepareImageRenditions(src);
+  const uploaded = await uploadImageSet(productId, prepared, { onProgress });
+  return {
+    ...uploaded,
+    // Column values shared by every write path.
+    fields: {
+      storage_provider: uploaded.master.provider,
+      storage_key: uploaded.master.key,
+      public_url: uploaded.master.publicUrl,
+      width: prepared.master.width,
+      height: prepared.master.height,
+      bytes: prepared.master.bytes,
+      mime_type: prepared.master.mimeType,
+      variants: uploaded.variants,
+    },
+  };
+}
+
+// Every storage object belonging to one image: the master plus each rendition.
+// Used by delete and by replace cleanup, so neither has to know the layout.
+function imageObjectKeys(img) {
+  const keys = [];
+  if (img?.storage_key) keys.push(img.storage_key);
+  Object.values(img?.variants || {}).forEach(v => { if (v?.storage_key) keys.push(v.storage_key); });
+  return keys;
+}
+
+// Best-effort removal of a set of objects. Never throws: an object left behind is
+// wasted bytes, while a thrown error here would corrupt the caller's flow.
+async function deleteImageObjects(keys, provider) {
+  const orphans = [];
+  for (const key of keys) {
+    try { await deleteImage({ provider, key }); }
+    catch (e) { orphans.push(key); console.warn('[storage] orphaned object:', key, e.message); }
+  }
+  if (orphans.length) console.warn('[storage] cleanup needed for', orphans.length, 'object(s):', orphans);
+  return orphans;
+}
+
+// Tell Saima only when something is actually missing, and in her terms.
+function _renditionWarning(missing) {
+  if (!missing?.length) return null;
+  return `Saved. ${missing.length} smaller size${missing.length > 1 ? 's' : ''} could not be made — the photo still works everywhere.`;
+}
+
 async function preparePersistentImage(src, {
   maxPx    = MASTER_MAX_PX,
   maxBytes = MASTER_MAX_BYTES,
@@ -2697,13 +2870,38 @@ async function _storageCall(action, payload) {
 // Collision-safe, never-overwritten object key.
 // Replacing an image writes a NEW key and repoints the database row, so a stale
 // CDN copy of a replaced image cannot exist.
-function buildImageKey(productId, ext = 'webp') {
-  const uuid = (crypto.randomUUID && crypto.randomUUID()) ||
+function _uuid() {
+  return (crypto.randomUUID && crypto.randomUUID()) ||
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0;
       return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
     });
-  return `products/${productId}/${uuid}.${ext}`;
+}
+
+// An image and its renditions live in one folder named by a fresh UUID:
+//
+//   products/{product_id}/{image_uuid}/master.webp
+//   products/{product_id}/{image_uuid}/560.webp
+//   products/{product_id}/{image_uuid}/960.webp
+//   products/{product_id}/{image_uuid}/1400.webp
+//
+// Nothing is ever overwritten: a replacement gets a whole new folder, so a CDN
+// copy of the previous image can never go stale and no cache-busting query
+// parameter is needed. The folder also makes every object belonging to one image
+// enumerable from the master key alone, which is what delete and replace need.
+//
+// No product or image name appears in a key — only IDs.
+function buildImageNamespace(productId) {
+  return `products/${productId}/${_uuid()}`;
+}
+
+function imageKeyIn(namespace, name) {
+  return `${namespace}/${name}.webp`;
+}
+
+// Legacy flat key, kept so pre-rendition callers and tests still resolve.
+function buildImageKey(productId, ext = 'webp') {
+  return `products/${productId}/${_uuid()}.${ext}`;
 }
 
 // Uploads bytes straight to object storage using a short-lived signed URL.
@@ -2870,7 +3068,7 @@ async function saveGarmentDetails(btn) {
 
 const PRODUCT_IMAGE_COLS =
   'id,product_id,storage_provider,storage_key,public_url,image_role,sort_order,' +
-  'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,created_at,updated_at';
+  'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,variants,created_at,updated_at';
 
 // Role ordering, used as a tiebreak when sort_order matches.
 // Mirrors the PHOTO_SLOTS priorities so a synthesised gallery reads sensibly.
@@ -2892,6 +3090,25 @@ function _sortProductImages(list) {
   );
 }
 
+// variants is JSONB, but a stale schema cache or an older client can hand back a
+// JSON string. Both are accepted, anything unusable becomes {}.
+function _parseVariants(raw) {
+  if (!raw) return {};
+  let v = raw;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return {}; } }
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+
+// Public rendition URLs for one image, widest key first is irrelevant — the
+// storefront reads them by width. Storage keys are deliberately not included.
+function imageVariantUrls(img) {
+  const out = {};
+  Object.entries(img?.variants || {}).forEach(([w, v]) => {
+    if (v?.public_url) out[w] = v.public_url;
+  });
+  return out;
+}
+
 // Normalise a stored product_images row into the shared shape.
 function _normalizeImageRow(row) {
   return {
@@ -2907,6 +3124,9 @@ function _normalizeImageRow(row) {
     width: row.width ?? null,
     height: row.height ?? null,
     mime_type: row.mime_type || null,
+    // NULL means the row predates renditions. Normalised once, here, so nothing
+    // downstream has to distinguish "no column" from "no renditions".
+    variants: _parseVariants(row.variants),
     legacy: false,
   };
 }
@@ -3127,32 +3347,22 @@ async function _refreshPhotos() {
 
 // Prepare + upload + create the metadata row. Bytes go straight to storage.
 async function _uploadGalleryImage(file, { role = 'gallery', makePrimary = false } = {}) {
-  _photosStatus('Preparing…');
-  const prepared = await preparePersistentImage(file);   // 2400px master, WebP q0.88
-  const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
-  const key = buildImageKey(currentProduct.id, ext);
-
-  _photosStatus('Uploading…');
-  const up = await uploadImage({ blob: prepared.blob, key, contentType: prepared.mimeType });
+  const set = await prepareAndUploadImageSet(currentProduct.id, file, { onProgress: _photosStatus });
 
   _photosStatus('Saving…');
   const existing = window._detailPhotos || [];
   const row = {
     product_id: currentProduct.id,
-    storage_provider: up.provider,
-    storage_key: up.key,
-    public_url: up.publicUrl,
     image_role: role,
     sort_order: existing.length,
     // Only claim primary when nothing stored is already primary — the partial
     // unique index would reject a second one.
     is_primary: makePrimary || !existing.some(i => i.is_primary),
     show_on_website: true,
-    width: prepared.width, height: prepared.height,
-    bytes: prepared.bytes, mime_type: prepared.mimeType,
+    ...set.fields,
   };
   const rows = await db('insert', 'product_images', { data: row });
-  return { row: rows?.[0], upload: up };
+  return { row: rows?.[0], upload: set.master, missing: set.missing };
 }
 
 // AI-generated model images land in product_images with role 'model', exactly
@@ -3161,43 +3371,36 @@ async function _uploadGalleryImage(file, { role = 'gallery', makePrimary = false
 // The model image becomes the hero, which is what Saima generates it for.
 async function saveModelImageToStorage(productId, src) {
   if (!productId || !src) throw new Error('saveModelImageToStorage: missing product or image');
-  const prepared = await preparePersistentImage(src);
-  const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
-  const key = buildImageKey(productId, ext);
-  const up = await uploadImage({ blob: prepared.blob, key, contentType: prepared.mimeType });
+  // Same pipeline as every other image: one architecture, one rendition policy.
+  const set = await prepareAndUploadImageSet(productId, src);
 
   const existing = getProductImagesSync({ id: productId });
   const prevModel = existing.find(i => i.role === 'model');
   const prevPrimary = existing.find(i => i.is_primary && i.id !== prevModel?.id);
-  const dims = { width: prepared.width, height: prepared.height, bytes: prepared.bytes, mime_type: prepared.mimeType };
 
   // Clear the old hero first — the partial unique index allows only one.
   if (prevPrimary) await db('update', 'product_images', { id: prevPrimary.id, data: { is_primary: false } });
 
   if (prevModel) {
-    const oldKey = prevModel.storage_key;
+    const oldKeys = imageObjectKeys(prevModel);
     await db('update', 'product_images', { id: prevModel.id, data: {
-      storage_key: up.key, public_url: up.publicUrl, is_primary: true,
-      updated_at: new Date().toISOString(), ...dims,
+      ...set.fields, is_primary: true, updated_at: new Date().toISOString(),
     }});
-    if (oldKey && oldKey !== up.key) {
-      try { await deleteImage({ provider: prevModel.storage_provider, key: oldKey }); }
-      catch (e) { console.warn('[images] old model object left behind:', oldKey, e.message); }
-    }
+    await deleteImageObjects(oldKeys.filter(k => k !== set.master.key), prevModel.storage_provider);
   } else {
     await db('insert', 'product_images', { data: {
       product_id: productId,
-      storage_provider: up.provider, storage_key: up.key, public_url: up.publicUrl,
       image_role: 'model',
       sort_order: existing.length,
       is_primary: true,
       show_on_website: true,
-      ...dims,
+      ...set.fields,
     }});
   }
 
   invalidateProductImages(productId);
   await getProductImages({ id: productId }, { force: true });
+  return set;
 }
 
 async function handleGalleryUpload(input) {
@@ -3208,10 +3411,10 @@ async function handleGalleryUpload(input) {
   const btn = document.getElementById('addPhotoBtn');
   if (btn) btn.disabled = true;
   try {
-    await _uploadGalleryImage(file);
+    const { missing } = await _uploadGalleryImage(file);
     await _refreshPhotos();
     _photosStatus('');
-    showToast('Photo added ✓');
+    showToast(_renditionWarning(missing) || 'Photo added ✓');
   } catch (e) {
     console.warn('[photos] upload failed', e);
     _photosStatus('');
@@ -3310,8 +3513,9 @@ async function deletePhoto(imageId) {
   _photosStatus('Deleting…');
   try {
     await db('delete', 'product_images', { id: imageId });
-    try { await deleteImage({ provider: img.storage_provider, key: img.storage_key }); }
-    catch (objErr) { console.warn('[photos] row deleted but object remains:', img.storage_key, objErr.message); }
+    // Master and every rendition. Partial cleanup leaves orphaned bytes, which is
+    // wasteful but harmless — the row is already gone, so nothing points at them.
+    await deleteImageObjects(imageObjectKeys(img), img.storage_provider);
     await _refreshPhotos();
     _photosStatus('');
     showToast('Deleted ✓');
@@ -3342,29 +3546,24 @@ async function handleGalleryReplace(input) {
   if (!img) return;
   _photosBusy = true;
   try {
-    _photosStatus('Preparing…');
-    const prepared = await preparePersistentImage(file);
-    const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
-    const newKey = buildImageKey(currentProduct.id, ext);
-
-    _photosStatus('Uploading…');
-    const up = await uploadImage({ blob: prepared.blob, key: newKey, contentType: prepared.mimeType });
+    // The replacement is uploaded to a brand-new namespace before anything is
+    // repointed, so the product is never without an image.
+    const set = await prepareAndUploadImageSet(currentProduct.id, file, { onProgress: _photosStatus });
 
     _photosStatus('Saving…');
-    const oldKey = img.storage_key;
+    const oldKeys = imageObjectKeys(img);
     await db('update', 'product_images', { id: targetId, data: {
-      storage_key: up.key, public_url: up.publicUrl,
-      width: prepared.width, height: prepared.height,
-      bytes: prepared.bytes, mime_type: prepared.mimeType,
+      ...set.fields,
       updated_at: new Date().toISOString(),
     }});
-    // Only now is the old object unreferenced.
-    try { await deleteImage({ provider: img.storage_provider, key: oldKey }); }
-    catch (objErr) { console.warn('[photos] old object left behind:', oldKey, objErr.message); }
+
+    // Only now are the old objects unreferenced. Cleanup failure leaves orphaned
+    // bytes and is logged — it never reverts the row to the old imagery.
+    await deleteImageObjects(oldKeys, img.storage_provider);
 
     await _refreshPhotos();
     _photosStatus('');
-    showToast('Replaced ✓');
+    showToast(_renditionWarning(set.missing) || 'Replaced ✓');
   } catch (e) {
     console.warn('[photos] replace failed', e);
     _photosStatus('');
@@ -3569,15 +3768,24 @@ function buildPublicProductPayload(p) {
 
     garment_details: websiteGarmentDetails(p),
 
-    images: websiteImages(p).map(i => ({
-      src: i.src,
-      role: i.role,
-      sort_order: i.sort_order,
-      alt: i.alt || p.name || null,
-      width: i.width,
-      height: i.height,
-      is_primary: i.id === websiteHeroImage(p)?.id,
-    })),
+    images: websiteImages(p).map(i => {
+      const variants = imageVariantUrls(i);
+      return {
+        // The master. Always present, so it is a reliable fallback and a valid
+        // plain src for a browser that ignores srcset.
+        src: i.src,
+        role: i.role,
+        sort_order: i.sort_order,
+        alt: i.alt || p.name || null,
+        width: i.width,
+        height: i.height,
+        is_primary: i.id === websiteHeroImage(p)?.id,
+        // Public rendition URLs by longest-side width. A width is absent when the
+        // master was smaller, and the whole object is absent for images uploaded
+        // before renditions existed — both cases fall back to src.
+        ...(Object.keys(variants).length ? { variants } : {}),
+      };
+    }),
 
     published_at: p.website_published_at || null,
   };
@@ -5101,24 +5309,23 @@ async function _doSaveProduct() {
   // The product row already exists, so anything that fails here can be added
   // afterwards from the Photos section — Saima is told exactly what is missing.
   const _failed = [];
+  const _missingRenditions = [];
   const _total = _intakeImages.length + (_intakeModelPhoto ? 1 : 0);
   let _done = 0;
   for (const im of _intakeImages) {
     btn.innerHTML = `<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Uploading photo ${_done + 1} of ${_total}…`;
     try {
-      const prepared = await preparePersistentImage(im.src);
-      const ext = (prepared.mimeType || '').includes('webp') ? 'webp' : 'jpg';
-      const up = await uploadImage({ blob: prepared.blob, key: buildImageKey(saved.id, ext), contentType: prepared.mimeType });
+      // Identical pipeline to Product Detail — master plus renditions, one policy.
+      const set = await prepareAndUploadImageSet(saved.id, im.src);
+      if (set.missing.length) _missingRenditions.push(...set.missing);
       await db('insert', 'product_images', { data: {
         product_id: saved.id,
-        storage_provider: up.provider, storage_key: up.key, public_url: up.publicUrl,
         image_role: im.role,
         sort_order: _done,
         is_primary: _done === 0 && !_intakeModelPhoto,
         show_on_website: true,
         alt_text: im.alt || null,
-        width: prepared.width, height: prepared.height,
-        bytes: prepared.bytes, mime_type: prepared.mimeType,
+        ...set.fields,
       }});
     } catch (e) {
       console.warn('[intake] photo upload failed', im.role, e.message);
@@ -5131,11 +5338,15 @@ async function _doSaveProduct() {
 
   if (_intakeModelPhoto) {
     btn.innerHTML = `<div class="loading" style="scale:0.7;display:inline-flex"><span></span><span></span><span></span></div> Uploading photo ${_total} of ${_total}…`;
-    try { await saveModelImageToStorage(saved.id, _intakeModelPhoto); }
+    try {
+      const set = await saveModelImageToStorage(saved.id, _intakeModelPhoto);
+      if (set?.missing?.length) _missingRenditions.push(...set.missing);
+    }
     catch (e) { console.warn('[intake] model image upload failed', e.message); _failed.push('AI model photo'); }
   }
 
   if (_failed.length) showToast(`Saved, but ${_failed.length} photo${_failed.length > 1 ? 's' : ''} did not upload: ${_failed.join(', ')} — add them from Photos`);
+  else if (_missingRenditions.length) showToast(_renditionWarning(_missingRenditions));
   else if (!_previewSku || _previewSku === _sku) showToast('Saved to inventory ✓');
 
   _intakeSaveInProgress = false;

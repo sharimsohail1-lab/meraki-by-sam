@@ -1,0 +1,26 @@
+-- Pre-generated responsive renditions for product images.
+--
+-- Each product image keeps its high-quality master in storage_key/public_url.
+-- This column records the smaller WebP renditions generated alongside it, so the
+-- storefront can build a srcset without Supabase image transformations and
+-- without routing images through a resizing proxy.
+--
+-- Shape:
+--   {"560":  {"storage_key": "products/<pid>/<img>/560.webp",  "public_url": "https://..."},
+--    "960":  {"storage_key": "products/<pid>/<img>/960.webp",  "public_url": "https://..."},
+--    "1400": {"storage_key": "products/<pid>/<img>/1400.webp", "public_url": "https://..."}}
+--
+-- Keys are the target longest side in pixels. A width is absent when the master
+-- was smaller than that target, because renditions are never upscaled. Never
+-- contains image bytes.
+--
+-- Default NULL rather than an empty object. NULL means "this row predates
+-- renditions", which is genuinely different from "renditions were generated and
+-- none applied" — a small source legitimately produces {}. The read path
+-- normalises NULL to {} in one place, so the rest of the app never null-checks.
+--
+-- NOTE: /api/migrate splits this file on the semicolon character. Do not use DO
+-- blocks or function bodies here, and keep semicolons out of comments. Every
+-- statement below must stand alone.
+
+ALTER TABLE product_images ADD COLUMN IF NOT EXISTS variants JSONB;
