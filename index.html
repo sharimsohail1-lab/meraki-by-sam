@@ -1127,6 +1127,33 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <input type="file" id="galleryFileInput" accept="image/*" style="display:none" onchange="handleGalleryUpload(this)">
         <input type="file" id="galleryReplaceInput" accept="image/*" style="display:none" onchange="handleGalleryReplace(this)">
       </div>
+      <!-- ── WEBSITE ─────────────────────────────────────────────────────── -->
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+        <div onclick="toggleWebsiteSection()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px">
+          <div style="min-width:0">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase">Website</div>
+            <div id="websiteSummary" style="font-size:12px;color:var(--ink);margin-top:3px"></div>
+          </div>
+          <i class="ti ti-chevron-down" id="websiteChevron" style="color:var(--muted);font-size:16px;flex-shrink:0;transition:transform .15s"></i>
+        </div>
+        <div id="websiteContent" style="display:none;margin-top:14px">
+          <div style="font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:6px;padding:8px 10px;margin-bottom:12px;line-height:1.5">
+            Website publishing controls are ready. Connecting the storefront is the next setup step, so publishing here does not change merakibysaima.com yet.
+          </div>
+
+          <div class="field-label">Availability</div>
+          <div id="websiteAvailRow" style="display:flex;gap:6px;margin-bottom:6px"></div>
+          <div id="websiteAvailHelp" style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
+
+          <div class="field-label">What the website will show</div>
+          <div id="websitePreview" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--surface)"></div>
+
+          <div id="websiteIssues" style="margin-bottom:12px"></div>
+          <div id="websiteStatusMsg" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
+          <div id="websiteActions" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+      </div>
+
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e8e0d8">
         <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Manage Product</div>
         <button id="archiveProductBtn" class="btn" style="width:100%;background:#fff;color:#7a4500;border:1.5px solid #c8a060;font-weight:600;margin-bottom:8px" onclick="archiveProduct(this)"><i class="ti ti-archive"></i> Archive Product</button>
@@ -1959,7 +1986,8 @@ const PRODUCT_SUMMARY_COLS = [
   'fabric','pieces','color','made','care',
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
-  'is_archived','created_at','updated_at'
+  'is_archived','created_at','updated_at',
+  'website_status','website_availability','website_published_at'
 ].join(',');
 
 
@@ -2813,7 +2841,7 @@ async function saveGarmentDetails(btn) {
     else currentProduct = { ...currentProduct, ...update };
     if (btn) btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓';
     _invalidateMktPreview();
-    setTimeout(() => { renderGarmentDetails(currentProduct); showToast('Garment details saved ✓'); }, 450);
+    setTimeout(() => { renderGarmentDetails(currentProduct); renderWebsiteSection(currentProduct); showToast('Garment details saved ✓'); }, 450);
   } catch (e) {
     // Leave the editor open with everything the user typed still in place.
     if (btn) {
@@ -3089,7 +3117,7 @@ async function renderProductPhotos(p, { force = false } = {}) {
 async function _refreshPhotos() {
   invalidateProductImages(currentProduct?.id);
   await renderProductPhotos(currentProduct, { force: true });
-  if (currentProduct) _applyPhotoView(_getPhotoViewPref(), currentProduct);
+  if (currentProduct) { _applyPhotoView(_getPhotoViewPref(), currentProduct); renderWebsiteSection(currentProduct); }
   renderInventory();
   _invalidateMktPreview();
 }
@@ -3340,6 +3368,328 @@ async function handleGalleryReplace(input) {
     showToast('Could not replace photo: ' + e.message);
     await _refreshPhotos();
   } finally { _photosBusy = false; }
+}
+
+// ─── WEBSITE PUBLISHING ──────────────────────────────────────────────────────
+// The app is the control plane for the storefront. These three columns hold the
+// publication state; every other value the website shows is read live from the
+// canonical product. Nothing is duplicated and nothing is snapshotted.
+
+const WEBSITE_STATUSES = ['draft', 'published', 'hidden'];
+
+const WEBSITE_AVAILABILITY = [
+  { value: 'ready_now',     label: 'Ready Now',     help: 'Pieces are in stock and ready to ship.' },
+  { value: 'made_to_order', label: 'Made to Order', help: 'Customers can enquire even when no ready-stock size is left.' },
+  { value: 'both',          label: 'Both',          help: 'Some sizes are ready now, others can be made to order.' },
+];
+
+// Existing products have no value until migration 024 runs, and the column is
+// NOT NULL DEFAULT 'draft' afterwards. Reading through this keeps "unset means
+// draft" in exactly one place.
+function websiteStatus(p) {
+  const v = p?.website_status;
+  return WEBSITE_STATUSES.includes(v) ? v : 'draft';
+}
+
+function websiteAvailabilityLabel(v) {
+  return WEBSITE_AVAILABILITY.find(a => a.value === v)?.label || null;
+}
+
+// The storefront gallery: website-visible images in order. Independent of the
+// internal hero, which Saima may deliberately keep off the website.
+function websiteImages(p) {
+  return getWebsiteProductImages(p);
+}
+
+// The image the storefront leads with. If the internal hero is hidden from the
+// website, the first visible image by sort order is used instead — deterministic,
+// and never silently exposes an image Saima marked hidden. There is no separate
+// website_hero column: one hero system, with a documented fallback.
+function websiteHeroImage(p) {
+  const visible = websiteImages(p);
+  if (!visible.length) return null;
+  const hero = getPrimaryProductImage(p);
+  if (hero && hero.show_on_website) return hero;
+  return visible[0];
+}
+
+// True when the internal hero exists but is excluded from the website, so the
+// Website section can explain which image will actually lead.
+function websiteHeroIsFallback(p) {
+  const hero = getPrimaryProductImage(p);
+  return !!(hero && !hero.show_on_website && websiteImages(p).length);
+}
+
+// Garment details with blank fields omitted — never "Made —" or "N/A".
+function websiteGarmentDetails(p) {
+  const out = {};
+  GARMENT_DETAIL_FIELDS.forEach(f => {
+    const v = (p?.[f.key] || '').trim();
+    if (v) out[f.key] = v;
+  });
+  return out;
+}
+
+// ── The public payload ──────────────────────────────────────────────────────
+// This is the contract the storefront will consume. It is an allowlist, built by
+// naming each field explicitly — never by copying the product and deleting keys,
+// because that leaks any column added later.
+//
+// Deliberately absent: cost, notes, customer_id, reserved_for, status,
+// ideogram_prompt, every marketing/caption field, exhibition and sale fields,
+// exact size quantities, and the dormant legacy image columns.
+function buildPublicProductPayload(p) {
+  if (!p) return null;
+  return {
+    id: p.id,
+    sku: p.sku,
+    name: p.name || null,
+    description: p.description_en || null,
+    price: p.price ?? null,
+    collection_names: getProductCollections(p),
+
+    availability: p.website_availability || null,
+    // Labels only. Quantities are internal and never cross this boundary.
+    sizes: getAvailableSizeLabels(p),
+
+    garment_details: websiteGarmentDetails(p),
+
+    images: websiteImages(p).map(i => ({
+      src: i.src,
+      role: i.role,
+      sort_order: i.sort_order,
+      alt: i.alt || p.name || null,
+      width: i.width,
+      height: i.height,
+      is_primary: i.id === websiteHeroImage(p)?.id,
+    })),
+
+    published_at: p.website_published_at || null,
+  };
+}
+
+// Published products only — what a future /api/products would return. Returns
+// null for anything not published, so a draft or hidden product cannot leak by
+// being passed to the wrong builder.
+function getPublishedProductPayload(p) {
+  return websiteStatus(p) === 'published' ? buildPublicProductPayload(p) : null;
+}
+
+// Same mapping, flagged as a preview, for showing Saima what publishing would
+// produce before she publishes. One mapping function, two entry points.
+function getPreviewProductPayload(p) {
+  const payload = buildPublicProductPayload(p);
+  return payload && { ...payload, preview: true };
+}
+
+// ── Publish validation ──────────────────────────────────────────────────────
+// Blocking issues only. Garment details are all optional, and exact inventory
+// counts are never required.
+//
+// The availability rule: 'ready_now' asserts that stock exists, so publishing it
+// with zero available sizes would put a claim on the storefront that the
+// inventory contradicts — that blocks. 'both' also offers made-to-order, so zero
+// ready stock is still a truthful listing: it warns but does not block.
+// 'made_to_order' never depends on stock at all.
+function websitePublishIssues(p) {
+  const blocking = [], warnings = [];
+  if (!p) return { blocking: ['Product not loaded.'], warnings };
+
+  if (!(p.name || '').trim())            blocking.push('Add a name before publishing.');
+  if (!p.price)                          blocking.push('Add a price before publishing.');
+  if (!(p.description_en || '').trim())  blocking.push('Add a description before publishing.');
+
+  const visible = websiteImages(p);
+  if (!visible.length) blocking.push('Add at least one website-visible photo before publishing.');
+  else if (!websiteHeroImage(p)) blocking.push('Choose a main photo for the website.');
+
+  const avail = p.website_availability;
+  if (!avail) {
+    blocking.push('Choose Ready Now, Made to Order, or Both.');
+  } else if (!getAvailableSizeLabels(p).length) {
+    if (avail === 'ready_now') blocking.push('Ready Now requires at least one available size. Add stock, or choose Made to Order.');
+    else if (avail === 'both') warnings.push('No sizes are in stock right now, so this will show as made to order only.');
+  }
+
+  if (websiteHeroIsFallback(p)) {
+    warnings.push('Your main photo is hidden from the website. The first visible photo will be used instead.');
+  }
+
+  return { blocking, warnings };
+}
+
+// ── Website section UI ──────────────────────────────────────────────────────
+let _websiteBusy = false;
+let _websiteOpen = false;
+
+function toggleWebsiteSection() {
+  _websiteOpen = !_websiteOpen;
+  const c = document.getElementById('websiteContent');
+  const ch = document.getElementById('websiteChevron');
+  if (c) c.style.display = _websiteOpen ? 'block' : 'none';
+  if (ch) ch.style.transform = _websiteOpen ? 'rotate(180deg)' : '';
+}
+
+function _websiteMsg(msg) {
+  const el = document.getElementById('websiteStatusMsg');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function _websiteSummaryText(p) {
+  const status = websiteStatus(p);
+  const visible = websiteImages(p).length;
+  if (status === 'published') {
+    return [
+      'Published in app',
+      websiteAvailabilityLabel(p.website_availability),
+      `${visible} photo${visible === 1 ? '' : 's'}`,
+    ].filter(Boolean).join(' · ');
+  }
+  if (status === 'hidden') return 'Hidden from website';
+  return 'Draft · Not published';
+}
+
+function renderWebsiteSection(p) {
+  if (!document.getElementById('websiteContent')) return;
+  const status = websiteStatus(p);
+
+  const sum = document.getElementById('websiteSummary');
+  if (sum) sum.textContent = _websiteSummaryText(p);
+
+  // Availability
+  const availRow = document.getElementById('websiteAvailRow');
+  if (availRow) {
+    availRow.innerHTML = WEBSITE_AVAILABILITY.map(a => {
+      const on = p.website_availability === a.value;
+      return `<button onclick="setWebsiteAvailability('${a.value}')" style="flex:1;padding:8px 6px;font-size:12px;border-radius:8px;cursor:pointer;border:1.5px solid ${on ? 'var(--burgundy)' : 'var(--border)'};background:${on ? 'var(--burgundy)' : '#fff'};color:${on ? '#fff' : 'var(--ink)'};font-weight:${on ? '600' : '400'}">${a.label}</button>`;
+    }).join('');
+  }
+  const availHelp = document.getElementById('websiteAvailHelp');
+  if (availHelp) {
+    availHelp.textContent = WEBSITE_AVAILABILITY.find(a => a.value === p.website_availability)?.help
+      || 'Choose how customers can buy this piece. This is never guessed from stock.';
+  }
+
+  // Informational preview of the canonical data the website will read.
+  const prev = document.getElementById('websitePreview');
+  if (prev) {
+    const payload = getPreviewProductPayload(p);
+    const hero = websiteHeroImage(p);
+    const totalPhotos = getProductImagesSync(p).length;
+    const gd = GARMENT_DETAIL_FIELDS.filter(f => payload.garment_details[f.key]);
+    const row = (label, value) => `<div style="display:flex;gap:10px;margin-bottom:5px;align-items:flex-start">
+        <div style="width:74px;flex-shrink:0;font-size:11px;color:var(--muted)">${label}</div>
+        <div style="flex:1;min-width:0;font-size:12px;color:var(--ink);word-break:break-word">${value}</div>
+      </div>`;
+    prev.innerHTML =
+      `<div style="display:flex;gap:10px;margin-bottom:10px">
+        ${hero
+          ? `<img src="${_esc(hero.src)}" alt="" loading="lazy" style="width:56px;height:72px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)">`
+          : `<div style="width:56px;height:72px;border-radius:6px;flex-shrink:0;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger"></i></div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${_esc(payload.name || 'No name')}</div>
+          <div style="font-size:12px;color:${payload.price ? 'var(--ink)' : 'var(--muted)'}">${payload.price ? '$' + payload.price : 'No price'}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${payload.images.length} of ${totalPhotos} photo${totalPhotos === 1 ? '' : 's'} visible on website</div>
+        </div>
+      </div>` +
+      row('Description', payload.description ? _esc(payload.description) : '<span style="color:var(--muted)">Not added</span>') +
+      row('Collection', payload.collection_names.length ? _esc(payload.collection_names.join(', ')) : '<span style="color:var(--muted)">None</span>') +
+      row('Sizes', payload.sizes.length ? _esc(payload.sizes.join(', ')) : '<span style="color:var(--muted)">None in stock</span>') +
+      (gd.length ? gd.map(f => row(f.label, _esc(payload.garment_details[f.key]))).join('') : '');
+  }
+
+  // Blocking issues and warnings, in plain language.
+  const issuesEl = document.getElementById('websiteIssues');
+  const { blocking, warnings } = websitePublishIssues(p);
+  if (issuesEl) {
+    const chip = (text, colour, bg) =>
+      `<div style="font-size:11px;color:${colour};background:${bg};border-radius:6px;padding:7px 10px;margin-bottom:6px;line-height:1.5">${_esc(text)}</div>`;
+    issuesEl.innerHTML =
+      blocking.map(m => chip(m, '#8a1f1f', '#fdecea')).join('') +
+      warnings.map(m => chip(m, '#7a4500', '#fff6e5')).join('');
+  }
+
+  // Actions. Changing status is always an explicit tap — nothing here publishes
+  // as a side effect of editing availability or photos.
+  const actions = document.getElementById('websiteActions');
+  if (!actions) return;
+  const canPublish = blocking.length === 0;
+  const primary = (label, fn, icon) =>
+    `<button id="websitePrimaryBtn" class="btn btn-primary" style="width:100%${canPublish ? '' : ';opacity:.5'}" ${canPublish ? '' : 'disabled'} onclick="${fn}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const secondary = (label, fn, icon, colour) =>
+    `<button class="btn" style="width:100%;background:#fff;color:${colour};border:1.5px solid ${colour};font-weight:600" onclick="${fn}"><i class="ti ${icon}"></i> ${label}</button>`;
+
+  if (status === 'draft') {
+    actions.innerHTML = primary('Publish to Website', 'publishProductToWebsite()', 'ti-world-upload');
+  } else if (status === 'published') {
+    actions.innerHTML =
+      `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px">Published in app · Website connection pending. Your edits stay on this product — nothing is copied, so the storefront will show current data once it is connected.</div>` +
+      secondary('Hide from Website', 'hideProductFromWebsite()', 'ti-eye-off', 'var(--muted)');
+  } else {
+    actions.innerHTML =
+      `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px">Hidden from the website. This piece still appears everywhere in the app — Stock, Collections, Exhibitions, catalogs and share cards are unaffected.</div>` +
+      primary('Republish to Website', 'publishProductToWebsite()', 'ti-world-upload') +
+      `<button class="btn" style="width:100%;background:none;border:none;color:var(--muted);font-size:12px" onclick="_websiteMsg('Still hidden — nothing changed.')">Keep Hidden</button>`;
+  }
+}
+
+// One write path for every website field, so local state and the database can
+// never disagree. On failure nothing local is mutated and the chosen values
+// survive for a retry.
+async function _saveWebsiteFields(data, { busyMsg, doneMsg }) {
+  if (!currentProduct || _websiteBusy) return false;
+  _websiteBusy = true;
+  _websiteMsg(busyMsg);
+  const id = currentProduct.id;
+  try {
+    await db('update', 'products', { id, data });
+    const idx = inventory.findIndex(x => x.id === id);
+    if (idx >= 0) inventory[idx] = { ...inventory[idx], ...data };
+    if (currentProduct?.id === id) {
+      currentProduct = idx >= 0 ? inventory[idx] : { ...currentProduct, ...data };
+      renderWebsiteSection(currentProduct);
+    }
+    _websiteMsg('');
+    showToast(doneMsg);
+    return true;
+  } catch (e) {
+    _websiteMsg('');
+    showToast('Could not save: ' + e.message);
+    return false;
+  } finally { _websiteBusy = false; }
+}
+
+// Availability is saved on its own. It never changes publication status.
+async function setWebsiteAvailability(value) {
+  if (!currentProduct || _websiteBusy) return;
+  if (currentProduct.website_availability === value) return;
+  await _saveWebsiteFields({ website_availability: value }, { busyMsg: 'Saving…', doneMsg: 'Saved ✓' });
+}
+
+async function publishProductToWebsite() {
+  if (!currentProduct || _websiteBusy) return;
+  const { blocking } = websitePublishIssues(currentProduct);
+  if (blocking.length) { showToast(blocking[0]); renderWebsiteSection(currentProduct); return; }
+
+  const btn = document.getElementById('websitePrimaryBtn');
+  if (btn) btn.disabled = true;
+
+  const data = { website_status: 'published' };
+  // Preserved across hide and republish: this always means first published.
+  if (!currentProduct.website_published_at) data.website_published_at = new Date().toISOString();
+
+  const okSave = await _saveWebsiteFields(data, { busyMsg: 'Publishing…', doneMsg: 'Published ✓' });
+  if (!okSave && btn) btn.disabled = false;
+}
+
+async function hideProductFromWebsite() {
+  if (!currentProduct || _websiteBusy) return;
+  if (!confirm('Hide this piece from the website? It stays in Stock, Collections, Exhibitions and catalogs — only the storefront is affected.')) return;
+  // website_published_at is deliberately left alone so republishing keeps the
+  // original first-published date.
+  await _saveWebsiteFields({ website_status: 'hidden' }, { busyMsg: 'Hiding…', doneMsg: 'Hidden ✓' });
 }
 
 // ─── FASHN COMPRESSION HELPER ────────────────────────────────────────────────
@@ -7779,7 +8129,8 @@ function openProductDetail(id, opts) {
     'ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
-    'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb'
+    'story_text','whatsapp_listing','price_card','sharing_angle','catalog_blurb',
+    'website_status','website_availability','website_published_at'
   ].join(',');
 
   if (!p._hydrated && _hydratingProductId !== id) {
@@ -7834,6 +8185,15 @@ function _openProductDetailUI(p) {
   renderGarmentDetails(p);
   // Read-only: resolves images, never migrates or writes.
   renderProductPhotos(p).catch(e => console.warn('[photos] render failed', e.message));
+  // Collapsed on every open — the Website section is a deliberate destination,
+  // not something to scroll past.
+  _websiteOpen = false;
+  const _wc = document.getElementById('websiteContent');
+  const _wch = document.getElementById('websiteChevron');
+  if (_wc) _wc.style.display = 'none';
+  if (_wch) _wch.style.transform = '';
+  _websiteMsg('');
+  renderWebsiteSection(p);
   document.getElementById('detailPriceInput').value = p.price || '';
   document.getElementById('detailNotesInput').value = p.notes || '';
   const _detailCollArr = getProductCollections(p);
@@ -8205,6 +8565,7 @@ async function saveProductEdits(opts) {
       window._sizeStateDirty['detailSizeGrid'] = false;
       _updateSizeTotalNote('detailSizeGrid', detailSizeState);
       _renderLegacySizeNotice(currentProduct);
+      renderWebsiteSection(currentProduct);
     }
     const _masr2 = document.getElementById('markAllSoldRow');
     if (_masr2) _masr2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
