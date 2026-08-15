@@ -2823,6 +2823,19 @@ function _renditionWarning(missing) {
   return `Saved. ${missing.length} smaller size${missing.length > 1 ? 's' : ''} could not be made — the photo still works everywhere.`;
 }
 
+// Cached once: the probe costs a canvas export, and the answer cannot change
+// within a session.
+let _webpSupport = null;
+function supportsWebP() {
+  if (_webpSupport !== null) return _webpSupport;
+  try {
+    const c = document.createElement('canvas');
+    c.width = 1; c.height = 1;
+    _webpSupport = c.toDataURL('image/webp', 0.5).startsWith('data:image/webp');
+  } catch { _webpSupport = false; }
+  return _webpSupport;
+}
+
 async function preparePersistentImage(src, {
   maxPx    = MASTER_MAX_PX,
   maxBytes = MASTER_MAX_BYTES,
@@ -2860,14 +2873,7 @@ async function preparePersistentImage(src, {
   const baseW = Math.round(origW * baseScale);
   const baseH = Math.round(origH * baseScale);
 
-  const supportsWebP = (() => {
-    try {
-      const c = document.createElement('canvas');
-      c.width = 1; c.height = 1;
-      return c.toDataURL('image/webp', 0.5).startsWith('data:image/webp');
-    } catch { return false; }
-  })();
-  const preferredMime = supportsWebP ? 'image/webp' : 'image/jpeg';
+  const preferredMime = supportsWebP() ? 'image/webp' : 'image/jpeg';
 
   const qualitySteps = [quality, Math.max(quality - 0.10, 0.55), 0.55, 0.42];
   const scaleSteps   = [1.0, 0.85, 0.70, 0.55];
@@ -5733,10 +5739,19 @@ async function _doSaveProduct() {
     return def.role === 'structural' ? 100 - (def.priority || 0) : 500 - (def.priority || 0);
   };
 
+  // The ORIGINAL File is sent to the storage pipeline, not the compressed
+  // preview. handleSlotFile builds a 1800 px q0.84 dataUrl so the slot thumbnail
+  // paints instantly, and that image used to be what got uploaded — so every
+  // intake photo was encoded twice and its master could never exceed 1800 px,
+  // however large the source. The preview is still generated and still used for
+  // the thumbnail; only the upload source changed.
+  //
+  // dataUrl remains the fallback for the rare device where canvas preparation
+  // failed and handleSlotFile stored a raw FileReader result with no File.
   const _intakeImages = Object.entries(uploadedPhotos)
-    .filter(([, v]) => v?.dataUrl)
+    .filter(([, v]) => v?.file || v?.dataUrl)
     .sort(([a], [b]) => _slotRank(a) - _slotRank(b))
-    .map(([id, v]) => ({ src: v.dataUrl, role: id, alt: _slotMap[id]?.label || _extraLabel(id) }));
+    .map(([id, v]) => ({ src: v.file || v.dataUrl, role: id, alt: _slotMap[id]?.label || _extraLabel(id) }));
 
   const _intakeModelPhoto = currentAnalysis._modelPhotoUrl || null;
 
@@ -6758,11 +6773,18 @@ async function applyWatermark(imageUrl, _rid) {
     console.log('[watermark]', { rid: _rid, phase: watermarkPhase });
 
     watermarkPhase = 'export-canvas';
-    // Quality 0.86 — good garment detail, typically under 1.5 MB at 1800 px.
-    const result = canvas.toDataURL('image/jpeg', 0.86);
+    // This is an INTERMEDIATE, not a final asset: saveModelImageToStorage
+    // re-encodes it into the storage master. It used to be JPEG q0.86, so every
+    // AI image was compressed twice — once here at a fairly lossy setting, then
+    // again into WebP — and the embroidery detail lost at this step could never
+    // be recovered. WebP q0.95 keeps that detail for the master encode to work
+    // from. JPEG stays as the fallback for a browser without WebP export.
+    const _wmMime = supportsWebP() ? 'image/webp' : 'image/jpeg';
+    const _wmQuality = _wmMime === 'image/webp' ? 0.95 : 0.94;
+    const result = canvas.toDataURL(_wmMime, _wmQuality);
     const _resultPrefix = typeof result === 'string' ? result.slice(0, 40) : String(result);
     const _resultApproxBytes = Math.round(new TextEncoder().encode(result).length * 0.75);
-    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, resultPrefix: _resultPrefix, resultLen: result?.length, approxBytes: _resultApproxBytes });
+    console.log('[watermark]', { rid: _rid, phase: watermarkPhase, mime: _wmMime, quality: _wmQuality, resultPrefix: _resultPrefix, resultLen: result?.length, approxBytes: _resultApproxBytes });
     return result;
   } catch (e) {
     console.warn('[watermark] FAILED — falling back to original URL', {
