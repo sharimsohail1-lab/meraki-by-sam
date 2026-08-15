@@ -1367,7 +1367,6 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="lbCleanBadge" style="display:none;margin-top:4px;font-size:11px;color:#a8e6a3;font-weight:600"><i class="ti ti-sparkles"></i> Background cleaned</div>
     <div id="lbMissingImageNote" style="display:none;margin-top:12px;padding:12px 14px;background:rgba(200,80,60,0.18);border-radius:10px;color:#ffb3a7;font-size:13px;text-align:center;width:100%"><i class="ti ti-alert-triangle"></i> This photo is missing its image. Please use <b>Replace photo</b> below to re-upload it.</div>
     <div style="width:100%;margin-top:16px;display:flex;flex-direction:column;gap:10px">
-      <button id="lbInsetBtn" onclick="_lbToggleInset()" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"></button>
       <button id="lbCropBtn" onclick="_lbOpenCrop()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-crop"></i> Adjust inset</button>
       <button id="lbResetCropBtn" onclick="_lbResetCrop()" style="display:none;width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.6);font-size:13px;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Reset crop</button>
       <button onclick="_lbReplacePhoto()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation"><i class="ti ti-refresh"></i> Replace photo</button>
@@ -6803,15 +6802,6 @@ function _lbRefresh() {
   if (lbMissing) lbMissing.style.display = hasImage ? 'none' : 'block';
   document.getElementById('lbCroppedBadge').style.display = d.croppedImage ? 'block' : 'none';
   document.getElementById('lbCleanBadge').style.display = (!d.croppedImage && d.cleanedImage) ? 'block' : 'none';
-  const insetBtn = document.getElementById('lbInsetBtn');
-  insetBtn.disabled = !hasImage;
-  if (d.useAsInset) {
-    insetBtn.textContent = '✓ Showing in share/catalog';
-    insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--burgundy);color:#fff';
-  } else {
-    insetBtn.textContent = 'Use in share/catalog';
-    insetBtn.style.cssText = 'width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;background:var(--sand-light,#f5f0ea);color:var(--text)';
-  }
   // Crop button — disabled if no original image (cannot crop without source)
   const cropBtn = document.getElementById('lbCropBtn');
   if (cropBtn) {
@@ -6832,46 +6822,6 @@ function closeDetailPhotoLightbox() {
   document.body.style.overflow = '';
   _lbCurrentIdx = null;
   _lbCurrentPhotoId = null;
-}
-
-async function _lbToggleInset() {
-  if (_lbCurrentIdx === null) return;
-  const btn = document.getElementById('lbInsetBtn');
-  const origHTML = btn.innerHTML;
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    await toggleDetailPhotoInset(_lbCurrentIdx);
-    // Flash "Saved ✓" briefly, then refresh to the new stable state
-    btn.textContent = 'Saved ✓';
-    setTimeout(() => { if (_lbCurrentIdx !== null) _lbRefresh(); else { btn.disabled = false; } }, 700);
-  } catch(err) {
-    btn.disabled = false; btn.innerHTML = origHTML;
-    showToast('Could not update inset: ' + err.message);
-  }
-}
-
-async function _lbCleanBackground() {
-  if (_lbCurrentIdx === null) return;
-  const btn = document.getElementById('lbCleanBtn');
-  const origHTML = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader-2"></i> Cleaning background…';
-  try {
-    await cleanDetailPhotoBackground(_lbCurrentIdx);
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-check"></i> Background cleaned ✓';
-    _lbRefresh();
-    _renderDetailPhotoInsets();
-  } catch(err) {
-    btn.disabled = false;
-    btn.innerHTML = origHTML;
-    // Surface setup-not-done error plainly; other errors include the reason
-    const msg = err.message.includes('REMOVE_BG_API_KEY')
-      ? 'Background cleanup is not set up yet.'
-      : err.message;
-    showToast(msg);
-    console.warn('[INSET BACKGROUND CLEANUP] UI error', { reason: err.message });
-  }
 }
 
 // ── Crop / reframe v2 (iPhone-style: CSS transform on <img>, canvas only at save) ─
@@ -8491,163 +8441,6 @@ async function deleteDetailPhoto(idx) {
     _renderDetailPhotoInsets();
     showToast('Could not delete: ' + err.message);
   }
-}
-
-// Saves the toggle via metadata-only endpoint (no base64 in payload).
-async function toggleDetailPhotoInset(idx) {
-  const photos = window._detailInsetPhotos || [];
-  if (!photos[idx]) return;
-  const photoId = photos[idx].id;
-  const pending = window._detailPhotoPending || (window._detailPhotoPending = { toggle: new Set(), delete: new Set(), clean: new Set() });
-  // Prevent double-submit for the same photo
-  if (photoId && pending.toggle.has(photoId)) return;
-  if (photoId) pending.toggle.add(photoId);
-
-  const prev = !!photos[idx].useAsInset;
-  const activeCount = photos.filter(d => d.useAsInset).length;
-  if (!prev && activeCount >= 2) {
-    if (photoId) pending.toggle.delete(photoId);
-    showToast('Max 2 insets. Turn one off first.');
-    return;
-  }
-  photos[idx] = { ...photos[idx], useAsInset: !prev };
-  let order = 1;
-  photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order++; } else { d.insetOrder = null; } });
-  try {
-    await _saveDetailPhotosMeta();
-    _renderDetailPhotoInsets();
-  } catch(err) {
-    // Revert optimistic change
-    photos[idx] = { ...photos[idx], useAsInset: prev };
-    let order2 = 1;
-    photos.forEach(d => { if (d.useAsInset) { d.insetOrder = order2++; } else { d.insetOrder = null; } });
-    _renderDetailPhotoInsets();
-    throw err;
-  } finally {
-    if (photoId) pending.toggle.delete(photoId);
-  }
-}
-
-// Background removal via /api/remove-background (server-side remove.bg proxy).
-// Requires REMOVE_BG_API_KEY in Vercel environment variables.
-// Called only when Sam explicitly taps "Clean background".
-async function cleanDetailPhotoBackground(idx) {
-  const photos = window._detailInsetPhotos || [];
-  // ID-based lookup so stale index after re-render still resolves
-  const foundById = _lbCurrentPhotoId ? photos.find(p => p.id === _lbCurrentPhotoId) : null;
-  const foundByIdx = photos[idx];
-  let d = foundById || foundByIdx;
-  const resolvedIdx = d ? photos.indexOf(d) : idx;
-
-  console.log('[BG CLEANUP] selected detail', {
-    currentPhotoId: _lbCurrentPhotoId,
-    currentIdx: idx,
-    foundById: !!foundById,
-    foundByIdx: !!foundByIdx,
-    label: d?.label,
-    id: d?.id,
-    hasImage: !!d?.image,
-    imageLength: d?.image?.length || 0,
-    hasCleanedImage: !!d?.cleanedImage,
-  });
-
-  if (!d) throw new Error('photo not found');
-
-  if (!d.image || typeof d.image !== 'string' || !d.image.startsWith('data:')) {
-    throw new Error('Could not find this detail photo image. Please close and reopen Product Detail, then try again.');
-  }
-
-  console.log('[INSET BACKGROUND CLEANUP] sending to /api/remove-background', { label: d.label, slot: d.slot });
-
-  // Re-encode to JPEG via canvas: normalizes format, caps size, avoids HEIC on remove.bg.
-  let imageToSend;
-  try {
-    imageToSend = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 1200;
-        let w = img.naturalWidth, h = img.naturalHeight;
-        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
-        const c = document.createElement('canvas'); c.width = w; c.height = h;
-        const cx = c.getContext('2d'); cx.drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.88));
-      };
-      img.onerror = () => reject(new Error('Could not load photo for processing. Try replacing the photo.'));
-      img.src = d.image;
-    });
-  } catch(encErr) {
-    throw encErr;
-  }
-
-  let resp;
-  try {
-    resp = await fetch('/api/remove-background', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_b64: imageToSend }),
-    });
-  } catch(netErr) {
-    console.warn('[INSET BACKGROUND CLEANUP] network error', { label: d.label, reason: netErr?.message });
-    throw new Error('Could not reach background cleanup service. Check your connection.');
-  }
-
-  const json = await resp.json();
-
-  if (!resp.ok) {
-    const errCode = json.error;
-    const errMsg = json.message || `Server error ${resp.status}`;
-    console.warn('[INSET BACKGROUND CLEANUP] server error', { label: d.label, slot: d.slot, status: resp.status, errCode, errMsg });
-    if (errCode === 'MISSING_API_KEY' || resp.status === 503) throw new Error('Background cleanup is not set up yet. Ask your developer to add REMOVE_BG_API_KEY to the server.');
-    if (errCode === 'MISSING_IMAGE' || errCode === 'INVALID_IMAGE') throw new Error('This photo\'s image data was not found. Please use Replace photo to re-upload it.');
-    throw new Error('Background cleanup failed: ' + errMsg);
-  }
-
-  if (!json.cleanedImage) {
-    console.warn('[INSET BACKGROUND CLEANUP] no cleanedImage in response', { label: d.label });
-    throw new Error('Background cleanup returned no image.');
-  }
-
-  photos[resolvedIdx] = { ...photos[resolvedIdx], cleanedImage: json.cleanedImage, cleanedAt: new Date().toISOString(), cleanMethod: 'remove.bg' };
-  await _saveDetailPhotos();
-
-  console.log('[INSET BACKGROUND CLEANUP] success', { label: d.label, slot: d.slot, method: 'remove.bg', hasCleanedImage: true });
-}
-
-// Metadata-only save: sends non-image fields to /api/detail-photo-meta.
-// Server merges with existing DB record so base64 photos never round-trip on toggles.
-async function _saveDetailPhotosMeta() {
-  if (!currentProduct) throw new Error('No product selected');
-  const photos = window._detailInsetPhotos || [];
-  const metaArray = photos.map(({ image, cleanedImage, croppedImage, ...meta }) => meta);
-
-  console.log('[DETAIL META CLIENT] before local update', {
-    count: photos.length,
-    photos: photos.map(d => ({ id: d.id, label: d.label, hasImage: !!d.image, imageLength: d.image?.length || 0, hasCleanedImage: !!d.cleanedImage, useAsInset: d.useAsInset })),
-  });
-
-  let r;
-  try {
-    r = await fetch('/api/detail-photo-meta', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId: currentProduct.id, metaArray }),
-    });
-  } catch(netErr) {
-    throw new Error('Network error saving photos: ' + netErr.message);
-  }
-  const json = await r.json();
-  if (json.error) throw new Error(json.error);
-  // Local in-memory array already has full image data — no replacement needed.
-  // Just update the serialized cache so re-open still has images.
-  const serialized = photos.length ? JSON.stringify(photos) : null;
-  const invIdx = inventory.findIndex(p => p.id === currentProduct.id);
-  if (invIdx >= 0) inventory[invIdx] = { ...inventory[invIdx], detail_photos: serialized };
-  currentProduct = { ...currentProduct, detail_photos: serialized };
-
-  console.log('[DETAIL META CLIENT] after local update', {
-    count: window._detailInsetPhotos?.length,
-    photos: (window._detailInsetPhotos || []).map(d => ({ id: d.id, label: d.label, hasImage: !!d.image, imageLength: d.image?.length || 0, hasCleanedImage: !!d.cleanedImage, useAsInset: d.useAsInset })),
-  });
 }
 
 async function _saveDetailPhotos() {

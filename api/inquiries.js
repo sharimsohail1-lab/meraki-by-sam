@@ -13,7 +13,8 @@ import { createClient } from '@supabase/supabase-js';
 // any field. The only mutation exposed here is status, restricted to three
 // values, and the only reads are the two shapes the inbox actually needs.
 //
-// Routes (all require the admin PIN when MERAKI_ADMIN_PIN is set):
+// Routes (all require the admin PIN; the route refuses everything if the PIN is
+// not configured server-side — see denyReason):
 //   GET  /api/inquiries            -> list, newest first, with item counts
 //   GET  /api/inquiries?id=<uuid>  -> one inquiry with its items
 //   POST /api/inquiries            -> { id, status } status change only
@@ -42,14 +43,24 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-// Same gate as /api/leads: the PIN travels in a header and is compared
-// server-side. When MERAKI_ADMIN_PIN is unset the gate is disabled, matching
-// /api/admin-auth, so a deployment without the variable still works.
-function authorized(req) {
+// The PIN travels in a header and is compared server-side, as in /api/leads.
+//
+// This route FAILS CLOSED. Elsewhere in the app a missing MERAKI_ADMIN_PIN
+// disables the gate so a fresh deployment still works, but that default is wrong
+// here: these rows carry customers' names, phone numbers and email addresses, and
+// a forgotten environment variable would publish them to anyone who found the
+// URL. A misconfigured deployment must be visibly broken, not quietly open.
+//
+// Returns null when the request may proceed, or { code, error } to refuse it.
+function denyReason(req) {
   const adminPin = process.env.MERAKI_ADMIN_PIN;
-  if (!adminPin) return true;
+  if (!adminPin) {
+    console.error('[inquiries] MERAKI_ADMIN_PIN is not set — refusing all requests');
+    return { code: 500, error: 'Inquiries are not configured on the server.' };
+  }
   const supplied = req.headers['x-meraki-pin'];
-  return !!supplied && supplied === adminPin;
+  if (!supplied || supplied !== adminPin) return { code: 401, error: 'Unauthorized' };
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -58,7 +69,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-meraki-pin');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+  const denied = denyReason(req);
+  if (denied) return res.status(denied.code).json({ error: denied.error });
 
   let supabase;
   try { supabase = getSupabase(); }
