@@ -869,9 +869,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="field-label">Where you are</div>
     <input type="text" id="wsLocation" class="field-input" placeholder="e.g. Lahore, Pakistan" style="margin-bottom:10px">
 
-    <div class="field-label">Usual made-to-order timing</div>
+    <div class="field-label">Default made-to-order timing</div>
     <input type="text" id="wsLeadTime" class="field-input" placeholder="e.g. 4–6 weeks" style="margin-bottom:2px">
-    <p style="font-size:11px;color:var(--muted);margin:2px 0 10px">General guidance shown around the site. A piece can still have its own delivery note.</p>
+    <p style="font-size:11px;color:var(--muted);margin:2px 0 10px">Used for made-to-order pieces unless a piece has its own fulfilment note.</p>
 
     <div class="field-label">Sizes &amp; service note</div>
     <input type="text" id="wsSizeNote" class="field-input" placeholder="e.g. Sizes 38–52 and custom" style="margin-bottom:10px">
@@ -4391,6 +4391,8 @@ function renderWebsiteSection(p) {
     const fb = document.getElementById('websiteFulfilSaveBtn');
     if (fb) fb.style.display = 'none';
   }
+  const fulfilHelp = document.getElementById('websiteFulfilHelp');
+  if (fulfilHelp) fulfilHelp.textContent = _fulfilmentHint(p);
 
   // Informational preview of the canonical data the website will read.
   const prev = document.getElementById('websitePreview');
@@ -4417,7 +4419,15 @@ function renderWebsiteSection(p) {
       row('Description', payload.description ? _esc(payload.description) : '<span style="color:var(--muted)">Not added</span>') +
       row('Collection', payload.collection_names.length ? _esc(payload.collection_names.join(', ')) : '<span style="color:var(--muted)">None</span>') +
       row('Sizes', payload.sizes.length ? _esc(payload.sizes.join(', ')) : '<span style="color:var(--muted)">None in stock</span>') +
-      (payload.fulfillment_note ? row('Delivery', _esc(payload.fulfillment_note)) : '') +
+      (() => {
+        // Exactly what the storefront will show, including the global fallback.
+        const eff = effectiveFulfillment(p);
+        if (!eff.text) return '';
+        const tag = eff.source === 'global'
+          ? ' <span style="color:var(--muted);font-size:11px">(website default)</span>'
+          : '';
+        return row('Delivery', _esc(eff.text) + tag);
+      })() +
       (gd.length ? gd.map(f => row(f.label, _esc(payload.garment_details[f.key]))).join('') : '');
   }
 
@@ -4454,6 +4464,47 @@ function renderWebsiteSection(p) {
       primary('Republish to Website', 'publishProductToWebsite()', 'ti-world-upload') +
       `<button class="btn" style="width:100%;background:none;border:none;color:var(--muted);font-size:12px" onclick="_websiteMsg('Still hidden — nothing changed.')">Keep Hidden</button>`;
   }
+}
+
+// ── Effective fulfilment timing ─────────────────────────────────────────────
+// The storefront's presentation rule, mirrored here so the in-app preview and
+// the live site can never disagree.
+//
+//   ready_now      product note, or nothing. The global made-to-order lead time
+//                  is deliberately NOT used: a ready piece is not made to order,
+//                  and borrowing that timing would state something untrue.
+//   made_to_order  product note, else the global lead time, else nothing.
+//   both           same as made_to_order — a product note always wins.
+//
+// This is a pure read. It never writes products.fulfillment_note, so the product
+// field stays a true override: change the global value and every product without
+// its own note follows automatically, with no rows touched.
+//
+// Returns { text, source } where source is 'product' | 'global' | null.
+function effectiveFulfillment(p) {
+  const own = (p?.fulfillment_note || '').trim();
+  if (own) return { text: own, source: 'product' };
+
+  const availability = p?.website_availability;
+  if (availability === 'made_to_order' || availability === 'both') {
+    const global = (websiteSettings?.made_to_order_lead_time || '').trim();
+    if (global) return { text: global, source: 'global' };
+  }
+  return { text: null, source: null };
+}
+
+// The hint under the field. Names the actual current default rather than
+// describing it, so Saima can see what blank will mean for this piece.
+function _fulfilmentHint(p) {
+  const availability = p?.website_availability;
+  const global = (websiteSettings?.made_to_order_lead_time || '').trim();
+  if (availability === 'made_to_order' || availability === 'both') {
+    return global
+      ? `Optional. Leave blank to use the website default: ${global}.`
+      : 'Optional. Add a note if this piece has a specific timing.';
+  }
+  // ready_now, or availability not chosen yet.
+  return 'Optional. Add a specific shipping or pickup note for this piece.';
 }
 
 // ── Fulfilment note ─────────────────────────────────────────────────────────
