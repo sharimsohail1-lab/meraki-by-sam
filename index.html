@@ -40,7 +40,7 @@ body { font-family: 'Inter', sans-serif; background: var(--cream); color: var(--
 /* Nav */
 .nav { display: flex; background: white; border-top: 1px solid var(--border); flex-shrink: 0; padding-bottom: max(0px, env(safe-area-inset-bottom)); order: 3; }
 .nav-btn { flex: 1; padding: 8px 4px 6px; font-size: 10px; border: none; background: none; color: var(--muted); cursor: pointer; border-top: 2px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: 'Inter', sans-serif; }
-.nav-btn i { font-size: 22px; }
+.nav-btn i { font-size: 22px; line-height: 1; min-height: 22px; }
 .nav-btn.active { color: var(--burgundy); border-top-color: var(--burgundy); }
 
 /* Screens */
@@ -246,6 +246,34 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
 /* Photo slots */
 .slot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+/* Six nav items on a phone: keep the label readable rather than letting it wrap. */
+.nav-btn span:not(.nav-badge) { font-size: 9.5px; line-height: 1.1; white-space: nowrap; }
+.nav-badge { position: absolute; top: 4px; left: 50%; margin-left: 5px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 8px; background: var(--burgundy); color: #fff; font-size: 9.5px;
+  font-weight: 700; line-height: 16px; text-align: center; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--surface, #fff); }
+
+/* Inquiry inbox */
+.inq-card { display: flex; gap: 11px; align-items: flex-start; background: #fff; border: 1px solid var(--border);
+  border-left: 3px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; }
+.inq-card.is-new { border-left-color: var(--burgundy); background: #fffdfa; }
+.inq-thumb { width: 46px; height: 58px; border-radius: 6px; object-fit: cover; flex-shrink: 0; border: 1px solid var(--border); }
+.inq-thumb-ph { width: 46px; height: 58px; border-radius: 6px; flex-shrink: 0; background: var(--sand-light);
+  display: flex; align-items: center; justify-content: center; color: var(--gold-light); }
+.inq-name { font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inq-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.45; word-break: break-word; }
+.status-new { background: #FDECEA; color: #8a1f1f; }
+.status-contacted { background: #FFF8E1; color: #7a4500; }
+.status-closed { background: #ECEFF1; color: #546E7A; }
+.inq-filter { flex: 1; min-width: 0; padding: 8px 4px; font-size: 12px; border: none; background: none;
+  cursor: pointer; color: var(--muted); white-space: nowrap; }
+.inq-filter.active { background: var(--burgundy); color: #fff; font-weight: 600; }
+.inq-act { flex: 1; min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1.5px solid var(--border);
+  background: #fff; color: var(--ink); text-decoration: none; }
+.inq-act.primary { background: #25D366; border-color: #25D366; color: #fff; }
+
 .ws-err { display: none; font-size: 11px; color: #8a1f1f; margin: 3px 0 0; line-height: 1.4; }
 .photo-slot { border: 2px dashed var(--border); border-radius: var(--radius); overflow: hidden; position: relative; aspect-ratio: 3/4; background: var(--gold-pale); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .photo-slot.filled { border-color: var(--emerald-mid); border-style: solid; }
@@ -554,6 +582,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </div>
     </div>
 
+    <!-- INQUIRIES -->
+    <div id="screen-inquiries" class="screen">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <p class="section-title" style="margin:0">Inquiries</p>
+        <button id="inqRefreshBtn" onclick="loadInquiries({ manual: true })" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:34px"><i class="ti ti-refresh"></i> Refresh</button>
+      </div>
+      <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;margin-bottom:12px" id="inqFilters"></div>
+      <div id="inqError" style="display:none;font-size:12px;color:#8a1f1f;background:#fdecea;border-radius:8px;padding:10px 12px;margin-bottom:10px;line-height:1.5"></div>
+      <div id="inquiryList"></div>
+    </div>
+
     <!-- ADD / INTAKE -->
     <div id="screen-add" class="screen">
       <p class="section-title" id="t-addTitle">Add New Piece</p>
@@ -757,6 +796,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <button class="nav-btn active" id="nav-home" onclick="showScreen('home')"><i class="ti ti-home"></i><span id="t-nav-home">Home</span></button>
     <button class="nav-btn" id="nav-add" onclick="showScreen('add')"><i class="ti ti-plus"></i><span id="t-nav-add">Add</span></button>
     <button class="nav-btn" id="nav-stock" onclick="showScreen('stock')"><i class="ti ti-hanger"></i><span id="t-nav-stock">Stock</span></button>
+    <button class="nav-btn" id="nav-inquiries" onclick="showScreen('inquiries')" style="position:relative"><i class="ti ti-mail"></i><span>Inbox</span><span class="nav-badge" id="inqNavBadge" style="display:none">0</span></button>
     <button class="nav-btn" id="nav-people" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-nav-people">People</span></button>
     <button class="nav-btn" id="nav-show" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-nav-show">Show</span></button>
   </nav>
@@ -826,6 +866,34 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
     </div>
+  </div>
+</div>
+
+<!-- INQUIRY DETAIL SHEET -->
+<div class="sheet-overlay" id="inquiryDetailSheet">
+  <div class="sheet" style="height:90vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px">
+      <div style="min-width:0">
+        <div id="inqDetailName" style="font-size:18px;font-weight:700;color:var(--burgundy);word-break:break-word"></div>
+        <div id="inqDetailWhen" style="font-size:11.5px;color:var(--muted);margin-top:3px"></div>
+      </div>
+      <button class="modal-close" style="position:static;flex-shrink:0" onclick="closeSheet('inquiryDetailSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="margin:10px 0 14px"><span id="inqDetailStatus" class="status-pill"></span></div>
+
+    <div id="inqDetailContactRow" style="display:flex;gap:8px;margin-bottom:16px"></div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Customer</div>
+    <div id="inqDetailCustomer" style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px;background:var(--surface)"></div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Pieces asked about</div>
+    <div id="inqDetailItems" style="margin-bottom:18px"></div>
+
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;border-top:1px solid var(--border);padding-top:14px">Status</div>
+    <div id="inqDetailStatusMsg" style="display:none;font-size:12px;margin-bottom:8px"></div>
+    <div id="inqDetailStatusBtns" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div style="height:24px"></div>
   </div>
 </div>
 
@@ -3713,6 +3781,389 @@ const WEBSITE_AVAILABILITY = [
   { value: 'both',          label: 'Both',          help: 'Some sizes are ready now, others can be made to order.' },
 ];
 
+// ─── WEBSITE INQUIRIES ───────────────────────────────────────────────────────
+// A working queue for enquiries submitted on merakibysaima.com. The schema is
+// owned by the website and already live; the app only reads it and moves an
+// inquiry through new -> contacted -> closed.
+//
+// Everything goes through /api/inquiries, which carries the same admin PIN as
+// /api/leads. The service key stays server-side and no inquiry column other than
+// status is ever writable.
+
+let inquiries = [];
+let inquiriesLoaded = false;
+let _inqFilter = 'new';
+let _inqBusy = false;
+let currentInquiry = null;
+
+const INQUIRY_FILTERS = [
+  { value: 'new',       label: 'New' },
+  { value: 'all',       label: 'All' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'closed',    label: 'Closed' },
+];
+
+const INQUIRY_STATUS_LABEL = { new: 'New', contacted: 'Contacted', closed: 'Closed' };
+
+// The database keeps the two-letter code; this is display only and the full name
+// is never written back. US_STATES is the app's existing [code, name] list,
+// declared further down, so the lookup is built lazily on first use rather than
+// duplicating fifty entries.
+let _stateNameMap = null;
+function stateLabel(code) {
+  const raw = (code || '').trim();
+  if (!raw) return null;
+  if (!_stateNameMap) {
+    _stateNameMap = {};
+    try { US_STATES.forEach(([c, n]) => { _stateNameMap[c] = n; }); } catch (_) {}
+  }
+  // Unknown or already-spelled-out values pass through untouched.
+  return _stateNameMap[raw.toUpperCase()] || raw;
+}
+
+// 'Unsure' is an answer the customer gave, not a gap in the data, so it is shown
+// as-is. A genuinely absent value reads 'Not collected'.
+const NOT_COLLECTED = 'Not collected';
+
+function inquiryStateDisplay(inq) { return stateLabel(inq?.state) || NOT_COLLECTED; }
+function inquirySizeDisplay(inq) {
+  const v = (inq?.preferred_size || '').trim();
+  return v || NOT_COLLECTED;
+}
+
+function newInquiryCount() {
+  return inquiries.filter(i => i.status === 'new').length;
+}
+
+// The badge counts rows with status 'new'. It is not a read/unread marker:
+// opening an inquiry leaves it untouched, and only an explicit status change
+// moves the number.
+function renderInquiryBadge() {
+  const el = document.getElementById('inqNavBadge');
+  if (!el) return;
+  const n = newInquiryCount();
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.style.display = n ? 'block' : 'none';
+}
+
+function _inqRelative(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return mins + ' min ago';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+  const days = Math.round(hrs / 24);
+  if (days < 7) return days + (days === 1 ? ' day ago' : ' days ago');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function _inqFullWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// Product enrichment costs no queries: every product_images row is already in
+// memory from boot, so a live product's hero resolves locally. A snapshot whose
+// product no longer resolves simply has no image.
+//
+// width picks the rendition — 560 for list thumbnails, 960 for the detail view —
+// so a master is never pulled for a thumbnail.
+function inquiryItemImage(item, width) {
+  if (!item?.product_id) return null;
+  const p = inventory.find(x => x.id === item.product_id);
+  if (!p) return null;
+  const hero = getPrimaryProductImage(p);
+  if (!hero) return null;
+  const variants = imageVariantUrls(hero);
+  if (width <= 560) return variants['560'] || variants['960'] || hero.src;
+  return variants['960'] || variants['1400'] || hero.src;
+}
+
+function _inqThumbHtml(item, width) {
+  const src = inquiryItemImage(item, width);
+  // Never a broken-image glyph: the placeholder is used whenever nothing
+  // resolves, and onerror falls back to it if the object itself has gone.
+  const ph = `<div class="inq-thumb-ph"><i class="ti ti-hanger" style="font-size:18px"></i></div>`;
+  if (!src) return ph;
+  return `<img class="inq-thumb" src="${_esc(src)}" alt="" loading="lazy"
+    onerror="this.outerHTML=${_esc(JSON.stringify(ph))}">`;
+}
+
+// ── Loading ─────────────────────────────────────────────────────────────────
+async function loadInquiries({ manual = false } = {}) {
+  const btn = document.getElementById('inqRefreshBtn');
+  const errEl = document.getElementById('inqError');
+  if (btn) btn.disabled = true;
+  if (manual && btn) btn.innerHTML = '<i class="ti ti-loader-2"></i> Refreshing…';
+  if (!inquiriesLoaded) renderInquiries({ loading: true });
+
+  try {
+    const resp = await fetch('/api/inquiries', { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Could not load inquiries.');
+    inquiries = json.data || [];
+    inquiriesLoaded = true;
+    if (errEl) errEl.style.display = 'none';
+  } catch (e) {
+    console.warn('[inquiries] load failed', e.message);
+    // Previously loaded inquiries stay on screen — a dropped connection should
+    // not blank the queue Saima is working through.
+    if (errEl) {
+      errEl.innerHTML = `${_esc(e.message)} <button onclick="loadInquiries({ manual: true })" style="background:none;border:none;color:#8a1f1f;font-weight:600;text-decoration:underline;cursor:pointer;padding:0;font-size:12px">Retry</button>`;
+      errEl.style.display = 'block';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh"></i> Refresh'; }
+  }
+  renderInquiries();
+  renderInquiryBadge();
+}
+
+// ── Inbox ───────────────────────────────────────────────────────────────────
+function setInquiryFilter(v) {
+  _inqFilter = v;
+  renderInquiries();
+}
+
+function _filteredInquiries() {
+  // The server already returns newest first; this preserves that order.
+  if (_inqFilter === 'all') return inquiries;
+  return inquiries.filter(i => i.status === _inqFilter);
+}
+
+function renderInquiries({ loading = false } = {}) {
+  const filters = document.getElementById('inqFilters');
+  if (filters) {
+    filters.innerHTML = INQUIRY_FILTERS.map((f, i) => {
+      const n = f.value === 'all' ? inquiries.length : inquiries.filter(x => x.status === f.value).length;
+      return `<button class="inq-filter${_inqFilter === f.value ? ' active' : ''}" onclick="setInquiryFilter('${f.value}')"
+        style="${i ? 'border-left:1px solid var(--border)' : ''}">${f.label}${n ? ' ' + n : ''}</button>`;
+    }).join('');
+  }
+
+  const list = document.getElementById('inquiryList');
+  if (!list) return;
+
+  if (loading && !inquiriesLoaded) {
+    list.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:12px">Loading inquiries…</div></div>';
+    return;
+  }
+
+  const rows = _filteredInquiries();
+  if (!rows.length) {
+    const msg = !inquiries.length
+      ? 'Website inquiries will appear here.'
+      : _inqFilter === 'new' ? 'No new inquiries.'
+      : _inqFilter === 'contacted' ? 'No contacted inquiries.'
+      : _inqFilter === 'closed' ? 'No closed inquiries.'
+      : 'No inquiries.';
+    list.innerHTML = `<div class="empty" style="padding:40px 20px"><i class="ti ti-mail-opened"></i><p>${msg}</p></div>`;
+    return;
+  }
+
+  window._inqIds = [];
+  list.innerHTML = rows.map((inq, i) => {
+    window._inqIds[i] = inq.id;
+    const bits = [
+      stateLabel(inq.state),
+      (inq.preferred_size || '').trim() ? 'Size ' + inq.preferred_size : null,
+    ].filter(Boolean).join(' · ');
+    const count = inq.item_count || 0;
+    return `<div class="inq-card${inq.status === 'new' ? ' is-new' : ''}" onclick="openInquiryDetail(window._inqIds[${i}])">
+      ${_inqThumbHtml(inq.first_item, 560)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <div class="inq-name" style="flex:1">${_esc(inq.customer_name || 'Someone')}</div>
+          <span class="status-pill status-${inq.status}" style="flex-shrink:0">${INQUIRY_STATUS_LABEL[inq.status] || inq.status}</span>
+        </div>
+        ${bits ? `<div class="inq-meta">${_esc(bits)}</div>` : ''}
+        <div class="inq-meta">${count} piece${count === 1 ? '' : 's'} · ${_esc(_inqRelative(inq.created_at))}</div>
+      </div>
+      <i class="ti ti-chevron-right" style="color:var(--muted);font-size:16px;flex-shrink:0;align-self:center"></i>
+    </div>`;
+  }).join('');
+}
+
+// ── Detail ──────────────────────────────────────────────────────────────────
+async function openInquiryDetail(id) {
+  const summary = inquiries.find(i => i.id === id);
+  if (!summary) return;
+  // Opening never changes status.
+  currentInquiry = { ...summary, items: null };
+  _renderInquiryDetail();
+  openSheet('inquiryDetailSheet');
+
+  try {
+    const resp = await fetch('/api/inquiries?id=' + encodeURIComponent(id), { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Could not load this inquiry.');
+    if (currentInquiry?.id !== id) return;             // sheet moved on
+    currentInquiry = { ...summary, ...json.data };
+    _renderInquiryDetail();
+  } catch (e) {
+    const el = document.getElementById('inqDetailItems');
+    if (el && currentInquiry?.id === id) {
+      el.innerHTML = `<div style="font-size:12px;color:#8a1f1f;background:#fdecea;border-radius:8px;padding:10px 12px;line-height:1.5">${_esc(e.message)} <button onclick="openInquiryDetail('${id}')" style="background:none;border:none;color:#8a1f1f;font-weight:600;text-decoration:underline;cursor:pointer;padding:0;font-size:12px">Retry</button></div>`;
+    }
+  }
+}
+
+// The prefilled WhatsApp text. Never sent automatically — this only opens the
+// compose window so Saima can read it before sending.
+function inquiryWhatsappMessage(inq) {
+  const first = (inq.customer_name || '').trim().split(/\s+/)[0] || 'there';
+  const names = (inq.items || []).map(i => (i.product_name || '').trim()).filter(Boolean);
+  let about = '';
+  if (names.length === 1) about = ` about ${names[0]}`;
+  else if (names.length === 2) about = ` about ${names[0]} and ${names[1]}`;
+  else if (names.length > 2) about = ` about ${names[0]} and ${names.length - 1} other pieces`;
+  let msg = `Hi ${first}, this is Saima from Meraki by Saima. Thank you for your inquiry${about}.`;
+  if ((inq.preferred_size || '').trim().toLowerCase() === 'unsure') {
+    msg += ` I'd also be happy to help you with sizing.`;
+  }
+  return msg;
+}
+
+function _renderInquiryDetail() {
+  const inq = currentInquiry;
+  if (!inq) return;
+
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('inqDetailName', inq.customer_name || 'Someone');
+  set('inqDetailWhen', _inqFullWhen(inq.created_at));
+
+  const st = document.getElementById('inqDetailStatus');
+  if (st) { st.textContent = INQUIRY_STATUS_LABEL[inq.status] || inq.status; st.className = 'status-pill status-' + inq.status; }
+
+  // ── Contact actions. None of these touch status. ──
+  const contact = document.getElementById('inqDetailContactRow');
+  if (contact) {
+    const digits = (inq.phone || '').replace(/[^\d]/g, '');
+    const acts = [];
+    if (digits) {
+      const wa = 'https://wa.me/' + digits + '?text=' + encodeURIComponent(inquiryWhatsappMessage(inq));
+      acts.push(`<a class="inq-act primary" id="inqWhatsappBtn" href="${_esc(wa)}" target="_blank" rel="noopener"><i class="ti ti-brand-whatsapp"></i> WhatsApp</a>`);
+      acts.push(`<a class="inq-act" id="inqCallBtn" href="tel:${_esc(inq.phone.trim())}"><i class="ti ti-phone"></i> Call</a>`);
+    }
+    if ((inq.email || '').trim()) {
+      acts.push(`<a class="inq-act" id="inqEmailBtn" href="mailto:${_esc(inq.email.trim())}"><i class="ti ti-mail"></i> Email</a>`);
+    }
+    contact.innerHTML = acts.join('') || '<div style="font-size:12px;color:var(--muted)">No contact details were provided.</div>';
+  }
+
+  // ── Customer ──
+  const cust = document.getElementById('inqDetailCustomer');
+  if (cust) {
+    const row = (label, value, strong) => `<div style="display:flex;gap:10px;margin-bottom:7px;align-items:flex-start">
+        <div style="width:96px;flex-shrink:0;font-size:11px;color:var(--muted);padding-top:1px">${label}</div>
+        <div style="flex:1;min-width:0;font-size:${strong ? '13px;font-weight:600' : '12.5px'};color:var(--ink);line-height:1.5;word-break:break-word;white-space:pre-wrap">${value}</div>
+      </div>`;
+    const muted = t => `<span style="color:var(--muted);font-weight:400">${t}</span>`;
+    cust.innerHTML =
+      row('Phone', inq.phone ? _esc(inq.phone) : muted(NOT_COLLECTED)) +
+      ((inq.email || '').trim() ? row('Email', _esc(inq.email)) : '') +
+      row('State', inq.state ? _esc(inquiryStateDisplay(inq)) : muted(NOT_COLLECTED)) +
+      row('Preferred size', (inq.preferred_size || '').trim() ? _esc(inq.preferred_size) : muted(NOT_COLLECTED), true) +
+      ((inq.note || '').trim() ? row('Note', _esc(inq.note)) : '') +
+      (inq.source ? row('Came from', _esc(inq.source)) : '');
+  }
+
+  // ── Requested pieces ──
+  const itemsEl = document.getElementById('inqDetailItems');
+  if (itemsEl) {
+    if (inq.items === null) {
+      itemsEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0">Loading pieces…</div>';
+    } else if (!inq.items.length) {
+      itemsEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0">No specific pieces were listed.</div>';
+    } else {
+      // Snapshot values are authoritative: they are what the customer actually
+      // asked about. A live product is used only to add an image, never to
+      // replace the recorded name, SKU or price.
+      itemsEl.innerHTML = inq.items.map(it => {
+        const bits = [
+          it.product_sku ? _esc(it.product_sku) : null,
+          it.price_snapshot != null ? '$' + _esc(String(it.price_snapshot)) : null,
+        ].filter(Boolean).join(' · ');
+        const legacySize = (it.requested_size || '').trim();
+        return `<div style="display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
+          ${_inqThumbHtml(it, 960)}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:var(--ink);word-break:break-word">${_esc(it.product_name || 'Piece')}</div>
+            ${bits ? `<div class="inq-meta">${bits}</div>` : ''}
+            ${legacySize ? `<div class="inq-meta">Asked for size ${_esc(legacySize)}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // ── Status controls. Explicit, never automatic. ──
+  const btns = document.getElementById('inqDetailStatusBtns');
+  if (btns) {
+    const primary = (label, next, icon) =>
+      `<button class="btn btn-primary" style="width:100%;min-height:46px" onclick="setInquiryStatus('${next}',this)"><i class="ti ${icon}"></i> ${label}</button>`;
+    const secondary = (label, next) =>
+      `<button class="btn" style="width:100%;min-height:44px;background:#fff;color:var(--muted);border:1.5px solid var(--border)" onclick="setInquiryStatus('${next}',this)">${label}</button>`;
+    if (inq.status === 'new') {
+      btns.innerHTML = primary('Mark Contacted', 'contacted', 'ti-check') + secondary('Close without contacting', 'closed');
+    } else if (inq.status === 'contacted') {
+      btns.innerHTML = primary('Mark Closed', 'closed', 'ti-archive') + secondary('Move back to New', 'new');
+    } else {
+      btns.innerHTML = secondary('Reopen as New', 'new') + secondary('Move back to Contacted', 'contacted');
+    }
+  }
+}
+
+// ── Status ──────────────────────────────────────────────────────────────────
+// Persisted before anything on screen changes. A failed write leaves the UI
+// showing the state the database actually holds.
+async function setInquiryStatus(status, btn) {
+  if (!currentInquiry || _inqBusy) return;
+  const id = currentInquiry.id;
+  const msg = document.getElementById('inqDetailStatusMsg');
+  const label = btn ? btn.innerHTML : '';
+  _inqBusy = true;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  if (msg) msg.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/inquiries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-meraki-pin': _getStoredPin() },
+      body: JSON.stringify({ id, status }),
+    });
+    const json = await resp.json();
+    if (!resp.ok) throw new Error(json.error || 'Could not update this inquiry.');
+
+    const saved = json.data;
+    const idx = inquiries.findIndex(i => i.id === id);
+    if (idx >= 0) inquiries[idx] = { ...inquiries[idx], ...saved };
+    if (currentInquiry?.id === id) {
+      currentInquiry = { ...currentInquiry, ...saved };
+      _renderInquiryDetail();
+    }
+    renderInquiries();
+    renderInquiryBadge();
+    showToast(status === 'contacted' ? 'Marked contacted ✓' : status === 'closed' ? 'Closed ✓' : 'Moved back to New ✓');
+  } catch (e) {
+    if (msg) {
+      msg.textContent = e.message;
+      msg.style.color = '#8a1f1f';
+      msg.style.display = 'block';
+    }
+    // Nothing local was changed, so the UI still shows the persisted status.
+    _renderInquiryDetail();
+  } finally {
+    _inqBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
+  }
+}
+
 // ─── WEBSITE SETTINGS ────────────────────────────────────────────────────────
 // Global operational values for the public site: who to contact, where Saima is,
 // and the standing service notes. Deliberately NOT a CMS — brand and editorial
@@ -5110,6 +5561,7 @@ function showScreen(name) {
   if (name === 'home') renderHome();
   if (name === 'stock') { if (stockView === 'collections') renderCollections(); else renderInventory(); }
   if (name === 'add') { updateCollectionPickerDisplay(); }
+  if (name === 'inquiries') loadInquiries();
   if (name === 'people') { if (_currentPeopleTab === 'leads') renderLeads(); else renderCustomers(); }
   if (name === 'show') renderExhibitions();
 }
@@ -7070,6 +7522,15 @@ async function _bootLoadData() {
     renderHome();
     _bootInFlight = false;
     return; // stop — customers/exhibitions are useless without products context
+  }
+
+  try {
+    // Loaded at boot only so the navigation badge is correct straight away.
+    // No polling and no subscription — the queue refreshes when Saima opens it.
+    await loadInquiries();
+    console.log('[BOOT] inquiries loaded', inquiries.length);
+  } catch(e) {
+    console.warn('[BOOT] inquiries failed', e?.message || e);
   }
 
   try {
