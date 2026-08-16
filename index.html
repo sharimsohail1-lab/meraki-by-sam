@@ -866,6 +866,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div style="margin-top:12px;border-top:1px solid var(--sand-light);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--sand-light);color:var(--ink)" onclick="closeModal('settingsModal');openLabSheet()"><i class="ti ti-flask"></i> Provider Lab &amp; Benchmarks</button>
     </div>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+      <button class="btn" style="width:100%;background:#fff;color:var(--muted);border:1.5px solid var(--border)" onclick="closeModal('settingsModal');lockAdminDevice()"><i class="ti ti-lock"></i> Lock this device</button>
+      <p class="key-note" style="margin-top:6px">Forgets the PIN on this phone. You will be asked for it next time.</p>
+    </div>
   </div>
 </div>
 
@@ -3902,7 +3906,7 @@ async function loadInquiries({ manual = false } = {}) {
   if (!inquiriesLoaded) renderInquiries({ loading: true });
 
   try {
-    const resp = await fetch('/api/inquiries', { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const resp = await adminFetch('/api/inquiries');
     const json = await resp.json();
     if (!resp.ok) throw new Error(json.error || 'Could not load inquiries.');
     inquiries = json.data || [];
@@ -3998,7 +4002,7 @@ async function openInquiryDetail(id) {
   openSheet('inquiryDetailSheet');
 
   try {
-    const resp = await fetch('/api/inquiries?id=' + encodeURIComponent(id), { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const resp = await adminFetch('/api/inquiries?id=' + encodeURIComponent(id));
     const json = await resp.json();
     if (!resp.ok) throw new Error(json.error || 'Could not load this inquiry.');
     if (currentInquiry?.id !== id) return;             // sheet moved on
@@ -4163,9 +4167,9 @@ async function setInquiryStatus(status, btn) {
   if (msg) msg.style.display = 'none';
 
   try {
-    const resp = await fetch('/api/inquiries', {
+    const resp = await adminFetch('/api/inquiries', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-meraki-pin': _getStoredPin() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status }),
     });
     const json = await resp.json();
@@ -7421,17 +7425,108 @@ async function regenerateWithFeedback() {
 const _MERAKI_BUILD = '2026-06-29-pin-permanent';
 
 // ─── ADMIN PIN GATE ───────────────────────────────────────────────────────────
+// ── Admin session ───────────────────────────────────────────────────────────
+// A remembered device holds two things, and they must never disagree: a flag
+// saying the gate is satisfied, and the credential every protected request
+// needs. An unlocked flag without a credential is the broken state this section
+// exists to make impossible — the app would open normally while Inquiries and
+// Leads quietly failed, with no PIN prompt to fix it.
+//
+// SECURITY TRADEOFF: the PIN is kept in localStorage in plain text. This is a
+// private single-operator admin app with no public URL, and the alternative —
+// prompting on every launch — is the thing the remembered-device requirement
+// exists to avoid. It means anyone with the unlocked phone can read the PIN from
+// devtools; on that device they already have the whole app. Clearing site data
+// or using a private window removes it, as expected.
+const ADMIN_UNLOCK_KEY = 'meraki_admin_unlocked';
+const ADMIN_PIN_KEY    = 'meraki_admin_pin';
+
 function _isAdminUnlocked() {
-  try { return localStorage.getItem('meraki_admin_unlocked') === 'true'; } catch(e) { return false; }
+  try { return localStorage.getItem(ADMIN_UNLOCK_KEY) === 'true'; } catch(e) { return false; }
 }
 
-function _storeAdminUnlock() {
-  try { localStorage.setItem('meraki_admin_unlocked', 'true'); } catch(e) {}
-}
-
-// Stored PIN used as header for admin API calls (e.g. GET /api/leads)
+// The credential sent as x-meraki-pin on every protected request.
 function _getStoredPin() {
-  try { return localStorage.getItem('meraki_admin_pin') || ''; } catch(e) { return ''; }
+  try { return localStorage.getItem(ADMIN_PIN_KEY) || ''; } catch(e) { return ''; }
+}
+
+function _hasAdminCredential() {
+  return !!_getStoredPin();
+}
+
+// A device counts as remembered only when BOTH exist.
+function _hasAdminSession() {
+  return _isAdminUnlocked() && _hasAdminCredential();
+}
+
+// The credential is written BEFORE the unlock flag, and the flag is only set if
+// the credential actually landed. Storage can fail — quota, private mode, a
+// locked-down browser — and the old order set the flag first, so a failed PIN
+// write left exactly the unlocked-but-uncredentialed device this prevents.
+function _storeAdminSession(pin) {
+  try {
+    localStorage.setItem(ADMIN_PIN_KEY, pin);
+    if (localStorage.getItem(ADMIN_PIN_KEY) !== pin) return false;
+    localStorage.setItem(ADMIN_UNLOCK_KEY, 'true');
+    return _isAdminUnlocked();
+  } catch(e) {
+    console.warn('[admin] could not remember this device:', e.message);
+    _clearAdminSession();
+    return false;
+  }
+}
+
+function _clearAdminSession() {
+  try {
+    localStorage.removeItem(ADMIN_UNLOCK_KEY);
+    localStorage.removeItem(ADMIN_PIN_KEY);
+  } catch(e) {}
+}
+
+function _showAdminGate(message) {
+  const gate = document.getElementById('adminPinGate');
+  if (!gate) return;
+  gate.style.display = 'flex';
+  const err = document.getElementById('adminPinError');
+  if (err && message) err.textContent = message;
+  const input = document.getElementById('adminPinInput');
+  if (input) { input.value = ''; try { input.focus(); } catch(e) {} }
+  const btn = document.getElementById('adminPinBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Unlock'; }
+}
+
+// Lock this device: forget the credential and ask for the PIN again.
+function lockAdminDevice() {
+  _clearAdminSession();
+  _showAdminGate('');
+}
+
+// ── The one way to call a protected endpoint ────────────────────────────────
+// Every PIN-gated request goes through here — Leads and Inquiries alike — so
+// there is a single place that knows how the credential is attached and a single
+// place that reacts when the server rejects it.
+//
+// A 401 means the stored credential is wrong or stale: the PIN was changed on
+// the server, or this device was remembered against a different one. Carrying on
+// would leave the app open but permanently unable to load anything protected, so
+// the session is dropped and the gate comes back. Other failures are left to the
+// caller — a 500 or a dropped connection is not an auth problem.
+async function adminFetch(url, options = {}) {
+  const pin = _getStoredPin();
+  const headers = { ...(options.headers || {}) };
+  if (pin) headers['x-meraki-pin'] = pin;
+
+  const resp = await fetch(url, { ...options, headers });
+
+  if (resp.status === 401) {
+    console.warn('[admin] credential rejected by', url, '— locking device');
+    _clearAdminSession();
+    _showAdminGate('Your PIN has changed. Please enter it again.');
+    const err = new Error('Your PIN is no longer valid. Please enter it again.');
+    err.status = 401;
+    throw err;
+  }
+  return resp;
 }
 
 async function submitAdminPin() {
@@ -7456,9 +7551,12 @@ async function submitAdminPin() {
       document.getElementById('adminPinInput').focus();
       return;
     }
-    // Success
-    _storeAdminUnlock();
-    try { localStorage.setItem('meraki_admin_pin', pin); } catch(e) {}
+    // Success. If the credential could not be stored the device is NOT
+    // remembered — better to ask again next launch than to open uncredentialed.
+    const remembered = _storeAdminSession(pin);
+    if (!remembered) {
+      console.warn('[admin] unlocked for this session only — storage unavailable');
+    }
     document.getElementById('adminPinGate').style.display = 'none';
     await _bootLoadData();
   } catch(e) {
@@ -7558,7 +7656,7 @@ async function _bootLoadData() {
   }
 
   try {
-    const resp = await fetch('/api/leads', { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const resp = await adminFetch('/api/leads');
     const json = await resp.json();
     leads = json.data || [];
     console.log('[BOOT] leads loaded', leads.length);
@@ -7581,9 +7679,20 @@ async function init() {
   }
   applyTranslations();
 
-  // Check if PIN gate is needed
-  if (_isAdminUnlocked()) {
-    // Already unlocked on this device — boot normally
+  // Check if PIN gate is needed.
+  //
+  // The unlock flag alone is not enough: a device remembered before the
+  // credential was stored, or one where the credential write failed, would boot
+  // normally and then fail every protected request with no way to recover. Such
+  // a session is dropped here and the normal gate path runs instead — which also
+  // handles the case where the server has no PIN configured at all.
+  if (_isAdminUnlocked() && !_hasAdminCredential()) {
+    console.warn('[admin] remembered device has no stored PIN — asking again');
+    _clearAdminSession();
+  }
+
+  if (_hasAdminSession()) {
+    // Remembered and credentialed — boot normally.
     await _bootLoadData();
     return;
   }
@@ -12519,7 +12628,7 @@ async function refreshLeads() {
   const ind = document.getElementById('leadsPtrIndicator');
   if (ind) ind.style.display = 'block';
   try {
-    const resp = await fetch('/api/leads', { headers: { 'x-meraki-pin': _getStoredPin() } });
+    const resp = await adminFetch('/api/leads');
     const json = await resp.json();
     if (resp.ok) { leads = json.data || []; renderLeads(); }
     else showToast('Refresh failed');
