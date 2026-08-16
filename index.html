@@ -4012,20 +4012,52 @@ async function openInquiryDetail(id) {
   }
 }
 
+// The greeting name. A blank submission, or a first token carrying no letters at
+// all — stray punctuation, an emoji — reads worse than no name, so both fall
+// back to "there" rather than producing "Hi undefined" or "Hi !!!".
+function _inquiryFirstName(name) {
+  const first = String(name == null ? '' : name).trim().split(/\s+/)[0] || '';
+  const cleaned = first.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '');
+  return /\p{L}/u.test(cleaned) ? cleaned : 'there';
+}
+
 // The prefilled WhatsApp text. Never sent automatically — this only opens the
-// compose window so Saima can read it before sending.
+// compose window so Saima can read and edit it before sending.
+//
+// The draft names one piece and counts the rest rather than listing every
+// product: a long list reads like a receipt, and the point is to open a
+// conversation. It closes by asking for the order, because a message that only
+// offers help tends to end in thanks rather than a sale.
 function inquiryWhatsappMessage(inq) {
-  const first = (inq.customer_name || '').trim().split(/\s+/)[0] || 'there';
-  const names = (inq.items || []).map(i => (i.product_name || '').trim()).filter(Boolean);
-  let about = '';
-  if (names.length === 1) about = ` about ${names[0]}`;
-  else if (names.length === 2) about = ` about ${names[0]} and ${names[1]}`;
-  else if (names.length > 2) about = ` about ${names[0]} and ${names.length - 1} other pieces`;
-  let msg = `Hi ${first}, this is Saima from Meraki by Saima. Thank you for your inquiry${about}.`;
-  if ((inq.preferred_size || '').trim().toLowerCase() === 'unsure') {
-    msg += ` I'd also be happy to help you with sizing.`;
+  const first = _inquiryFirstName(inq?.customer_name);
+  const names = (inq?.items || []).map(i => (i.product_name || '').trim()).filter(Boolean);
+  const unsure = (inq?.preferred_size || '').trim().toLowerCase() === 'unsure';
+  const intro = `Hi ${first}, this is Saima from Meraki by Saima.`;
+
+  // No pieces recorded: keep the offer of help but drop the order question,
+  // since there is nothing specific to order.
+  if (!names.length) {
+    return `${intro} Thank you for your inquiry. I’d be happy to help with any sizing or delivery questions.`;
   }
-  return msg;
+
+  const others = names.length - 1;
+  const about = others
+    ? `${names[0]} and ${others} other ${others === 1 ? 'piece' : 'pieces'}`
+    : names[0];
+
+  // 'Unsure' is an answer the customer gave, so the offer becomes specific.
+  // A missing size is never mentioned — she was simply not asked.
+  const help = unsure
+    ? 'I’d be happy to help you choose the right size and answer any delivery questions.'
+    : others
+      ? 'I’d be happy to help with sizing or delivery.'
+      : 'I’d be happy to help with any sizing or delivery questions.';
+
+  const ask = others
+    ? 'Would you like to place an order for one of these suits?'
+    : 'Would you like to place an order for this suit?';
+
+  return `${intro} Thank you for your inquiry about ${about}. ${help} ${ask}`;
 }
 
 function _renderInquiryDetail() {
