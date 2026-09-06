@@ -1073,6 +1073,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <button class="btn btn-gold" id="collPkgBtn" onclick="generateCollectionPackage()" style="flex:1;margin:0"><i class="ti ti-package"></i> Marketing Package</button>
         <button class="btn btn-secondary btn-sm" onclick="toggleCollRename()" style="padding:0 12px;height:38px" title="Rename"><i class="ti ti-pencil"></i></button>
       </div>
+      <div id="collWebsiteRow" style="margin:12px 0"></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" onclick="openCatalogBuilder(currentCollection)" style="flex:1;margin:0"><i class="ti ti-book"></i> Catalog</button>
         <button class="btn btn-secondary" onclick="openCollAddPiecesSheet()" style="flex:1;margin:0"><i class="ti ti-plus"></i> Add Pieces</button>
@@ -1272,6 +1273,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <div class="field-label">Availability</div>
           <div id="websiteAvailRow" style="display:flex;gap:6px;margin-bottom:6px"></div>
           <div id="websiteAvailHelp" style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
+
+          <div class="field-label">Collections on the website</div>
+          <div id="websiteCollections" style="margin-bottom:14px"></div>
 
           <div class="field-label">Fulfilment note</div>
           <textarea id="websiteFulfilInput" class="field-input" rows="2" dir="auto"
@@ -4199,6 +4203,229 @@ async function setInquiryStatus(status, btn) {
   }
 }
 
+// ─── COLLECTION PUBLISHING ───────────────────────────────────────────────────
+// Two separate questions, which is the whole point of this model:
+//
+//   is this collection live at all            collections.show_on_website
+//   should THIS product appear in THIS        product_collections.show_on_website
+//   collection publicly
+//
+// A piece can sit in several collections internally while being merchandised
+// publicly in only one of them, so membership and exposure cannot share a flag.
+//
+// Internal membership still lives in products.collection_names, which is what
+// Stock, the catalog builder and the collection screens read. The join table is
+// the canonical record for the WEBSITE, and saveProductCollections below is the
+// single writer of both, so they cannot drift apart.
+
+let collections = [];            // [{ id, name, show_on_website }]
+let productCollections = [];     // [{ id, product_id, collection_id, show_on_website }]
+let collectionsLoaded = false;
+
+const COLLECTION_COLS = 'id,name,show_on_website,created_at,updated_at';
+const PRODUCT_COLLECTION_COLS = 'id,product_id,collection_id,show_on_website,created_at,updated_at';
+
+// Two queries at boot, never per product. Failure is non-fatal: the app keeps
+// working on collection_names alone and simply cannot edit website exposure.
+async function loadCollectionPublishing() {
+  const [cols, memberships] = await Promise.all([
+    db('select', 'collections', { columns: COLLECTION_COLS }),
+    db('select', 'product_collections', { columns: PRODUCT_COLLECTION_COLS }),
+  ]);
+  collections = cols || [];
+  productCollections = memberships || [];
+  collectionsLoaded = true;
+  return { collections: collections.length, memberships: productCollections.length };
+}
+
+function collectionByName(name) {
+  const n = String(name || '').trim();
+  return collections.find(c => c.name === n) || null;
+}
+
+// A collection with no record yet (created before this feature, or just typed
+// in) is treated as live — the same default the migration backfilled, so the
+// storefront never loses anything for want of a row.
+function isCollectionLive(name) {
+  const c = collectionByName(name);
+  return c ? c.show_on_website !== false : true;
+}
+
+function membershipFor(productId, name) {
+  const c = collectionByName(name);
+  if (!c) return null;
+  return productCollections.find(m => m.product_id === productId && m.collection_id === c.id) || null;
+}
+
+// Same reasoning: a membership with no row yet is visible. Nothing silently
+// disappears from the website because a row has not been written.
+function isMembershipPublic(productId, name) {
+  const m = membershipFor(productId, name);
+  return m ? m.show_on_website !== false : true;
+}
+
+// Ensure a collection record exists, so a freshly typed collection name can
+// carry publishing state immediately.
+async function ensureCollection(name) {
+  const n = String(name || '').trim();
+  if (!n) return null;
+  const existing = collectionByName(n);
+  if (existing) return existing;
+  try {
+    const rows = await db('insert', 'collections', { data: { name: n, show_on_website: true } });
+    const row = rows?.[0];
+    if (row) collections.push(row);
+    return row || null;
+  } catch (e) {
+    // A racing insert from another device — adopt whatever is there now.
+    if (e?.code === '23505') {
+      const refreshed = await db('select', 'collections', { columns: COLLECTION_COLS, filter: { name: n } });
+      const row = refreshed?.[0];
+      if (row && !collectionByName(n)) collections.push(row);
+      return row || null;
+    }
+    console.warn('[collections] could not create', n, e.message);
+    return null;
+  }
+}
+
+// THE single writer. Reconciles the join table against the product's current
+// membership list, so removing a product from a collection takes its visibility
+// row with it and no orphaned metadata is left behind.
+//
+// `visibility` is an optional { name: boolean } map for memberships whose
+// exposure is being changed in the same save. Anything absent keeps what it has.
+async function saveProductCollections(product, names, visibility = {}) {
+  if (!product?.id) return;
+  const wanted = [...new Set((names || []).map(n => String(n || '').trim()).filter(Boolean))];
+
+  // Every wanted collection needs a record before a membership can point at it.
+  for (const n of wanted) await ensureCollection(n);
+
+  const wantedIds = new Map();
+  wanted.forEach(n => { const c = collectionByName(n); if (c) wantedIds.set(c.id, n); });
+
+  const current = productCollections.filter(m => m.product_id === product.id);
+
+  // Gone from the product: drop the row and its visibility with it.
+  for (const m of current) {
+    if (!wantedIds.has(m.collection_id)) {
+      try {
+        await db('delete', 'product_collections', { id: m.id });
+        productCollections = productCollections.filter(x => x.id !== m.id);
+      } catch (e) { console.warn('[collections] could not remove membership', e.message); }
+    }
+  }
+
+  // Added, or exposure changed.
+  for (const [collectionId, name] of wantedIds) {
+    const existing = productCollections.find(m => m.product_id === product.id && m.collection_id === collectionId);
+    const desired = Object.prototype.hasOwnProperty.call(visibility, name)
+      ? !!visibility[name]
+      : (existing ? existing.show_on_website !== false : true);
+
+    if (!existing) {
+      try {
+        const rows = await db('insert', 'product_collections', {
+          data: { product_id: product.id, collection_id: collectionId, show_on_website: desired },
+        });
+        if (rows?.[0]) productCollections.push(rows[0]);
+      } catch (e) {
+        // The unique index rejected a duplicate — the membership already exists.
+        if (e?.code !== '23505') console.warn('[collections] could not add membership', e.message);
+      }
+    } else if ((existing.show_on_website !== false) !== desired) {
+      try {
+        await db('update', 'product_collections', {
+          id: existing.id, data: { show_on_website: desired, updated_at: new Date().toISOString() },
+        });
+        existing.show_on_website = desired;
+      } catch (e) { console.warn('[collections] could not update membership', e.message); }
+    }
+  }
+}
+
+// Renders the per-collection website toggles for one product.
+//
+// Only collections the product actually belongs to appear here, which is what
+// makes the distinction legible: being IN a collection is decided in Details,
+// being SHOWN in it online is decided here.
+function renderProductCollectionVisibility(p) {
+  const el = document.getElementById('websiteCollections');
+  if (!el || !p) return;
+  const names = getProductCollections(p);
+
+  if (!names.length) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);line-height:1.5">This piece is not in any collection yet. Add it to one under Collections above.</div>';
+    return;
+  }
+
+  window._collVisNames = names;
+  el.innerHTML = names.map((n, i) => {
+    const on = isMembershipPublic(p.id, n);
+    const live = isCollectionLive(n);
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer">
+      <input type="checkbox" ${on ? 'checked' : ''}
+        onchange="setMembershipWebsiteVisibility('${p.id}', window._collVisNames[${i}], this.checked)"
+        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0">
+      <span style="flex:1;min-width:0;font-size:13px;color:var(--ink);word-break:break-word">${_esc(n)}</span>
+      ${live ? '' : '<span style="flex-shrink:0;font-size:10px;color:#7a4500;background:#fff6e5;border-radius:10px;padding:2px 8px">Collection hidden</span>'}
+    </label>`;
+  }).join('') +
+  '<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">Tick where this piece should appear on the website. Unticking keeps it in the collection here, but hides it from that collection online.</div>';
+}
+
+// Renders the collection-level switch in the collection detail sheet.
+function renderCollectionWebsiteControl(name) {
+  const el = document.getElementById('collWebsiteRow');
+  if (!el) return;
+  if (!name) { el.innerHTML = ''; return; }     // the Uncollected pseudo-collection
+  const live = isCollectionLive(name);
+  el.innerHTML = `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer">
+      <input type="checkbox" ${live ? 'checked' : ''}
+        onchange="setCollectionWebsiteVisibility(window._collDetailName, this.checked, this)"
+        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0">
+      <span style="flex:1;min-width:0">
+        <span style="font-size:13px;color:var(--ink)">Show on website</span>
+        <span style="display:block;font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">${live ? 'This collection can appear on the website.' : 'Hidden — this collection will not appear on the website.'}</span>
+      </span>
+    </label>`;
+}
+
+// Collection-level switch, from the collection detail sheet.
+async function setCollectionWebsiteVisibility(name, visible, btn) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  if (btn) btn.disabled = true;
+  try {
+    const c = await ensureCollection(n);
+    if (!c) throw new Error('Could not find that collection');
+    await db('update', 'collections', { id: c.id, data: { show_on_website: !!visible, updated_at: new Date().toISOString() } });
+    c.show_on_website = !!visible;
+    renderCollectionWebsiteControl(n);
+    if (currentProduct) renderWebsiteSection(currentProduct);
+    showToast(visible ? 'Collection is on the website ✓' : 'Collection hidden from the website ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally { if (btn) btn.disabled = false; }
+}
+
+// Per-membership switch, from the product's Website section.
+async function setMembershipWebsiteVisibility(productId, name, visible) {
+  const p = inventory.find(x => x.id === productId);
+  if (!p) return;
+  try {
+    await saveProductCollections(p, getProductCollections(p), { [name]: !!visible });
+    // The whole section, not just the checkbox list: the preview above states
+    // what the website will show, and it would otherwise go stale.
+    renderWebsiteSection(p);
+    showToast(visible ? 'Shown in this collection ✓' : 'Hidden from this collection ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+    renderWebsiteSection(p);
+  }
+}
+
 // ─── WEBSITE SETTINGS ────────────────────────────────────────────────────────
 // Global operational values for the public site: who to contact, where Saima is,
 // and the standing service notes. Deliberately NOT a CMS — brand and editorial
@@ -4886,6 +5113,8 @@ function renderWebsiteSection(p) {
   const fulfilHelp = document.getElementById('websiteFulfilHelp');
   if (fulfilHelp) fulfilHelp.textContent = _fulfilmentHint(p);
 
+  renderProductCollectionVisibility(p);
+
   // Informational preview of the canonical data the website will read.
   const prev = document.getElementById('websitePreview');
   if (prev) {
@@ -4909,7 +5138,18 @@ function renderWebsiteSection(p) {
         </div>
       </div>` +
       row('Description', payload.description ? _esc(payload.description) : '<span style="color:var(--muted)">Not added</span>') +
-      row('Collection', payload.collection_names.length ? _esc(payload.collection_names.join(', ')) : '<span style="color:var(--muted)">None</span>') +
+      (() => {
+        // The preview claims to show what the website will show, so it lists only
+        // the collections this piece is actually public in: the collection must be
+        // live and this membership must be ticked. The payload itself is unchanged
+        // — the storefront applies the same rule.
+        const shown = payload.collection_names.filter(n => isCollectionLive(n) && isMembershipPublic(p.id, n));
+        const hiddenCount = payload.collection_names.length - shown.length;
+        const value = shown.length
+          ? _esc(shown.join(', ')) + (hiddenCount ? ` <span style="color:var(--muted);font-size:11px">(${hiddenCount} hidden)</span>` : '')
+          : '<span style="color:var(--muted)">Not shown in any collection</span>';
+        return row('Collection', value);
+      })() +
       row('Sizes', payload.sizes.length ? _esc(payload.sizes.join(', ')) : '<span style="color:var(--muted)">None in stock</span>') +
       (() => {
         // Exactly what the storefront will show, including the global fallback.
@@ -6361,6 +6601,11 @@ async function _doSaveProduct() {
 
   const saved = rows[0];
   inventory.unshift({ ...saved, _hydrated: false });
+
+  // Register the collection chosen at intake so it can carry publishing state,
+  // and record the membership. Visible by default, like every other new one.
+  try { await saveProductCollections(saved, getProductCollections(saved)); }
+  catch (e) { console.warn('[collections] intake membership not recorded:', e.message); }
   buildSmartRecommendations();
 
   // Photos go up one at a time so a single failure does not lose the rest.
@@ -7614,6 +7859,15 @@ async function _bootLoadData() {
   }
 
   try {
+    const n = await loadCollectionPublishing();
+    console.log('[BOOT] collection publishing loaded', n);
+  } catch(e) {
+    // Non-fatal: membership still works from collection_names, only the website
+    // exposure controls are unavailable until this succeeds.
+    console.warn('[BOOT] collection publishing failed', e?.message || e);
+  }
+
+  try {
     await loadWebsiteSettings();
     console.log('[BOOT] website settings loaded');
   } catch(e) {
@@ -7984,6 +8238,11 @@ function openCollectionDetail(name) {
   document.getElementById('collCoverSub').textContent = `${items.length} piece${items.length !== 1 ? 's' : ''} · ${available} available`;
   document.getElementById('collCoverLogo').src = MERAKI_LOGO_SRC;
 
+  // Website publishing. Held in a global because the collection name is used in
+  // the toggle's handler and may contain quotes.
+  window._collDetailName = name;
+  renderCollectionWebsiteControl(name);
+
   // Rename
   document.getElementById('collRenameRow').style.display = 'none';
   document.getElementById('collRenameInput').value = name || '';
@@ -8080,6 +8339,7 @@ async function removeFromCollection(productId, btn) {
     await db('update', 'products', { id: productId, data: payload });
     p.collection_name = payload.collection_name;
     p.collection_names = payload.collection_names;
+    await saveProductCollections(p, getProductCollections(p));
     const remaining = currentCollection === null
       ? inventory.filter(x => !getProductCollections(x).filter(n => !archivedCollectionNames.has(n)).length)
       : inventory.filter(x => productBelongsToCollection(x, currentCollection));
@@ -8159,6 +8419,7 @@ async function saveCollAddPieces(btn) {
       await db('update', 'products', { id: productId, data: payload });
       p.collection_name = payload.collection_name;
       p.collection_names = payload.collection_names;
+      await saveProductCollections(p, getProductCollections(p));
       console.log('[COLLECTION ADD] product', p.name, 'after:', { collection_name: p.collection_name, collection_names: p.collection_names });
     }
     if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Added ✓'; }
@@ -8240,6 +8501,17 @@ async function deleteCollection() {
       p.collection_name = payload.collection_name;
       p.collection_names = payload.collection_names;
     }
+    // Drop the collection record. The join table cascades, so no membership or
+    // visibility row is left pointing at a collection that no longer exists.
+    const _delColl = collectionByName(currentCollection);
+    if (_delColl) {
+      try {
+        await db('delete', 'collections', { id: _delColl.id });
+        collections = collections.filter(c => c.id !== _delColl.id);
+        productCollections = productCollections.filter(m => m.collection_id !== _delColl.id);
+      } catch (e) { console.warn('[collections] could not delete record:', e.message); }
+    }
+
     // Remove from archived names if present
     archivedCollectionNames.delete(currentCollection);
     await _saveArchivedCollections();
@@ -8355,6 +8627,7 @@ async function saveNewCollection() {
       await db('update', 'products', { id: productId, data: payload });
       p.collection_name = payload.collection_name;
       p.collection_names = payload.collection_names;
+      await saveProductCollections(p, getProductCollections(p));
     }
     console.log('[COLLECTION CREATE] saved', { after: selectedProducts.map(p => ({ id: p.id, name: p.name, collection_name: p.collection_name, collection_names: p.collection_names })) });
     if (btn) btn.innerHTML = '<i class="ti ti-check"></i> Saved ✓';
@@ -8636,6 +8909,19 @@ async function renameCollection() {
       p.collection_name = p.collection_name === oldName ? newName : p.collection_name;
       p.collection_names = JSON.stringify(colls);
     });
+    // The collection record follows the rename, so its publishing state and every
+    // membership pointing at it survive. Without this the renamed collection
+    // would silently revert to the default of visible.
+    const _renamed = collectionByName(oldName);
+    if (_renamed) {
+      try {
+        await db('update', 'collections', { id: _renamed.id, data: { name: newName, updated_at: new Date().toISOString() } });
+        _renamed.name = newName;
+      } catch (e) { console.warn('[collections] rename not carried over:', e.message); }
+    }
+    window._collDetailName = newName;
+    renderCollectionWebsiteControl(newName);
+
     currentCollection = newName;
     document.getElementById('collDetailName').textContent = newName;
     document.getElementById('collRenameInput').value = newName;
@@ -9939,6 +10225,13 @@ async function saveProductEdits(opts) {
     if (_masr2) _masr2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
     const _sor2 = document.getElementById('detailSizeSoldOutRow');
     if (_sor2) _sor2.style.display = getSizeInventory(currentProduct) ? 'block' : 'none';
+    // Reconcile the join table against the membership just saved. Removing a
+    // collection here takes its visibility row with it; adding one starts
+    // visible. Existing exposure choices are untouched.
+    try { await saveProductCollections(currentProduct, getProductCollections(currentProduct)); }
+    catch (e) { console.warn('[collections] reconcile after save failed:', e.message); }
+    renderProductCollectionVisibility(currentProduct);
+
     _invalidateMktPreview();
     renderCollections();
     // Refresh snapshot so subsequent checks start clean

@@ -44,6 +44,12 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   exhibitions: new Set([
     'id','name','location','date','status','notes','created_at','updated_at'
   ]),
+  collections: new Set([
+    'id','name','show_on_website','created_at','updated_at'
+  ]),
+  product_collections: new Set([
+    'id','product_id','collection_id','show_on_website','created_at','updated_at'
+  ]),
   model_templates: new Set([
     'id','def_id','name','category','group_name','subtype','pose_notes','prompt',
     'image','source_provider','is_default','status','created_at'
