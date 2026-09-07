@@ -4894,6 +4894,39 @@ const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
 const HOME_COUNT_MIN = 3;
 const HOME_COUNT_MAX = 8;
 
+// The homepage sections the APP controls, in the order the website shows them
+// today. This array is the fallback order and the whole of the vocabulary: a
+// stored order is reconciled against it, so an unknown key cannot reach the
+// website and a missing one cannot leave a hole.
+//
+// Our Story, Made for You and the inquiry call-to-action are not here. They are
+// the website's editorial furniture, not merchandising, and the app has never
+// had anything to say about them.
+//
+// These keys are stable identifiers. They are safe for the website to use later
+// as analytics section names — nothing about them is derived from copy, and
+// renaming a heading does not change them.
+const HOMEPAGE_SECTIONS = ['campaign', 'featured_edit', 'new_arrivals'];
+
+const HOMEPAGE_SECTION_LABELS = {
+  campaign:      'Current Campaign',
+  featured_edit: 'Featured Edit',
+  new_arrivals:  'New Arrivals',
+};
+
+// Reconcile a stored order: drop anything unknown, drop duplicates, then append
+// whatever is missing in the established order. The result always contains every
+// section exactly once, so ordering can never lose or repeat a section.
+function _normalizeSectionOrder(raw) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(raw) ? raw : []).forEach(k => {
+    if (HOMEPAGE_SECTIONS.includes(k) && !seen.has(k)) { seen.add(k); out.push(k); }
+  });
+  HOMEPAGE_SECTIONS.forEach(k => { if (!seen.has(k)) out.push(k); });
+  return out;
+}
+
 const CURATED_EDIT_COLS = 'id,title,slug,subtitle,show_on_website,created_at,updated_at';
 const CURATED_EDIT_PRODUCT_COLS = 'id,curated_edit_id,product_id,sort_order,created_at';
 
@@ -4968,8 +5001,25 @@ function normalizeHomepageConfig(raw) {
 
   const sourceType = _homeEnum(f.source_type, FEATURED_SOURCES, 'new_arrivals');
 
+  // "No campaign is running" and "a campaign is running that has no button" are
+  // different states and have to stay different in storage. `show` is what
+  // separates them, matching how the other two blocks already work.
+  //
+  // A campaign block that predates this flag is treated as active: it was saved
+  // deliberately, and inventing a false here would silently take a live campaign
+  // off the homepage.
+  // Default only. An explicit `show` always wins, including an explicit false.
+  // A campaign block carrying actual content but no flag predates this field and
+  // was saved deliberately, so it is treated as live; an empty block has nothing
+  // to put on screen and is not.
+  const campaignSeeded = !!src.campaign && typeof src.campaign === 'object' && !!(
+    _homeText(c.heading) || _homeText(c.subheading) || _homeText(c.media_url) ||
+    (c.cta_destination_type && c.cta_destination_type !== 'none')
+  );
+
   return {
     campaign: {
+      show:             _homeBool(c.show, campaignSeeded),
       heading:          _homeText(c.heading),
       subheading:       _homeText(c.subheading),
       media_type:       mediaType,
@@ -4996,6 +5046,7 @@ function normalizeHomepageConfig(raw) {
       count:            _homeCount(n.count),
       exclude_featured: _homeBool(n.exclude_featured, true),
     },
+    section_order: _normalizeSectionOrder(src.section_order),
     // Customer Looks is not built in this phase. The key is reserved so adding
     // it later is additive and the website can test for its absence today.
     customer_looks: (src.customer_looks && typeof src.customer_looks === 'object')
@@ -5014,10 +5065,171 @@ function getHomepageConfig() {
   return normalizeHomepageConfig(websiteSettings?.homepage_config);
 }
 
+// Is a campaign actually running? Nothing else may be used to answer this — a
+// campaign with no button, or with no heading, is still a running campaign.
+function isCampaignActive(cfg = getHomepageConfig()) {
+  return !isHomepageUnconfigured() && cfg.campaign.show === true;
+}
+
+// Whether a deactivated campaign still has something to switch back on. Turning
+// the default homepage back on does not erase any of this, so the answer stays
+// true until the operator changes the fields themselves.
+function campaignHasContent(c = getHomepageConfig().campaign) {
+  return !!(c.heading || c.subheading || c.media_url || c.cta_destination_type !== 'none');
+}
+
+// Is a section switched on? One place, because the campaign says it with `show`
+// on an active config and the other two say it with their own `show`.
+function isHomepageSectionEnabled(key, cfg = getHomepageConfig()) {
+  if (key === 'campaign') return isCampaignActive(cfg);
+  return cfg[key] ? cfg[key].show === true : false;
+}
+
+// Enabled sections, in the operator's order. A section that is off is simply
+// absent — it never leaves a gap and never reserves its position.
+function enabledHomepageSections(cfg = getHomepageConfig()) {
+  return cfg.section_order.filter(k => isHomepageSectionEnabled(k, cfg));
+}
+
+async function saveHomepageSectionOrder(order) {
+  const cfg = getHomepageConfig();
+  const next = normalizeHomepageConfig({ ...cfg, section_order: _normalizeSectionOrder(order) });
+  await _persistWebsiteSettings({ homepage_config: next });
+  return next;
+}
+
+async function moveHomepageSection(key, dir) {
+  const order = getHomepageConfig().section_order;
+  const i = order.indexOf(key);
+  if (i < 0) return;
+  const next = _moveInArray(order, i, dir);
+  if (next.join(',') === order.join(',')) return;
+  try {
+    await saveHomepageSectionOrder(next);
+    renderStorefrontHome();
+  } catch (e) {
+    showToast('Could not reorder: ' + e.message);
+  }
+}
+
+// ── The one homepage validator ──────────────────────────────────────────────
+// Every caller reads this: the Home screen summary, each editor's Save, and the
+// preview. Business rules live here and nowhere else, so a rule cannot be
+// enforced in one place and forgotten in another.
+//
+// Returns { valid, mode, issues: [{ section, field, severity, message }] }.
+//   mode      'default' when no campaign is running, 'campaign' when one is
+//   severity  'error'   blocks a section from being saved while it is enabled
+//             'warning' worth saying, never blocks
+//
+// A section that is switched OFF is never validated. Incomplete is fine while
+// nothing is showing it — that is the whole point of being able to turn it off.
+function validateHomepageConfig(cfg = getHomepageConfig()) {
+  const issues = [];
+  const add = (section, field, severity, message) => issues.push({ section, field, severity, message });
+
+  // Shared by both CTAs. A button that points nowhere reachable is worse than
+  // no button: the customer taps it and lands on an error.
+  const checkCta = (block, c) => {
+    if (c.cta_destination_type === 'none') return;
+    if (!c.cta_label) add(block, 'cta_label', 'error', 'The button needs words on it.');
+    if (c.cta_destination_type === 'collection') {
+      if (!c.cta_destination_ref) { add(block, 'cta_destination_ref', 'error', 'Choose the collection the button opens.'); return; }
+      const name = collectionNameById(c.cta_destination_ref);
+      if (!name) add(block, 'cta_destination_ref', 'error', 'The collection this button opened no longer exists.');
+      else if (!isCollectionLive(name)) add(block, 'cta_destination_ref', 'error', `“${name}” is hidden from the website, so the button would lead nowhere.`);
+    }
+    if (c.cta_destination_type === 'curated_edit') {
+      if (!c.cta_destination_ref) { add(block, 'cta_destination_ref', 'error', 'Choose the edit the button opens.'); return; }
+      const e = curatedEditById(c.cta_destination_ref);
+      if (!e) add(block, 'cta_destination_ref', 'error', 'The edit this button opened no longer exists.');
+      else if (e.show_on_website === false) add(block, 'cta_destination_ref', 'error', `“${e.title}” is hidden from the website, so the button would lead nowhere.`);
+    }
+  };
+
+  const campaignLive = isCampaignActive(cfg);
+  if (campaignLive) {
+    const c = cfg.campaign;
+    // Something has to be on screen. A heading or a picture is enough; neither
+    // means the website would render an empty band.
+    if (!c.heading && !c.media_url) add('campaign', 'heading', 'error', 'A campaign needs a heading or a picture — otherwise there is nothing to show.');
+    if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', 'That picture or video did not finish adding. Add it again.');
+    if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', 'No still image for the video. Visitors see a blank space until it loads.');
+    checkCta('campaign', c);
+  }
+
+  if (cfg.featured_edit.show) {
+    const f = cfg.featured_edit;
+    if (f.source_type === 'collection') {
+      const name = f.source_ref ? collectionNameById(f.source_ref) : null;
+      if (!f.source_ref) add('featured_edit', 'source_ref', 'error', 'Choose which collection these pieces come from.');
+      else if (!name) add('featured_edit', 'source_ref', 'error', 'That collection no longer exists.');
+      else if (!isCollectionLive(name)) add('featured_edit', 'source_ref', 'error', `“${name}” is hidden from the website, so this section would be empty.`);
+      else if (!resolveFeaturedProducts(cfg).length) add('featured_edit', 'source_ref', 'error', `Nothing in “${name}” is on the website yet, so this section would be empty.`);
+    }
+    if (f.source_type === 'products') {
+      if (!f.product_ids.length) add('featured_edit', 'product_ids', 'error', 'Choose the pieces for this section.');
+      else {
+        const usable = resolveFeaturedProducts(cfg).length;
+        if (!usable) add('featured_edit', 'product_ids', 'error', 'None of the chosen pieces are on the website, so this section would be empty.');
+        else if (usable < HOME_COUNT_MIN) add('featured_edit', 'product_ids', 'error', `Only ${usable} of the chosen pieces are on the website. At least ${HOME_COUNT_MIN} are needed.`);
+        else if (usable < f.count) add('featured_edit', 'count', 'warning', `You asked for ${f.count} but only ${usable} will show.`);
+      }
+    }
+    if (f.source_type === 'new_arrivals' && !resolveFeaturedProducts(cfg).length) {
+      add('featured_edit', 'source_type', 'error', 'No pieces are published to the website yet, so this section would be empty.');
+    }
+    checkCta('featured_edit', cfg.featured_edit);
+  }
+
+  if (cfg.new_arrivals.show && !inventory.filter(isWebsiteVisibleProduct).length) {
+    add('new_arrivals', 'show', 'error', 'No pieces are published to the website yet, so this section would be empty.');
+  }
+
+  // Both product sections on at once is allowed — a curated story above the
+  // automatic latest pieces is a real thing to want — but it is worth saying out
+  // loud, because the same piece can appear twice unless the overlap rule is on.
+  if (cfg.featured_edit.show && cfg.new_arrivals.show && !cfg.new_arrivals.exclude_featured) {
+    add('new_arrivals', 'exclude_featured', 'warning', 'Both product sections are on and repeats are allowed, so a piece can appear twice.');
+  }
+
+  return {
+    valid: !issues.some(i => i.severity === 'error'),
+    mode: campaignLive ? 'campaign' : 'default',
+    issues,
+  };
+}
+
+function homepageIssuesFor(section, cfg = getHomepageConfig()) {
+  return validateHomepageConfig(cfg).issues.filter(i => i.section === section);
+}
+
+// What a save would produce, validated before it is written. All saves are live
+// — there is no draft concept in this app and inventing one for three sections
+// would be more machinery than the problem deserves — so an enabled section has
+// to be correct before it can be stored.
+function validateSectionDraft(section, draft) {
+  const cfg = getHomepageConfig();
+  const next = normalizeHomepageConfig({ ...cfg, [section]: { ...cfg[section], ...draft } });
+  return { result: validateHomepageConfig(next), issues: homepageIssuesFor(section, next) };
+}
+
 // Every write goes through here: normalise, then store the whole object.
 async function saveHomepageConfig(block, patch) {
   const cfg = getHomepageConfig();
-  const next = normalizeHomepageConfig({ ...cfg, [block]: { ...cfg[block], ...patch } });
+  const rawBlock = (websiteSettings?.homepage_config || {})[block];
+  const merged = { ...cfg[block], ...patch };
+
+  // Whether a campaign is live is only ever an explicit decision — saving one
+  // from an editor, or Use Default Homepage. A `show` the stored config never
+  // actually had must not be carried in by this merge, or the very first save
+  // of a campaign would inherit the "no campaign yet" default and file a live
+  // campaign as inactive.
+  if (block === 'campaign' && !('show' in patch) && !(rawBlock && typeof rawBlock === 'object' && 'show' in rawBlock)) {
+    delete merged.show;
+  }
+
+  const next = normalizeHomepageConfig({ ...cfg, [block]: merged });
   await _persistWebsiteSettings({ homepage_config: next });
   return next;
 }
@@ -5272,20 +5484,6 @@ let _homeDraft = null;          // the block being edited
 let _homeEditingEditId = null;  // curated edit open in the editor
 let _homePickerCtx = null;      // where the product picker should hand its result
 
-function _homeCard(title, icon, body, onEdit, badge) {
-  return `<div class="card" style="margin-bottom:12px;padding:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:8px;min-width:0">
-        <i class="ti ${icon}" style="color:var(--burgundy);font-size:17px;flex-shrink:0"></i>
-        <span style="font-size:14px;font-weight:700;color:var(--ink)">${title}</span>
-        ${badge || ''}
-      </div>
-      <button onclick="${onEdit}" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px">Edit</button>
-    </div>
-    ${body}
-  </div>`;
-}
-
 function _homeRow(label, value) {
   return `<div style="display:flex;gap:10px;font-size:12px;line-height:1.6;padding:2px 0">
     <span style="width:104px;flex-shrink:0;color:var(--muted)">${label}</span>
@@ -5304,10 +5502,44 @@ function renderStorefrontHome() {
   if (!el) return;
   const cfg = getHomepageConfig();
   const c = cfg.campaign, f = cfg.featured_edit, n = cfg.new_arrivals;
+  const v = validateHomepageConfig(cfg);
+  const enabled = enabledHomepageSections(cfg);
 
   const notice = isHomepageUnconfigured()
     ? `<div style="font-size:12px;color:var(--muted);background:var(--sand-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.55">Nothing is set up yet, so the website homepage carries on exactly as it does today. Anything you set here replaces that piece of it.</div>`
     : '';
+
+  // ── What the website will show ──
+  const problems = v.issues.filter(i => i.severity === 'error');
+  const warnings = v.issues.filter(i => i.severity === 'warning');
+  const statusLine = v.mode === 'campaign'
+    ? '<span style="color:#1d5c3f;font-weight:600">A campaign is live on the website.</span>'
+    : '<span style="color:var(--ink);font-weight:600">Default homepage is showing.</span>' +
+      '<span style="color:var(--muted)"> No campaign is running.</span>';
+
+  const orderLine = enabled.length
+    ? enabled.map((k, i) => `<div style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--ink);padding:2px 0">
+         <span style="flex-shrink:0;width:18px;height:18px;border-radius:9px;background:var(--sand-light);color:var(--muted);font-size:10px;display:flex;align-items:center;justify-content:center">${i + 1}</span>
+         <span>${HOMEPAGE_SECTION_LABELS[k]}</span>
+       </div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted)">Nothing from here is switched on, so the website shows its usual homepage.</div>';
+
+  const issueList = problems.length
+    ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">` +
+      problems.map(i => `<div style="font-size:11px;color:#8a1f1f;line-height:1.5;padding:2px 0">${HOMEPAGE_SECTION_LABELS[i.section]}: ${_esc(i.message)}</div>`).join('') +
+      `</div>`
+    : (warnings.length
+        ? `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">` +
+          warnings.map(i => `<div style="font-size:11px;color:#7a4500;line-height:1.5;padding:2px 0">${HOMEPAGE_SECTION_LABELS[i.section]}: ${_esc(i.message)}</div>`).join('') +
+          `</div>`
+        : '');
+
+  const summary = `<div class="card" style="margin-bottom:14px;padding:14px">
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">What the website will show</div>
+    <div style="font-size:12px;line-height:1.6;margin-bottom:${enabled.length ? '8px' : '0'}">${statusLine}</div>
+    ${orderLine}
+    ${issueList}
+  </div>`;
 
   const featuredProducts = resolveFeaturedProducts(cfg);
   const sourceLabel = {
@@ -5316,7 +5548,14 @@ function renderStorefrontHome() {
     new_arrivals: 'Newest pieces',
   }[f.source_type];
 
-  const campaignBody =
+  const campaignActive = isCampaignActive(cfg);
+  const campaignBody = !campaignActive
+    ? `<div style="font-size:12px;color:var(--ink);line-height:1.6">The website is showing its usual homepage.</div>` +
+      (campaignHasContent(c)
+        ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">Your last campaign${c.heading ? ' — ' + _esc(c.heading) : ''} is kept and can be switched back on.</div>
+           <button onclick="reactivateCampaign()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use this campaign again</button>`
+        : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">No campaign has been set up yet.</div>`)
+    :
     _homeRow('Heading',  c.heading ? _esc(c.heading) : _homeMissing) +
     _homeRow('Look',     { default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[c.theme]) +
     _homeRow('Picture',  c.media_url
@@ -5326,9 +5565,11 @@ function renderStorefrontHome() {
       : _homeMissing) +
     _homeRow('Button',   c.cta_destination_type === 'none'
       ? '<span style="color:var(--muted)">No button</span>'
-      : `${_esc(c.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(c))}`);
+      : `${_esc(c.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(c))}`) +
+    `<button onclick="useDefaultHomepage()" style="margin-top:12px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use Default Homepage</button>`;
 
   const featuredBody =
+    `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Pieces you pick yourself, for a story you want to tell.</div>` +
     _homeRow('Heading', f.heading ? _esc(f.heading) : _homeMissing) +
     _homeRow('Pieces',  `${sourceLabel} · showing ${f.count}`) +
     _homeRow('Right now', featuredProducts.length
@@ -5339,9 +5580,50 @@ function renderStorefrontHome() {
       : `${_esc(f.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(f))}`);
 
   const newArrivalsBody =
+    `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Your newest pieces, kept up to date by the website on its own.</div>` +
     _homeRow('Heading', _esc(n.heading)) +
     _homeRow('Pieces',  `${n.count} newest`) +
     _homeRow('Overlap', n.exclude_featured ? 'Skips anything already featured above' : 'May repeat featured pieces');
+
+  // Section cards, in the operator's order, each carrying its position and the
+  // controls to move it. A section that is off keeps its place in this list so
+  // it can be positioned before being switched on, but it never occupies a
+  // position on the website.
+  const bodies  = { campaign: campaignBody, featured_edit: featuredBody, new_arrivals: newArrivalsBody };
+  const icons   = { campaign: 'ti-sparkles', featured_edit: 'ti-star', new_arrivals: 'ti-clock-plus' };
+  const editors = { campaign: 'openCampaignEditor()', featured_edit: 'openFeaturedEditEditor()', new_arrivals: 'openNewArrivalsEditor()' };
+
+  const sectionCards = cfg.section_order.map((key, i) => {
+    const on = isHomepageSectionEnabled(key, cfg);
+    const pos = on ? enabled.indexOf(key) + 1 : null;
+    const bad = homepageIssuesFor(key, cfg).filter(x => x.severity === 'error');
+    const badge = on
+      ? `<span style="font-size:10px;color:#1d5c3f;background:#e7f4ed;border-radius:10px;padding:2px 8px">${key === 'campaign' ? 'Live on Website' : 'Showing'} · ${pos}</span>`
+      : (key === 'campaign'
+          ? '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Default Homepage Active</span>'
+          : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Hidden</span>');
+
+    const problem = bad.length
+      ? `<div style="font-size:11px;color:#8a1f1f;line-height:1.5;margin-top:8px">${_esc(bad[0].message)}</div>`
+      : '';
+
+    return `<div class="card" style="margin-bottom:12px;padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
+          <i class="ti ${icons[key]}" style="color:var(--burgundy);font-size:17px;flex-shrink:0"></i>
+          <span style="font-size:14px;font-weight:700;color:var(--ink)">${HOMEPAGE_SECTION_LABELS[key]}</span>
+          ${badge}
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="moveHomepageSection('${key}', -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:32px;height:32px;opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-chevron-up"></i></button>
+          <button onclick="moveHomepageSection('${key}', 1)" ${i === cfg.section_order.length - 1 ? 'disabled' : ''} title="Move down" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:32px;height:32px;opacity:${i === cfg.section_order.length - 1 ? '.35' : '1'}"><i class="ti ti-chevron-down"></i></button>
+          <button onclick="${editors[key]}" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px">Edit</button>
+        </div>
+      </div>
+      ${bodies[key]}
+      ${problem}
+    </div>`;
+  }).join('');
 
   window._homeEditIds = curatedEdits.map(e => e.id);
   const editsList = curatedEdits.length
@@ -5358,10 +5640,7 @@ function renderStorefrontHome() {
       }).join('')
     : `<div style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:8px">No edits yet. An edit is a hand-picked group of pieces — “Eid Picks”, “Wedding Guest Edit” — that can come from any collection.</div>`;
 
-  el.innerHTML = notice +
-    _homeCard('Current Campaign', 'ti-sparkles', campaignBody, 'openCampaignEditor()') +
-    _homeCard('Featured Edit', 'ti-star', featuredBody, 'openFeaturedEditEditor()', _homeOnBadge(f.show)) +
-    _homeCard('New Arrivals', 'ti-clock-plus', newArrivalsBody, 'openNewArrivalsEditor()', _homeOnBadge(n.show)) +
+  el.innerHTML = notice + summary + sectionCards +
     `<div class="card" style="margin-bottom:12px;padding:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px"><i class="ti ti-list-details" style="color:var(--burgundy);font-size:17px"></i><span style="font-size:14px;font-weight:700;color:var(--ink)">Edits</span></div>
@@ -5466,6 +5745,7 @@ function renderCampaignEditor() {
     : '';
 
   el.innerHTML =
+    _homeIssueBanner('campaign', { ...d, show: true }) +
     `<div class="field-label">Heading</div>
      <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Eid, in colour"
        oninput="campaignSet('heading', this.value)" style="margin-bottom:10px">
@@ -5492,7 +5772,65 @@ function renderCampaignEditor() {
       ], d.theme, 'campaignSetTheme')}
      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Chooses the colours and mood the website already has ready. You are not picking colours yourself.</div>
 
-     ${_homeCtaBlock(d, 'campaign')}`;
+     ${_homeCtaBlock(d, 'campaign')}
+
+     ${d.show
+        ? `<div style="border-top:1px solid var(--border);padding-top:12px">
+             <button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;color:var(--ink)" onclick="useDefaultHomepage()">Use Default Homepage instead</button>
+             <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">Takes this campaign off the website and shows the usual homepage. Nothing here is deleted — you can switch it back on any time.</div>
+           </div>`
+        : `<div style="font-size:11px;color:#7a4500;background:#fff6e5;border-radius:8px;padding:10px 12px;line-height:1.55">The default homepage is showing. Saving here puts this campaign back on the website.</div>`}`;
+}
+
+// Turn the whole campaign off in one action. Nothing is deleted: every field
+// stays exactly where it was, so switching back on is one tap and not a re-entry
+// of heading, media and button. There is no campaign validation to satisfy here
+// — deactivating is not saving a campaign, so an incomplete one is no obstacle.
+async function useDefaultHomepage() {
+  if (_homeBusy) return;
+  if (!confirm('Use the default homepage instead of the current campaign?')) return;
+  _homeBusy = true;
+  try {
+    await saveHomepageConfig('campaign', { show: false });
+    closeSheet('homeCampaignSheet');
+    renderStorefrontHome();
+    showToast('Default homepage is showing ✓');
+  } catch (e) {
+    showToast('Could not switch: ' + e.message);
+  } finally { _homeBusy = false; }
+}
+
+async function reactivateCampaign() {
+  if (_homeBusy) return;
+  _homeBusy = true;
+  try {
+    await saveHomepageConfig('campaign', { show: true });
+    renderStorefrontHome();
+    showToast('Campaign is showing again ✓');
+  } catch (e) {
+    showToast('Could not switch: ' + e.message);
+  } finally { _homeBusy = false; }
+}
+
+// One place turns validation into what the operator sees. Each editor shows the
+// reasons its own section is not fit to be live, and Save refuses only while the
+// section is switched on — an incomplete section that is off is fine.
+function _homeIssueBanner(section, draft) {
+  const { issues } = validateSectionDraft(section, draft);
+  const errs = issues.filter(i => i.severity === 'error');
+  const warns = issues.filter(i => i.severity === 'warning');
+  if (!errs.length && !warns.length) return '';
+  const line = (i, colour, bg) => `<div style="font-size:11px;color:${colour};background:${bg};border-radius:8px;padding:9px 11px;line-height:1.5;margin-bottom:6px">${_esc(i.message)}</div>`;
+  return `<div style="margin-bottom:10px">` +
+    errs.map(i => line(i, '#8a1f1f', '#fdecea')).join('') +
+    warns.map(i => line(i, '#7a4500', '#fff6e5')).join('') + `</div>`;
+}
+
+function _homeBlockedBySection(section, draft, enabled) {
+  if (!enabled) return null;                       // a section that is off may be incomplete
+  const { issues } = validateSectionDraft(section, draft);
+  const err = issues.find(i => i.severity === 'error');
+  return err ? err.message : null;
 }
 
 function campaignSet(field, value) { _homeDraft[field] = value; }
@@ -5515,7 +5853,12 @@ async function saveCampaign(btn) {
   const html = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
   try {
-    await saveHomepageConfig('campaign', _homeDraft);
+    // Saving a campaign is how it is put on the website — an operator editing
+    // one while the default homepage is showing means to use it. Which is
+    // exactly why it has to be fit to be live before it can be saved.
+    const blocked = _homeBlockedBySection('campaign', { ..._homeDraft, show: true }, true);
+    if (blocked) { showToast(blocked); renderCampaignEditor(); return; }
+    await saveHomepageConfig('campaign', { ..._homeDraft, show: true });
     closeSheet('homeCampaignSheet');
     renderStorefrontHome();
     showToast('Campaign saved ✓');
@@ -5627,6 +5970,8 @@ function renderFeaturedEditEditor() {
   const preview = resolveFeaturedProducts({ ...getHomepageConfig(), featured_edit: normalizeHomepageConfig({ featured_edit: d }).featured_edit });
 
   el.innerHTML =
+    `<div style="font-size:11px;color:var(--muted);line-height:1.55;background:var(--sand-light);border-radius:8px;padding:9px 11px;margin-bottom:12px">Pieces you pick yourself, for a story you want to tell — an Eid selection, a wedding-guest edit. New Arrivals below is the automatic one.</div>` +
+    _homeIssueBanner('featured_edit', d) +
     _homeToggle('Show this section on the homepage', d.show, 'featuredSetShow') +
 
     `<div class="field-label">Heading</div>
@@ -5693,7 +6038,7 @@ function _moveInArray(arr, i, dir) {
 }
 
 function featuredSet(field, value) { _homeDraft[field] = value; }
-function featuredSetShow(on) { _homeDraft.show = on; }
+function featuredSetShow(on) { _homeDraft.show = on; renderFeaturedEditEditor(); }
 function featuredSetCount(v) { _homeDraft.count = Number(v); renderFeaturedEditEditor(); }
 function featuredSetSource(v) {
   _homeDraft.source_type = v;
@@ -5723,6 +6068,8 @@ async function saveFeaturedEdit(btn) {
   const html = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
   try {
+    const blocked = _homeBlockedBySection('featured_edit', _homeDraft, _homeDraft.show);
+    if (blocked) { showToast(blocked); renderFeaturedEditEditor(); return; }
     await saveHomepageConfig('featured_edit', _homeDraft);
     closeSheet('homeFeaturedSheet');
     renderStorefrontHome();
@@ -5748,6 +6095,8 @@ function renderNewArrivalsEditor() {
   const el = document.getElementById('homeNewArrivalsBody');
   if (!el || !d) return;
   el.innerHTML =
+    `<div style="font-size:11px;color:var(--muted);line-height:1.55;background:var(--sand-light);border-radius:8px;padding:9px 11px;margin-bottom:12px">Filled in automatically from your newest published pieces. Nothing to choose and nothing to keep up to date. The Featured Edit is the hand-picked one.</div>` +
+    _homeIssueBanner('new_arrivals', d) +
     _homeToggle('Show this section on the homepage', d.show, 'newArrivalsSetShow') +
     `<div class="field-label">Heading</div>
      <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="New Arrivals"
@@ -5760,7 +6109,7 @@ function renderNewArrivalsEditor() {
 }
 
 function newArrivalsSet(field, value) { _homeDraft[field] = value; }
-function newArrivalsSetShow(on) { _homeDraft.show = on; }
+function newArrivalsSetShow(on) { _homeDraft.show = on; renderNewArrivalsEditor(); }
 function newArrivalsSetExclude(on) { _homeDraft.exclude_featured = on; }
 function newArrivalsSetCount(v) { _homeDraft.count = Number(v); renderNewArrivalsEditor(); }
 
@@ -5770,6 +6119,8 @@ async function saveNewArrivals(btn) {
   const html = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
   try {
+    const blocked = _homeBlockedBySection('new_arrivals', _homeDraft, _homeDraft.show);
+    if (blocked) { showToast(blocked); renderNewArrivalsEditor(); return; }
     await saveHomepageConfig('new_arrivals', _homeDraft);
     closeSheet('homeNewArrivalsSheet');
     renderStorefrontHome();
