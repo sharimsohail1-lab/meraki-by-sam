@@ -1264,7 +1264,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         </div>
         <div id="websiteContent" style="display:none;margin-top:14px">
           <div style="font-size:11px;color:var(--muted);background:var(--sand-light);border-radius:6px;padding:8px 10px;margin-bottom:12px;line-height:1.5">
-            Website publishing controls are ready. Connecting the storefront is the next setup step, so publishing here does not change merakibysaima.com yet.
+            This is where merakibysaima.com is controlled. Changes saved here may take a few minutes to appear on the website.
           </div>
 
           <div class="field-label">Website address</div>
@@ -4364,13 +4364,28 @@ function renderProductCollectionVisibility(p) {
   el.innerHTML = names.map((n, i) => {
     const on = isMembershipPublic(p.id, n);
     const live = isCollectionLive(n);
-    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer">
+
+    // A ticked box on a hidden collection is the one state that can be
+    // misread. The tick is a saved preference, not a live state, so the row
+    // is greyed and says in words when it will take effect. The checkbox
+    // stays operable — the preference must remain editable while hidden.
+    const rowStyle = live
+      ? 'border:1px solid var(--border);background:#fff'
+      : 'border:1px dashed var(--border);background:var(--sand-light)';
+    const nameStyle = live ? 'color:var(--ink)' : 'color:var(--muted)';
+    const note = live ? '' :
+      `<div style="font-size:11px;color:#7a4500;line-height:1.5;margin:-2px 0 6px 27px">${
+        on ? `This piece is set to appear here when ${_esc(n)} is published.`
+           : `${_esc(n)} is hidden from the website, and this piece is set not to appear here even once it is published.`
+      }</div>`;
+
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 10px;${rowStyle};border-radius:8px;margin-bottom:${live ? '6px' : '4px'};cursor:pointer">
       <input type="checkbox" ${on ? 'checked' : ''}
         onchange="setMembershipWebsiteVisibility('${p.id}', window._collVisNames[${i}], this.checked)"
-        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0">
-      <span style="flex:1;min-width:0;font-size:13px;color:var(--ink);word-break:break-word">${_esc(n)}</span>
+        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0${live ? '' : ';opacity:.45'}">
+      <span style="flex:1;min-width:0;font-size:13px;${nameStyle};word-break:break-word">${_esc(n)}</span>
       ${live ? '' : '<span style="flex-shrink:0;font-size:10px;color:#7a4500;background:#fff6e5;border-radius:10px;padding:2px 8px">Collection hidden</span>'}
-    </label>`;
+    </label>${note}`;
   }).join('') +
   '<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">Tick where this piece should appear on the website. Unticking keeps it in the collection here, but hides it from that collection online.</div>';
 }
@@ -5188,7 +5203,7 @@ function renderWebsiteSection(p) {
     actions.innerHTML = primary('Publish to Website', 'publishProductToWebsite()', 'ti-world-upload');
   } else if (status === 'published') {
     actions.innerHTML =
-      `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px">Published in app · Website connection pending. Your edits stay on this product — nothing is copied, so the storefront will show current data once it is connected.</div>` +
+      `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px">Published in app. Website changes may take a few minutes to appear.</div>` +
       secondary('Hide from Website', 'hideProductFromWebsite()', 'ti-eye-off', 'var(--muted)');
   } else {
     actions.innerHTML =
