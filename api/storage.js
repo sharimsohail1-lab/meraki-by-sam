@@ -27,8 +27,13 @@ const BUCKET = 'product-images';
 //   products/{product_id}/{uuid}.{ext}             pre-rendition flat keys,
 //                                                  still accepted so existing
 //                                                  images can be deleted
+//   homepage/{uuid}/{media|poster}.{webp|mp4|webm}   homepage campaign media
+//
+// The homepage namespace exists because the campaign hero is not a product and
+// has no product id to file itself under. It is the same bucket, the same signed
+// upload, the same never-overwrite rule — only the prefix differs.
 const KEY_PATTERN =
-  /^products\/[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\/(?:master|560|960|1400)\.webp|[0-9a-z-]+\.(?:webp|jpg|jpeg|png))$/i;
+  /^(?:products\/[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\/(?:master|560|960|1400)\.webp|[0-9a-z-]+\.(?:webp|jpg|jpeg|png))|homepage\/[0-9a-f-]{36}\/(?:media|poster)\.(?:webp|jpg|jpeg|png|mp4|webm))$/i;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
@@ -63,7 +68,13 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'signUpload') {
-      if (contentType && !/^image\/(webp|jpeg|png)$/.test(contentType)) {
+      // Video is accepted only under the homepage namespace — a product image
+      // is always a still, and the key pattern already refuses a video
+      // extension there.
+      const allowedType = key.startsWith('homepage/')
+        ? /^(?:image\/(?:webp|jpeg|png)|video\/(?:mp4|webm))$/
+        : /^image\/(?:webp|jpeg|png)$/;
+      if (contentType && !allowedType.test(contentType)) {
         return res.status(400).json({ error: 'Unsupported content type' });
       }
       const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(key);

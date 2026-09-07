@@ -23,7 +23,13 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   website_settings: new Set([
     'id','featured_product_id','whatsapp','contact_email','instagram_url',
     'location_label','made_to_order_lead_time','size_service_note',
-    'inquiry_response_note','created_at','updated_at'
+    'inquiry_response_note','homepage_config','created_at','updated_at'
+  ]),
+  curated_edits: new Set([
+    'id','title','slug','subtitle','show_on_website','created_at','updated_at'
+  ]),
+  curated_edit_products: new Set([
+    'id','curated_edit_id','product_id','sort_order','created_at'
   ]),
   product_images: new Set([
     'id','product_id','storage_provider','storage_key','public_url','image_role',

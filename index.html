@@ -579,7 +579,16 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <button class="quick-btn" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-qaExhibition">Exhibition</span></button>
         <button class="quick-btn" onclick="generateWhatsAppCatalog()"><i class="ti ti-brand-whatsapp"></i><span id="t-qaWhatsapp">WhatsApp Catalog</span></button>
         <button class="quick-btn" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-qaPeople">Customers</span></button>
+        <button class="quick-btn" onclick="showScreen('storefront')"><i class="ti ti-layout-dashboard"></i><span>Website Home</span></button>
       </div>
+    </div>
+
+    <!-- STOREFRONT HOME (homepage merchandising) -->
+    <div id="screen-storefront" class="screen">
+      <p class="section-title" style="margin-bottom:4px">Website Home</p>
+      <div style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:14px">What people see first on merakibysaima.com. You choose what goes in each part — the website decides how it looks.</div>
+      <div id="storefrontBody"></div>
+      <div style="height:20px"></div>
     </div>
 
     <!-- INQUIRIES -->
@@ -914,13 +923,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
 
     <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Homepage</div>
-    <div class="field-label">Featured piece</div>
-    <div id="wsFeaturedDisplay" onclick="openFeaturedPicker()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:52px;margin-bottom:6px">
-      <div id="wsFeaturedThumb" style="flex-shrink:0"></div>
-      <span id="wsFeaturedLabel" style="flex:1;color:var(--muted);font-size:13px">Choose a piece</span>
-      <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+    <div onclick="closeSheet('websiteSettingsSheet');showScreen('storefront')" style="display:flex;align-items:center;gap:10px;padding:12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:6px">
+      <i class="ti ti-layout-dashboard" style="color:var(--burgundy);font-size:18px;flex-shrink:0"></i>
+      <span style="flex:1;font-size:13px;color:var(--ink)">Website Home</span>
+      <i class="ti ti-chevron-right" style="color:var(--muted)"></i>
     </div>
-    <div id="wsFeaturedNote" style="font-size:11px;color:var(--muted);margin-bottom:18px;line-height:1.5"></div>
+    <p style="font-size:11px;color:var(--muted);margin:2px 0 18px;line-height:1.5">The campaign, the featured pieces and the new arrivals shown on the front page.</p>
 
     <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;border-top:1px solid var(--border);padding-top:14px">Contact</div>
     <div class="field-label">WhatsApp</div>
@@ -953,6 +961,93 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
     <div id="wsStatus" style="display:none;font-size:12px;text-align:center;margin-bottom:8px"></div>
     <button class="btn btn-primary" id="wsSaveBtn" style="width:100%" onclick="saveWebsiteSettings(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<!-- HOME MERCHANDISING SHEETS -->
+<div class="sheet-overlay" id="homeCampaignSheet">
+  <div class="sheet" style="height:88vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-sparkles"></i> Current Campaign</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('homeCampaignSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The big picture and words at the very top of the homepage.</div>
+    <div id="homeCampaignBody"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveCampaign(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<input type="file" id="homeCampaignImageInput" accept="image/*" style="display:none" onchange="handleCampaignImage(this,'media')">
+<input type="file" id="homeCampaignPosterInput" accept="image/*" style="display:none" onchange="handleCampaignImage(this,'poster')">
+<input type="file" id="homeCampaignVideoInput" accept="video/mp4,video/webm" style="display:none" onchange="handleCampaignVideo(this)">
+
+<div class="sheet-overlay" id="homeFeaturedSheet">
+  <div class="sheet" style="height:88vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-star"></i> Featured Edit</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('homeFeaturedSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The group of pieces shown just under the campaign.</div>
+    <div id="homeFeaturedBody"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveFeaturedEdit(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="homeNewArrivalsSheet">
+  <div class="sheet" style="height:80vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-clock-plus"></i> New Arrivals</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('homeNewArrivalsSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">Your newest pieces, chosen by the website automatically.</div>
+    <div id="homeNewArrivalsBody"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveNewArrivals(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="curatedEditSheet">
+  <div class="sheet" style="height:88vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-list-details"></i> Edit</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('curatedEditSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">A hand-picked group of pieces with its own page. Pieces can come from any collection.</div>
+    <div id="curatedEditBody"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveCuratedEdit(this)"><i class="ti ti-device-floppy"></i> Save</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="homeProductPickerSheet">
+  <div class="sheet" style="height:88vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-hanger"></i> Choose pieces</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('homeProductPickerSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <input type="text" id="homeProductSearch" class="field-input" placeholder="Search by name or code" oninput="renderHomeProductPicker()" style="margin-bottom:12px">
+    <div id="homeProductPickerList"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="applyHomeProductPicker()">Done</button>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="homeCtaRefSheet">
+  <div class="sheet" style="height:70vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div id="homeCtaRefTitle" style="font-size:17px;font-weight:700;color:var(--burgundy)">Choose</div>
+      <button class="modal-close" style="position:static" onclick="closeSheet('homeCtaRefSheet')"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="homeCtaRefList"></div>
     <div style="height:20px"></div>
   </div>
 </div>
@@ -4454,7 +4549,7 @@ const WEBSITE_SETTINGS_ID = '00000000-0000-4000-8000-000000000001';
 
 const WEBSITE_SETTINGS_COLS =
   'id,featured_product_id,whatsapp,contact_email,instagram_url,location_label,' +
-  'made_to_order_lead_time,size_service_note,inquiry_response_note,updated_at';
+  'made_to_order_lead_time,size_service_note,inquiry_response_note,homepage_config,updated_at';
 
 let websiteSettings = null;
 
@@ -4469,6 +4564,7 @@ function _blankWebsiteSettings() {
     made_to_order_lead_time: null,
     size_service_note: null,
     inquiry_response_note: null,
+    homepage_config: {},
   };
 }
 
@@ -4775,6 +4871,1147 @@ async function saveWebsiteSettings(btn) {
     _wsBusy = false;
     if (btn) { btn.disabled = false; btn.innerHTML = label; }
   }
+}
+
+// ─── HOME MERCHANDISING ──────────────────────────────────────────────────────
+// What the storefront's front page shows. The app owns CONTENT — which campaign
+// is running, which pieces are featured, where the buttons go. The website owns
+// LAYOUT — order, type, spacing, card design, what a theme looks like. Nothing
+// here emits CSS, and no route string is ever stored: destinations are typed and
+// the website builds the URL from the entity, so renaming something cannot leave
+// a dead link behind in a saved setting.
+//
+// The configuration is one JSONB value on the website_settings row. /api/db
+// strips nulls from writes, so a per-column model could set a field but never
+// clear it — a whole-object write has no such hole. See migration 029.
+//
+// Curated edits are the exception and are real tables: they are named, slugged,
+// routable and ordered, and they deliberately cross collections.
+
+const HOMEPAGE_THEMES    = ['default', 'festive', 'bridal'];
+const HOMEPAGE_CTA_TYPES = ['none', 'collection', 'curated_edit', 'view_all'];
+const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
+const HOME_COUNT_MIN = 3;
+const HOME_COUNT_MAX = 8;
+
+const CURATED_EDIT_COLS = 'id,title,slug,subtitle,show_on_website,created_at,updated_at';
+const CURATED_EDIT_PRODUCT_COLS = 'id,curated_edit_id,product_id,sort_order,created_at';
+
+let curatedEdits = [];
+let curatedEditProducts = [];
+let homeMerchLoaded = false;
+
+// ── Configuration shape ─────────────────────────────────────────────────────
+// Normalised on read AND on write. A value that is not a known enum, an id that
+// is not a UUID, a count outside 3–8: all corrected here rather than trusted, so
+// neither a hand-edited row nor an older app version can hand the storefront
+// something it has to defend against.
+//
+// Cleared text is stored as null INSIDE the JSON object (the object is written
+// whole, so nulls survive here — it is only top-level column writes that /api/db
+// strips).
+
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function _homeText(v) {
+  const s = String(v == null ? '' : v).trim();
+  return s || null;
+}
+function _homeEnum(v, allowed, fallback) {
+  return allowed.includes(v) ? v : fallback;
+}
+function _homeCount(v, fallback = 4) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(HOME_COUNT_MAX, Math.max(HOME_COUNT_MIN, n));
+}
+function _homeBool(v, fallback) {
+  return typeof v === 'boolean' ? v : fallback;
+}
+function _homeId(v) {
+  return typeof v === 'string' && _UUID_RE.test(v) ? v : null;
+}
+
+// A CTA is a label plus a typed destination. The reference is dropped whenever
+// the type does not take one, so switching a button from a collection to View
+// All cannot leave the old collection id behind to be picked up later.
+function _normalizeCta(raw = {}) {
+  const type = _homeEnum(raw.cta_destination_type, HOMEPAGE_CTA_TYPES, 'none');
+  const takesRef = type === 'collection' || type === 'curated_edit';
+  return {
+    cta_label: type === 'none' ? null : _homeText(raw.cta_label),
+    cta_destination_type: type,
+    cta_destination_ref: takesRef ? _homeId(raw.cta_destination_ref) : null,
+  };
+}
+
+function _normalizeProductIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  raw.forEach(v => {
+    const id = _homeId(v);
+    if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+  });
+  return out;
+}
+
+function normalizeHomepageConfig(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const c = src.campaign || {};
+  const f = src.featured_edit || {};
+  const n = src.new_arrivals || {};
+
+  // media_type is only meaningful with a URL, and a poster only with a video.
+  const mediaUrl  = _homeText(c.media_url);
+  const mediaType = mediaUrl ? _homeEnum(c.media_type, ['image', 'video'], 'image') : null;
+
+  const sourceType = _homeEnum(f.source_type, FEATURED_SOURCES, 'new_arrivals');
+
+  return {
+    campaign: {
+      heading:          _homeText(c.heading),
+      subheading:       _homeText(c.subheading),
+      media_type:       mediaType,
+      media_url:        mediaUrl,
+      media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
+      theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
+      ..._normalizeCta(c),
+    },
+    featured_edit: {
+      show:        _homeBool(f.show, false),
+      heading:     _homeText(f.heading),
+      subtitle:    _homeText(f.subtitle),
+      source_type: sourceType,
+      // Only a collection source carries a source reference. Manual selection
+      // lives in product_ids, and new arrivals needs neither.
+      source_ref:  sourceType === 'collection' ? _homeId(f.source_ref) : null,
+      product_ids: sourceType === 'products' ? _normalizeProductIds(f.product_ids) : [],
+      count:       _homeCount(f.count),
+      ..._normalizeCta(f),
+    },
+    new_arrivals: {
+      show:             _homeBool(n.show, true),
+      heading:          _homeText(n.heading) || 'New Arrivals',
+      count:            _homeCount(n.count),
+      exclude_featured: _homeBool(n.exclude_featured, true),
+    },
+    // Customer Looks is not built in this phase. The key is reserved so adding
+    // it later is additive and the website can test for its absence today.
+    customer_looks: (src.customer_looks && typeof src.customer_looks === 'object')
+      ? src.customer_looks : null,
+  };
+}
+
+// True when nothing has ever been configured. The storefront's fallback signal:
+// an empty object means "keep doing exactly what you do today".
+function isHomepageUnconfigured() {
+  const raw = websiteSettings?.homepage_config;
+  return !raw || typeof raw !== 'object' || !Object.keys(raw).length;
+}
+
+function getHomepageConfig() {
+  return normalizeHomepageConfig(websiteSettings?.homepage_config);
+}
+
+// Every write goes through here: normalise, then store the whole object.
+async function saveHomepageConfig(block, patch) {
+  const cfg = getHomepageConfig();
+  const next = normalizeHomepageConfig({ ...cfg, [block]: { ...cfg[block], ...patch } });
+  await _persistWebsiteSettings({ homepage_config: next });
+  return next;
+}
+
+// ── Curated edits ───────────────────────────────────────────────────────────
+// Not collections. A collection is how Saima organises her stock, an edit is a
+// merchandising selection that may draw from several collections at once and
+// exists only to be pointed at from the homepage.
+
+async function loadCuratedEdits() {
+  try {
+    const [edits, links] = await Promise.all([
+      db('select', 'curated_edits', { columns: CURATED_EDIT_COLS }),
+      db('select', 'curated_edit_products', { columns: CURATED_EDIT_PRODUCT_COLS }),
+    ]);
+    curatedEdits = edits || [];
+    curatedEditProducts = links || [];
+    homeMerchLoaded = true;
+  } catch (e) {
+    // The tables may not exist yet on a database that has not run migration 029.
+    // The Home screen then shows no edits rather than failing to open.
+    console.warn('[home] curated edits unavailable:', e.message);
+    curatedEdits = [];
+    curatedEditProducts = [];
+    homeMerchLoaded = false;
+  }
+  return curatedEdits;
+}
+
+function curatedEditById(id) {
+  return curatedEdits.find(e => e.id === id) || null;
+}
+
+// Ordered product ids for one edit. sort_order is authoritative — insertion
+// order is not, because reordering rewrites sort_order without moving rows.
+function curatedEditProductIds(editId) {
+  return curatedEditProducts
+    .filter(l => l.curated_edit_id === editId)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+                    String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .map(l => l.product_id);
+}
+
+function curatedEditProductCount(editId) {
+  return curatedEditProducts.filter(l => l.curated_edit_id === editId).length;
+}
+
+// ── Curated edit slugs ──────────────────────────────────────────────────────
+// Generated once, on create, from the title. A later title change does NOT move
+// the slug: #/edit/eid-picks may already be in a WhatsApp message, an Instagram
+// bio or a customer's history, and silently repointing it breaks those links
+// with nothing to show for it. Renaming "Eid Picks" to "Eid Edit" changes the
+// heading everywhere and leaves the route alone, which is the safer default.
+//
+// The slug is editable, deliberately and explicitly, for the case where it is
+// genuinely wrong — and the app says plainly that old links will stop working.
+//
+// Its own namespace: #/edit/<slug> and #/collection/<slug> never collide, so an
+// edit may share a name with a collection.
+function _takenEditSlugs(excludeId) {
+  const taken = new Set();
+  curatedEdits.forEach(e => {
+    if (e.id === excludeId) return;
+    const s = (e.slug || '').trim();
+    if (s) taken.add(s);
+  });
+  return taken;
+}
+
+// Apostrophes are removed rather than turned into a separator, so
+// "Saima's Favorites" becomes saimas-favorites and not saima-s-favorites.
+// Product slugs are left alone: theirs are already allocated and stable, and
+// changing that rule would move existing routes.
+function _editSlugBase(title) {
+  return slugifyName(String(title == null ? '' : title).replace(/['\u2019]/g, ''));
+}
+
+function allocateCuratedEditSlug(title, excludeId = null, extraTaken = []) {
+  const base = _editSlugBase(title) || 'edit';
+  const taken = _takenEditSlugs(excludeId);
+  extraTaken.forEach(s => taken.add(s));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// Insert, retrying on a unique violation. Two devices creating "Eid Picks" at
+// the same moment both compute "eid-picks" locally — the database refuses the
+// second, and the retry sees the refusal and moves on to eid-picks-2.
+async function createCuratedEdit(title, subtitle = null) {
+  const clean = _homeText(title);
+  if (!clean) throw new Error('An edit needs a name.');
+  const refused = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const slug = allocateCuratedEditSlug(clean, null, refused);
+    try {
+      const rows = await db('insert', 'curated_edits', {
+        data: { title: clean, slug, subtitle: subtitle || '', show_on_website: true },
+      });
+      const row = rows?.[0];
+      if (row) curatedEdits.push(row);
+      return row;
+    } catch (e) {
+      if (e?.code !== '23505') throw e;
+      refused.push(slug);
+    }
+  }
+  throw new Error('Could not find a free web address for that name.');
+}
+
+// Blank text is written as an empty string rather than null: /api/db strips
+// nulls from updates, so a null would leave the old subtitle in place.
+async function updateCuratedEdit(id, patch) {
+  const data = { ...patch, updated_at: new Date().toISOString() };
+  if ('title' in data)    data.title    = _homeText(data.title) || 'Untitled edit';
+  if ('subtitle' in data) data.subtitle = _homeText(data.subtitle) || '';
+  if ('slug' in data)     data.slug     = _editSlugBase(data.slug) || undefined;
+  await db('update', 'curated_edits', { id, data });
+  const i = curatedEdits.findIndex(e => e.id === id);
+  if (i >= 0) curatedEdits[i] = { ...curatedEdits[i], ...data };
+  return curatedEdits[i];
+}
+
+async function deleteCuratedEdit(id) {
+  await db('delete', 'curated_edits', { id });
+  curatedEdits = curatedEdits.filter(e => e.id !== id);
+  curatedEditProducts = curatedEditProducts.filter(l => l.curated_edit_id !== id);
+
+  // A homepage that pointed at this edit would otherwise point at nothing. The
+  // reference is cleared here because the target is genuinely gone — this is
+  // not the same as a product merely being unpublished, which is left alone.
+  const cfg = getHomepageConfig();
+  const patch = {};
+  if (cfg.campaign.cta_destination_type === 'curated_edit' && cfg.campaign.cta_destination_ref === id) {
+    patch.campaign = { cta_destination_type: 'none', cta_destination_ref: null, cta_label: null };
+  }
+  if (cfg.featured_edit.cta_destination_type === 'curated_edit' && cfg.featured_edit.cta_destination_ref === id) {
+    patch.featured_edit = { cta_destination_type: 'none', cta_destination_ref: null, cta_label: null };
+  }
+  for (const [block, p] of Object.entries(patch)) await saveHomepageConfig(block, p);
+}
+
+// Reconciles one edit's product list to exactly `ids`, in that order.
+// Rows that stay are only touched when their position actually changed.
+async function setCuratedEditProducts(editId, ids) {
+  const wanted = _normalizeProductIds(ids);
+  const existing = curatedEditProducts.filter(l => l.curated_edit_id === editId);
+
+  for (const row of existing) {
+    if (!wanted.includes(row.product_id)) {
+      await db('delete', 'curated_edit_products', { id: row.id });
+      curatedEditProducts = curatedEditProducts.filter(l => l.id !== row.id);
+    }
+  }
+  for (let i = 0; i < wanted.length; i++) {
+    const pid = wanted[i];
+    const row = curatedEditProducts.find(l => l.curated_edit_id === editId && l.product_id === pid);
+    if (row) {
+      if ((row.sort_order ?? 0) !== i) {
+        await db('update', 'curated_edit_products', { id: row.id, data: { sort_order: i } });
+        row.sort_order = i;
+      }
+    } else {
+      try {
+        const created = await db('insert', 'curated_edit_products', {
+          data: { curated_edit_id: editId, product_id: pid, sort_order: i },
+        });
+        if (created?.[0]) curatedEditProducts.push(created[0]);
+      } catch (e) {
+        // The unique index refused a duplicate — another device added the same
+        // piece. Nothing to do: it is already in the edit.
+        if (e?.code !== '23505') throw e;
+      }
+    }
+  }
+  return curatedEditProductIds(editId);
+}
+
+// ── Resolving what the website will show ────────────────────────────────────
+// The app's own preview only. The website does its own resolution from the
+// contract — this is here so Saima can see the consequence of a choice before
+// she leaves the screen.
+
+function isWebsiteVisibleProduct(p) {
+  return !!p && !p.is_archived && websiteStatus(p) === 'published';
+}
+
+function homeProductById(id) {
+  return inventory.find(p => p.id === id) || null;
+}
+
+// Live collections, as records. A name with no record yet is still live — the
+// same rule the rest of the app uses.
+function liveCollectionOptions() {
+  return allCollectionNames()
+    .filter(n => isCollectionLive(n))
+    .map(n => ({ name: n, id: (collectionByName(n) || {}).id || null }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function collectionNameById(id) {
+  const c = collections.find(x => x.id === id);
+  return c ? c.name : null;
+}
+
+// One line describing where a button goes, in Saima's words rather than a route.
+function describeCtaDestination(cta) {
+  switch (cta.cta_destination_type) {
+    case 'collection': {
+      const name = collectionNameById(cta.cta_destination_ref);
+      return name ? `the ${name} collection` : 'a collection that no longer exists';
+    }
+    case 'curated_edit': {
+      const e = curatedEditById(cta.cta_destination_ref);
+      return e ? `the ${e.title} edit` : 'an edit that no longer exists';
+    }
+    case 'view_all': return 'the full collection page';
+    default: return 'nowhere — no button';
+  }
+}
+
+// The pieces the featured edit will actually render, as far as the app can tell.
+// Deliberately does not rewrite anything: an unavailable piece is skipped here
+// and stays in the saved configuration, because unpublishing is reversible.
+function resolveFeaturedProducts(cfg = getHomepageConfig()) {
+  const f = cfg.featured_edit;
+  let pool;
+  if (f.source_type === 'products') {
+    pool = f.product_ids.map(homeProductById).filter(isWebsiteVisibleProduct);
+  } else if (f.source_type === 'collection') {
+    const name = collectionNameById(f.source_ref);
+    pool = name
+      ? inventory.filter(p => isWebsiteVisibleProduct(p) &&
+          getProductCollections(p).includes(name) && isMembershipPublic(p.id, name))
+      : [];
+  } else {
+    pool = inventory.filter(isWebsiteVisibleProduct)
+      .sort((a, b) => String(b.website_published_at || b.created_at || '')
+        .localeCompare(String(a.website_published_at || a.created_at || '')));
+  }
+  return pool.slice(0, f.count);
+}
+
+// ── Home merchandising UI ───────────────────────────────────────────────────
+// One screen that answers "what is on my front page right now", four editors
+// behind it. Every editor holds a draft and saves on Save — nothing is written
+// as Saima types, so backing out of a sheet changes nothing.
+
+let _homeBusy = false;
+let _homeDraft = null;          // the block being edited
+let _homeEditingEditId = null;  // curated edit open in the editor
+let _homePickerCtx = null;      // where the product picker should hand its result
+
+function _homeCard(title, icon, body, onEdit, badge) {
+  return `<div class="card" style="margin-bottom:12px;padding:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <i class="ti ${icon}" style="color:var(--burgundy);font-size:17px;flex-shrink:0"></i>
+        <span style="font-size:14px;font-weight:700;color:var(--ink)">${title}</span>
+        ${badge || ''}
+      </div>
+      <button onclick="${onEdit}" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px">Edit</button>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function _homeRow(label, value) {
+  return `<div style="display:flex;gap:10px;font-size:12px;line-height:1.6;padding:2px 0">
+    <span style="width:104px;flex-shrink:0;color:var(--muted)">${label}</span>
+    <span style="flex:1;min-width:0;color:var(--ink);word-break:break-word">${value}</span>
+  </div>`;
+}
+
+const _homeOnBadge = on => on
+  ? '<span style="font-size:10px;color:#1d5c3f;background:#e7f4ed;border-radius:10px;padding:2px 8px">Showing</span>'
+  : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Hidden</span>';
+
+const _homeMissing = '<span style="color:var(--muted)">Not set</span>';
+
+function renderStorefrontHome() {
+  const el = document.getElementById('storefrontBody');
+  if (!el) return;
+  const cfg = getHomepageConfig();
+  const c = cfg.campaign, f = cfg.featured_edit, n = cfg.new_arrivals;
+
+  const notice = isHomepageUnconfigured()
+    ? `<div style="font-size:12px;color:var(--muted);background:var(--sand-light);border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.55">Nothing is set up yet, so the website homepage carries on exactly as it does today. Anything you set here replaces that piece of it.</div>`
+    : '';
+
+  const featuredProducts = resolveFeaturedProducts(cfg);
+  const sourceLabel = {
+    collection:   'A collection',
+    products:     'Pieces you choose',
+    new_arrivals: 'Newest pieces',
+  }[f.source_type];
+
+  const campaignBody =
+    _homeRow('Heading',  c.heading ? _esc(c.heading) : _homeMissing) +
+    _homeRow('Look',     { default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[c.theme]) +
+    _homeRow('Picture',  c.media_url
+      ? (c.media_type === 'video'
+          ? 'A video' + (c.media_poster_url ? ' with a still' : ' — no still image set')
+          : 'An image')
+      : _homeMissing) +
+    _homeRow('Button',   c.cta_destination_type === 'none'
+      ? '<span style="color:var(--muted)">No button</span>'
+      : `${_esc(c.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(c))}`);
+
+  const featuredBody =
+    _homeRow('Heading', f.heading ? _esc(f.heading) : _homeMissing) +
+    _homeRow('Pieces',  `${sourceLabel} · showing ${f.count}`) +
+    _homeRow('Right now', featuredProducts.length
+      ? _esc(featuredProducts.map(p => p.name).join(', '))
+      : '<span style="color:#7a4500">Nothing is eligible yet</span>') +
+    _homeRow('Button',  f.cta_destination_type === 'none'
+      ? '<span style="color:var(--muted)">No button</span>'
+      : `${_esc(f.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(f))}`);
+
+  const newArrivalsBody =
+    _homeRow('Heading', _esc(n.heading)) +
+    _homeRow('Pieces',  `${n.count} newest`) +
+    _homeRow('Overlap', n.exclude_featured ? 'Skips anything already featured above' : 'May repeat featured pieces');
+
+  window._homeEditIds = curatedEdits.map(e => e.id);
+  const editsList = curatedEdits.length
+    ? curatedEdits.map((e, i) => {
+        const count = curatedEditProductCount(e.id);
+        return `<div onclick="openCuratedEditor(window._homeEditIds[${i}])" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:var(--ink);word-break:break-word">${_esc(e.title)}</div>
+            <div style="font-size:11px;color:var(--muted)">${count} piece${count === 1 ? '' : 's'} · /edit/${_esc(e.slug)}</div>
+          </div>
+          ${_homeOnBadge(e.show_on_website !== false)}
+          <i class="ti ti-chevron-right" style="color:var(--muted);flex-shrink:0"></i>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:8px">No edits yet. An edit is a hand-picked group of pieces — “Eid Picks”, “Wedding Guest Edit” — that can come from any collection.</div>`;
+
+  el.innerHTML = notice +
+    _homeCard('Current Campaign', 'ti-sparkles', campaignBody, 'openCampaignEditor()') +
+    _homeCard('Featured Edit', 'ti-star', featuredBody, 'openFeaturedEditEditor()', _homeOnBadge(f.show)) +
+    _homeCard('New Arrivals', 'ti-clock-plus', newArrivalsBody, 'openNewArrivalsEditor()', _homeOnBadge(n.show)) +
+    `<div class="card" style="margin-bottom:12px;padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px"><i class="ti ti-list-details" style="color:var(--burgundy);font-size:17px"></i><span style="font-size:14px;font-weight:700;color:var(--ink)">Edits</span></div>
+        <button onclick="openCuratedEditor(null)" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px"><i class="ti ti-plus"></i> New</button>
+      </div>
+      ${editsList}
+    </div>` +
+    `<div class="card" style="padding:14px;opacity:.6">
+      <div style="display:flex;align-items:center;gap:8px"><i class="ti ti-camera-heart" style="color:var(--muted);font-size:17px"></i><span style="font-size:14px;font-weight:700;color:var(--ink)">Customer Looks</span></div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px">Photos of customers in their pieces. Coming in a later step — the website leaves this section out until then.</div>
+    </div>`;
+}
+
+async function openStorefrontHome() {
+  showScreen('storefront');
+}
+
+// ── Shared controls ─────────────────────────────────────────────────────────
+
+function _homePills(options, current, handler) {
+  return `<div class="tab-pills">` + options.map(o =>
+    `<button class="tab-pill ${o.value === current ? 'active' : ''}" onclick="${handler}('${o.value}')">${_esc(o.label)}</button>`
+  ).join('') + `</div>`;
+}
+
+function _homeCountPills(current, handler) {
+  const out = [];
+  for (let i = HOME_COUNT_MIN; i <= HOME_COUNT_MAX; i++) out.push({ value: String(i), label: String(i) });
+  return _homePills(out, String(current), handler);
+}
+
+function _homeToggle(label, on, handler, hint) {
+  return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:${hint ? '4px' : '12px'};cursor:pointer">
+    <input type="checkbox" ${on ? 'checked' : ''} onchange="${handler}(this.checked)" style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0">
+    <span style="flex:1;font-size:13px;color:var(--ink)">${_esc(label)}</span>
+  </label>` + (hint ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">${hint}</div>` : '');
+}
+
+// The CTA editor. Type first, then a destination only where one is meaningful.
+function _homeCtaBlock(cta, prefix) {
+  const typeOptions = [
+    { value: 'none',         label: 'No button' },
+    { value: 'collection',   label: 'A collection' },
+    { value: 'curated_edit', label: 'An edit' },
+    { value: 'view_all',     label: 'Everything' },
+  ];
+  const needsRef = cta.cta_destination_type === 'collection' || cta.cta_destination_type === 'curated_edit';
+  const refRow = needsRef
+    ? `<div onclick="${prefix}OpenCtaRef()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:46px;margin-bottom:6px">
+        <span style="flex:1;font-size:13px;color:${cta.cta_destination_ref ? 'var(--ink)' : 'var(--muted)'}">${
+          cta.cta_destination_ref
+            ? _esc(cta.cta_destination_type === 'collection'
+                ? (collectionNameById(cta.cta_destination_ref) || 'No longer available')
+                : ((curatedEditById(cta.cta_destination_ref) || {}).title || 'No longer available'))
+            : (cta.cta_destination_type === 'collection' ? 'Choose a collection' : 'Choose an edit')
+        }</span>
+        <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+      </div>`
+    : '';
+
+  const labelRow = cta.cta_destination_type === 'none' ? '' :
+    `<div class="field-label">Button text</div>
+     <input type="text" class="field-input" value="${_esc(cta.cta_label || '')}" placeholder="e.g. Shop Eid Picks"
+       oninput="${prefix}SetCtaLabel(this.value)" style="margin-bottom:8px">`;
+
+  return `<div class="field-label">Button goes to</div>
+    ${_homePills(typeOptions, cta.cta_destination_type, prefix + 'SetCtaType')}
+    ${refRow}${labelRow}
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.</div>`;
+}
+
+// ── Campaign editor ─────────────────────────────────────────────────────────
+
+function openCampaignEditor() {
+  _homeDraft = { ...getHomepageConfig().campaign };
+  renderCampaignEditor();
+  openSheet('homeCampaignSheet');
+}
+
+function renderCampaignEditor() {
+  const d = _homeDraft;
+  const el = document.getElementById('homeCampaignBody');
+  if (!el || !d) return;
+
+  const media = d.media_url
+    ? `<div style="display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:8px">
+        ${d.media_type === 'video'
+          ? (d.media_poster_url
+              ? `<img src="${_esc(d.media_poster_url)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0">`
+              : `<div style="width:52px;height:52px;border-radius:6px;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light);flex-shrink:0"><i class="ti ti-video"></i></div>`)
+          : `<img src="${_esc(d.media_url)}" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0">`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--ink)">${d.media_type === 'video' ? 'Video' : 'Image'}</div>
+          <div style="font-size:11px;color:var(--muted)">${d.media_type === 'video' && !d.media_poster_url ? 'No still image — add one so something shows while it loads' : 'Ready'}</div>
+        </div>
+        <button onclick="campaignClearMedia()" style="flex-shrink:0;background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:6px">Remove</button>
+      </div>`
+    : '';
+
+  const posterBtn = d.media_type === 'video'
+    ? `<button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;margin-bottom:8px" onclick="document.getElementById('homeCampaignPosterInput').click()"><i class="ti ti-photo"></i> ${d.media_poster_url ? 'Replace still image' : 'Add still image'}</button>`
+    : '';
+
+  el.innerHTML =
+    `<div class="field-label">Heading</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Eid, in colour"
+       oninput="campaignSet('heading', this.value)" style="margin-bottom:10px">
+
+     <div class="field-label">Under the heading</div>
+     <input type="text" class="field-input" value="${_esc(d.subheading || '')}" placeholder="e.g. Hand-finished pieces for the season"
+       oninput="campaignSet('subheading', this.value)" style="margin-bottom:14px">
+
+     <div class="field-label">Picture or video</div>
+     ${media}
+     <div id="homeCampaignUploadStatus" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
+     <div style="display:flex;gap:8px;margin-bottom:8px">
+       <button class="btn" style="flex:1;background:#fff;border:1px solid var(--border);font-size:12px" onclick="document.getElementById('homeCampaignImageInput').click()"><i class="ti ti-photo"></i> Image</button>
+       <button class="btn" style="flex:1;background:#fff;border:1px solid var(--border);font-size:12px" onclick="document.getElementById('homeCampaignVideoInput').click()"><i class="ti ti-video"></i> Video</button>
+     </div>
+     ${posterBtn}
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Landscape works best. Videos should be short and silent — the website plays them without sound.</div>
+
+     <div class="field-label">Look</div>
+     ${_homePills([
+        { value: 'default', label: 'Everyday' },
+        { value: 'festive', label: 'Festive' },
+        { value: 'bridal',  label: 'Bridal' },
+      ], d.theme, 'campaignSetTheme')}
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Chooses the colours and mood the website already has ready. You are not picking colours yourself.</div>
+
+     ${_homeCtaBlock(d, 'campaign')}`;
+}
+
+function campaignSet(field, value) { _homeDraft[field] = value; }
+function campaignSetTheme(v) { _homeDraft.theme = v; renderCampaignEditor(); }
+function campaignSetCtaType(v) {
+  _homeDraft.cta_destination_type = v;
+  if (v !== 'collection' && v !== 'curated_edit') _homeDraft.cta_destination_ref = null;
+  renderCampaignEditor();
+}
+function campaignSetCtaLabel(v) { _homeDraft.cta_label = v; }
+function campaignOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'campaign'); }
+function campaignClearMedia() {
+  _homeDraft.media_url = null; _homeDraft.media_type = null; _homeDraft.media_poster_url = null;
+  renderCampaignEditor();
+}
+
+async function saveCampaign(btn) {
+  if (_homeBusy) return;
+  _homeBusy = true;
+  const html = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    await saveHomepageConfig('campaign', _homeDraft);
+    closeSheet('homeCampaignSheet');
+    renderStorefrontHome();
+    showToast('Campaign saved ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally {
+    _homeBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+
+// ── Campaign media upload ───────────────────────────────────────────────────
+// Same bucket, same signed upload, same never-overwrite rule as product images.
+// Only the key prefix differs, because a campaign hero has no product to file
+// itself under. Images go through the app's existing compression; a video is
+// uploaded as-is, since a browser cannot re-encode one usefully.
+
+const HOME_VIDEO_MAX_BYTES = 20 * 1024 * 1024;
+
+function _homeMediaNamespace() { return `homepage/${_uuid()}`; }
+
+function _homeUploadStatus(msg) {
+  const el = document.getElementById('homeCampaignUploadStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+async function handleCampaignImage(input, role = 'media') {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  _homeUploadStatus('Preparing image…');
+  try {
+    const prepared = await preparePersistentImage(file);
+    const key = `${_homeMediaNamespace()}/${role}.webp`;
+    _homeUploadStatus('Uploading…');
+    const { publicUrl } = await uploadImage({ blob: prepared.blob, key, contentType: prepared.mimeType });
+    if (role === 'poster') {
+      _homeDraft.media_poster_url = publicUrl;
+    } else {
+      _homeDraft.media_url = publicUrl;
+      _homeDraft.media_type = 'image';
+      _homeDraft.media_poster_url = null;
+    }
+    _homeUploadStatus('');
+    renderCampaignEditor();
+  } catch (e) {
+    _homeUploadStatus('');
+    showToast('Could not add that image: ' + e.message);
+  }
+}
+
+async function handleCampaignVideo(input) {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (file.size > HOME_VIDEO_MAX_BYTES) {
+    showToast(`That video is ${Math.round(file.size / 1024 / 1024)} MB. Keep it under ${HOME_VIDEO_MAX_BYTES / 1024 / 1024} MB.`);
+    return;
+  }
+  const ext = /webm/.test(file.type) ? 'webm' : 'mp4';
+  const type = ext === 'webm' ? 'video/webm' : 'video/mp4';
+  _homeUploadStatus('Uploading video…');
+  try {
+    const key = `${_homeMediaNamespace()}/media.${ext}`;
+    const { publicUrl } = await uploadImage({ blob: file, key, contentType: type });
+    _homeDraft.media_url = publicUrl;
+    _homeDraft.media_type = 'video';
+    _homeUploadStatus('');
+    renderCampaignEditor();
+  } catch (e) {
+    _homeUploadStatus('');
+    showToast('Could not add that video: ' + e.message);
+  }
+}
+
+// ── Featured Edit editor ────────────────────────────────────────────────────
+
+function openFeaturedEditEditor() {
+  _homeDraft = { ...getHomepageConfig().featured_edit };
+  renderFeaturedEditEditor();
+  openSheet('homeFeaturedSheet');
+}
+
+function renderFeaturedEditEditor() {
+  const d = _homeDraft;
+  const el = document.getElementById('homeFeaturedBody');
+  if (!el || !d) return;
+
+  let sourceControl = '';
+  if (d.source_type === 'collection') {
+    const name = collectionNameById(d.source_ref);
+    sourceControl = `<div onclick="featuredOpenCollectionPicker()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:46px;margin-bottom:6px">
+        <span style="flex:1;font-size:13px;color:${name ? 'var(--ink)' : 'var(--muted)'}">${name ? _esc(name) : 'Choose a collection'}</span>
+        <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The website takes the newest pieces from this collection. You do not need to pick them one by one.</div>`;
+  } else if (d.source_type === 'products') {
+    sourceControl = _homeOrderedProductList(d.product_ids, 'featured') +
+      `<button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;margin-bottom:6px" onclick="featuredOpenProductPicker()"><i class="ti ti-plus"></i> Choose pieces</button>` +
+      (d.product_ids.length && d.product_ids.length < d.count
+        ? `<div style="font-size:11px;color:#7a4500;line-height:1.5;margin-bottom:14px">You have chosen ${d.product_ids.length} but asked for ${d.count}. Only ${d.product_ids.length} will show.</div>`
+        : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The order here is the order on the website. Drag is not needed — use the arrows.</div>`);
+  } else {
+    sourceControl = `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The website uses your newest published pieces. Nothing to choose.</div>`;
+  }
+
+  const preview = resolveFeaturedProducts({ ...getHomepageConfig(), featured_edit: normalizeHomepageConfig({ featured_edit: d }).featured_edit });
+
+  el.innerHTML =
+    _homeToggle('Show this section on the homepage', d.show, 'featuredSetShow') +
+
+    `<div class="field-label">Heading</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Our Eid Picks"
+       oninput="featuredSet('heading', this.value)" style="margin-bottom:10px">
+
+     <div class="field-label">Under the heading</div>
+     <input type="text" class="field-input" value="${_esc(d.subtitle || '')}" placeholder="Optional"
+       oninput="featuredSet('subtitle', this.value)" style="margin-bottom:14px">
+
+     <div class="field-label">Which pieces</div>
+     ${_homePills([
+        { value: 'products',     label: 'Pieces I choose' },
+        { value: 'collection',   label: 'A collection' },
+        { value: 'new_arrivals', label: 'Newest pieces' },
+      ], d.source_type, 'featuredSetSource')}
+     ${sourceControl}
+
+     <div class="field-label">How many to show</div>
+     ${_homeCountPills(d.count, 'featuredSetCount')}
+
+     ${_homeCtaBlock(d, 'featured')}
+
+     <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:6px;border-top:1px solid var(--border);padding-top:12px">What the website will show</div>
+     <div style="font-size:12px;color:var(--ink);line-height:1.6;margin-bottom:14px">${
+       preview.length ? _esc(preview.map(p => p.name).join(', '))
+                      : '<span style="color:#7a4500">Nothing yet — the pieces you chose are not on the website.</span>'
+     }</div>`;
+}
+
+// The ordered list. Arrows rather than drag: this is a phone, the lists are
+// short, and a drag target small enough to fit is a target too small to hit.
+function _homeOrderedProductList(ids, prefix) {
+  if (!ids.length) {
+    return `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">No pieces chosen yet.</div>`;
+  }
+  window['_' + prefix + 'OrderIds'] = ids;
+  return ids.map((id, i) => {
+    const p = homeProductById(id);
+    const src = p ? productImageSrc(p) : null;
+    const gone = !p;
+    const hidden = p && !isWebsiteVisibleProduct(p);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px">
+      ${src ? `<img src="${_esc(src)}" alt="" loading="lazy" style="width:34px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0">`
+            : `<div style="width:34px;height:44px;border-radius:5px;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light);flex-shrink:0"><i class="ti ti-hanger" style="font-size:14px"></i></div>`}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--ink);word-break:break-word">${_esc(p ? p.name : 'A piece that no longer exists')}</div>
+        ${gone ? '<div style="font-size:11px;color:#7a4500">Removed from your stock</div>'
+               : (hidden ? '<div style="font-size:11px;color:#7a4500">Not on the website, so it will be skipped</div>' : '')}
+      </div>
+      <button onclick="${prefix}MoveProduct(${i}, -1)" ${i === 0 ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:30px;height:30px;opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-chevron-up"></i></button>
+      <button onclick="${prefix}MoveProduct(${i}, 1)" ${i === ids.length - 1 ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:30px;height:30px;opacity:${i === ids.length - 1 ? '.35' : '1'}"><i class="ti ti-chevron-down"></i></button>
+      <button onclick="${prefix}RemoveProduct(${i})" style="flex-shrink:0;background:none;border:none;color:var(--muted);cursor:pointer;width:28px;height:30px"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+}
+
+function _moveInArray(arr, i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return arr;
+  const copy = arr.slice();
+  [copy[i], copy[j]] = [copy[j], copy[i]];
+  return copy;
+}
+
+function featuredSet(field, value) { _homeDraft[field] = value; }
+function featuredSetShow(on) { _homeDraft.show = on; }
+function featuredSetCount(v) { _homeDraft.count = Number(v); renderFeaturedEditEditor(); }
+function featuredSetSource(v) {
+  _homeDraft.source_type = v;
+  if (v !== 'collection') _homeDraft.source_ref = null;
+  if (v !== 'products') _homeDraft.product_ids = [];
+  renderFeaturedEditEditor();
+}
+function featuredSetCtaType(v) {
+  _homeDraft.cta_destination_type = v;
+  if (v !== 'collection' && v !== 'curated_edit') _homeDraft.cta_destination_ref = null;
+  renderFeaturedEditEditor();
+}
+function featuredSetCtaLabel(v) { _homeDraft.cta_label = v; }
+function featuredOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'featured'); }
+function featuredMoveProduct(i, dir) { _homeDraft.product_ids = _moveInArray(_homeDraft.product_ids, i, dir); renderFeaturedEditEditor(); }
+function featuredRemoveProduct(i) { _homeDraft.product_ids = _homeDraft.product_ids.filter((_, k) => k !== i); renderFeaturedEditEditor(); }
+function featuredOpenProductPicker() {
+  openHomeProductPicker(_homeDraft.product_ids, ids => { _homeDraft.product_ids = ids; renderFeaturedEditEditor(); });
+}
+function featuredOpenCollectionPicker() {
+  openHomeCtaRefPicker('collection', 'featured_source');
+}
+
+async function saveFeaturedEdit(btn) {
+  if (_homeBusy) return;
+  _homeBusy = true;
+  const html = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    await saveHomepageConfig('featured_edit', _homeDraft);
+    closeSheet('homeFeaturedSheet');
+    renderStorefrontHome();
+    showToast('Featured edit saved ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally {
+    _homeBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+
+// ── New Arrivals editor ─────────────────────────────────────────────────────
+
+function openNewArrivalsEditor() {
+  _homeDraft = { ...getHomepageConfig().new_arrivals };
+  renderNewArrivalsEditor();
+  openSheet('homeNewArrivalsSheet');
+}
+
+function renderNewArrivalsEditor() {
+  const d = _homeDraft;
+  const el = document.getElementById('homeNewArrivalsBody');
+  if (!el || !d) return;
+  el.innerHTML =
+    _homeToggle('Show this section on the homepage', d.show, 'newArrivalsSetShow') +
+    `<div class="field-label">Heading</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="New Arrivals"
+       oninput="newArrivalsSet('heading', this.value)" style="margin-bottom:14px">
+     <div class="field-label">How many to show</div>
+     ${_homeCountPills(d.count, 'newArrivalsSetCount')}` +
+    _homeToggle('Skip pieces already in the featured section', d.exclude_featured, 'newArrivalsSetExclude',
+      'Keeps the same piece from appearing twice on one page.') +
+    `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The website picks these itself from your newest published pieces. There is no list to keep up to date.</div>`;
+}
+
+function newArrivalsSet(field, value) { _homeDraft[field] = value; }
+function newArrivalsSetShow(on) { _homeDraft.show = on; }
+function newArrivalsSetExclude(on) { _homeDraft.exclude_featured = on; }
+function newArrivalsSetCount(v) { _homeDraft.count = Number(v); renderNewArrivalsEditor(); }
+
+async function saveNewArrivals(btn) {
+  if (_homeBusy) return;
+  _homeBusy = true;
+  const html = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    await saveHomepageConfig('new_arrivals', _homeDraft);
+    closeSheet('homeNewArrivalsSheet');
+    renderStorefrontHome();
+    showToast('New Arrivals saved ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally {
+    _homeBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+
+// ── Curated edit editor ─────────────────────────────────────────────────────
+
+let _curatedDraft = null;
+
+function openCuratedEditor(editId) {
+  const e = editId ? curatedEditById(editId) : null;
+  _homeEditingEditId = editId || null;
+  _curatedDraft = e
+    ? { title: e.title, subtitle: e.subtitle || '', slug: e.slug, show_on_website: e.show_on_website !== false,
+        product_ids: curatedEditProductIds(e.id) }
+    : { title: '', subtitle: '', slug: null, show_on_website: true, product_ids: [] };
+  renderCuratedEditor();
+  openSheet('curatedEditSheet');
+}
+
+function renderCuratedEditor() {
+  const d = _curatedDraft;
+  const el = document.getElementById('curatedEditBody');
+  if (!el || !d) return;
+  const isNew = !_homeEditingEditId;
+
+  const address = isNew
+    ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Its web address is made from the name when you create it, and then stays put — so a link you have shared keeps working even if you rename the edit later.</div>`
+    : `<div class="field-label">Web address</div>
+       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+         <div style="flex:1;min-width:0;font-size:13px;color:var(--ink);padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--sand-light);word-break:break-all">/edit/${_esc(d.slug || '')}</div>
+         <button onclick="curatedEditSlug()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:8px 13px">Change</button>
+       </div>
+       <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">This stays the same when you rename the edit. Change it only if it is wrong — any link already shared will stop working.</div>`;
+
+  el.innerHTML =
+    `<div class="field-label">Name</div>
+     <input type="text" class="field-input" value="${_esc(d.title || '')}" placeholder="e.g. Eid Picks"
+       oninput="curatedSet('title', this.value)" style="margin-bottom:10px">
+
+     <div class="field-label">Under the name</div>
+     <input type="text" class="field-input" value="${_esc(d.subtitle || '')}" placeholder="Optional"
+       oninput="curatedSet('subtitle', this.value)" style="margin-bottom:14px">
+
+     ${address}` +
+    _homeToggle('Show this edit on the website', d.show_on_website, 'curatedSetShow') +
+    `<div class="field-label">Pieces in this edit</div>
+     ${_homeOrderedProductList(d.product_ids, 'curated')}
+     <button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;margin-bottom:6px" onclick="curatedOpenProductPicker()"><i class="ti ti-plus"></i> Choose pieces</button>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">${d.product_ids.length} piece${d.product_ids.length === 1 ? '' : 's'}. The order here is the order on the website.</div>` +
+    (isNew ? '' :
+     `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px" onclick="confirmDeleteCuratedEdit()">Delete this edit</button>`);
+}
+
+function curatedSet(field, value) { _curatedDraft[field] = value; }
+function curatedSetShow(on) { _curatedDraft.show_on_website = on; }
+function curatedMoveProduct(i, dir) { _curatedDraft.product_ids = _moveInArray(_curatedDraft.product_ids, i, dir); renderCuratedEditor(); }
+function curatedRemoveProduct(i) { _curatedDraft.product_ids = _curatedDraft.product_ids.filter((_, k) => k !== i); renderCuratedEditor(); }
+function curatedOpenProductPicker() {
+  openHomeProductPicker(_curatedDraft.product_ids, ids => { _curatedDraft.product_ids = ids; renderCuratedEditor(); });
+}
+
+function curatedEditSlug() {
+  const next = prompt('Web address for this edit. Old links will stop working.', _curatedDraft.slug || '');
+  if (next == null) return;
+  const clean = _editSlugBase(next);
+  if (!clean) { showToast('That address cannot be used.'); return; }
+  _curatedDraft.slug = clean;
+  renderCuratedEditor();
+}
+
+async function saveCuratedEdit(btn) {
+  if (_homeBusy) return;
+  const d = _curatedDraft;
+  if (!_homeText(d.title)) { showToast('Give the edit a name first.'); return; }
+  _homeBusy = true;
+  const html = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    let id = _homeEditingEditId;
+    if (!id) {
+      const created = await createCuratedEdit(d.title, d.subtitle);
+      id = created?.id;
+      if (!id) throw new Error('The edit was not created.');
+      if (!d.show_on_website) await updateCuratedEdit(id, { show_on_website: false });
+    } else {
+      const patch = { title: d.title, subtitle: d.subtitle, show_on_website: d.show_on_website };
+      const current = curatedEditById(id);
+      if (d.slug && d.slug !== current.slug) patch.slug = d.slug;
+      try {
+        await updateCuratedEdit(id, patch);
+      } catch (e) {
+        if (e?.code === '23505') throw new Error('Another edit already uses that web address.');
+        throw e;
+      }
+    }
+    await setCuratedEditProducts(id, d.product_ids);
+    closeSheet('curatedEditSheet');
+    renderStorefrontHome();
+    showToast('Edit saved ✓');
+  } catch (e) {
+    showToast('Could not save: ' + e.message);
+  } finally {
+    _homeBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+
+async function confirmDeleteCuratedEdit() {
+  const e = curatedEditById(_homeEditingEditId);
+  if (!e) return;
+  if (!confirm(`Delete “${e.title}”? The pieces themselves are not affected.`)) return;
+  try {
+    await deleteCuratedEdit(e.id);
+    closeSheet('curatedEditSheet');
+    renderStorefrontHome();
+    showToast('Edit deleted');
+  } catch (err) {
+    showToast('Could not delete: ' + err.message);
+  }
+}
+
+// ── Pickers ─────────────────────────────────────────────────────────────────
+// One multi-select product picker, shared by the featured edit and every curated
+// edit. Selecting appends, so the order pieces are tapped in is the order they
+// arrive in — which is usually the order Saima wants them.
+
+let _homePickerSelected = [];
+let _homePickerDone = null;
+
+function openHomeProductPicker(current, onDone) {
+  _homePickerSelected = (current || []).slice();
+  _homePickerDone = onDone;
+  const search = document.getElementById('homeProductSearch');
+  if (search) search.value = '';
+  renderHomeProductPicker();
+  openSheet('homeProductPickerSheet');
+}
+
+function renderHomeProductPicker() {
+  const list = document.getElementById('homeProductPickerList');
+  if (!list) return;
+  const q = (document.getElementById('homeProductSearch')?.value || '').trim().toLowerCase();
+
+  // Website-visible pieces first, then the rest: a piece that is not published
+  // can still be chosen — it simply will not show until it is.
+  const items = inventory
+    .filter(p => !p.is_archived)
+    .filter(p => !q || `${p.name} ${p.sku || ''}`.toLowerCase().includes(q))
+    .sort((a, b) => (isWebsiteVisibleProduct(b) ? 1 : 0) - (isWebsiteVisibleProduct(a) ? 1 : 0));
+
+  if (!items.length) {
+    list.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:24px 8px">Nothing matches.</div>';
+    return;
+  }
+
+  window._homePickIds = items.map(p => p.id);
+  list.innerHTML = items.map((p, i) => {
+    const on = _homePickerSelected.includes(p.id);
+    const src = productImageSrc(p);
+    const live = isWebsiteVisibleProduct(p);
+    const pos = on ? _homePickerSelected.indexOf(p.id) + 1 : null;
+    return `<div onclick="toggleHomePick(window._homePickIds[${i}])" style="display:flex;gap:10px;align-items:center;padding:9px;background:#fff;border-radius:10px;border:2px solid ${on ? 'var(--burgundy)' : 'var(--border)'};cursor:pointer;margin-bottom:8px">
+      ${src ? `<img src="${_esc(src)}" alt="" loading="lazy" style="width:40px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0">`
+            : `<div style="width:40px;height:52px;border-radius:6px;flex-shrink:0;background:var(--sand-light);display:flex;align-items:center;justify-content:center;color:var(--gold-light)"><i class="ti ti-hanger"></i></div>`}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--ink);word-break:break-word">${_esc(p.name)}</div>
+        <div style="font-size:11px;color:${live ? 'var(--muted)' : '#7a4500'}">${live ? _esc(p.sku || '') : 'Not on the website yet'}</div>
+      </div>
+      ${on ? `<span style="flex-shrink:0;width:24px;height:24px;border-radius:12px;background:var(--burgundy);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center">${pos}</span>`
+           : '<i class="ti ti-circle" style="font-size:20px;color:var(--border);flex-shrink:0"></i>'}
+    </div>`;
+  }).join('');
+}
+
+function toggleHomePick(id) {
+  _homePickerSelected = _homePickerSelected.includes(id)
+    ? _homePickerSelected.filter(x => x !== id)
+    : _homePickerSelected.concat(id);
+  renderHomeProductPicker();
+}
+
+function applyHomeProductPicker() {
+  const done = _homePickerDone;
+  closeSheet('homeProductPickerSheet');
+  if (done) done(_homePickerSelected.slice());
+}
+
+// The destination picker. Same sheet for both kinds of reference and for the
+// featured edit's collection source, told apart by context.
+function openHomeCtaRefPicker(kind, ctx) {
+  _homePickerCtx = { kind, ctx };
+  const title = document.getElementById('homeCtaRefTitle');
+  const list  = document.getElementById('homeCtaRefList');
+  if (!list) return;
+
+  if (kind === 'collection') {
+    const options = liveCollectionOptions();
+    if (title) title.textContent = 'Choose a collection';
+    list.innerHTML = options.length
+      ? (window._homeRefNames = options.map(o => o.name),
+         options.map((o, i) => `<div onclick="pickHomeCtaRefCollection(window._homeRefNames[${i}])" style="padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer;font-size:13px;color:var(--ink)">${_esc(o.name)}</div>`).join(''))
+      : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:24px 8px;line-height:1.6">No collections are showing on the website.</div>';
+  } else {
+    const live = curatedEdits.filter(e => e.show_on_website !== false);
+    if (title) title.textContent = 'Choose an edit';
+    window._homeRefIds = live.map(e => e.id);
+    list.innerHTML = live.length
+      ? live.map((e, i) => `<div onclick="pickHomeCtaRef(window._homeRefIds[${i}])" style="padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer">
+          <div style="font-size:13px;color:var(--ink)">${_esc(e.title)}</div>
+          <div style="font-size:11px;color:var(--muted)">/edit/${_esc(e.slug)}</div>
+        </div>`).join('')
+      : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:24px 8px;line-height:1.6">No edits are showing on the website yet. Create one first.</div>';
+  }
+  openSheet('homeCtaRefSheet');
+}
+
+// A collection is chosen by name — the record is created on demand, so a
+// collection that predates the publishing tables can still be pointed at.
+async function pickHomeCtaRefCollection(name) {
+  try {
+    const rec = await ensureCollection(name);
+    if (!rec?.id) throw new Error('That collection could not be prepared.');
+    pickHomeCtaRef(rec.id);
+  } catch (e) {
+    showToast('Could not use that collection: ' + e.message);
+  }
+}
+
+function pickHomeCtaRef(id) {
+  const { ctx } = _homePickerCtx || {};
+  closeSheet('homeCtaRefSheet');
+  if (ctx === 'campaign') { _homeDraft.cta_destination_ref = id; renderCampaignEditor(); }
+  else if (ctx === 'featured') { _homeDraft.cta_destination_ref = id; renderFeaturedEditEditor(); }
+  else if (ctx === 'featured_source') { _homeDraft.source_ref = id; renderFeaturedEditEditor(); }
 }
 
 // ── Product slug ────────────────────────────────────────────────────────────
@@ -5796,7 +7033,7 @@ function applyTranslations() {
   document.body.style.direction = lang === 'ur' ? 'rtl' : 'ltr';
 }
 
-const _DATA_SCREENS = ['stock', 'people', 'show'];
+const _DATA_SCREENS = ['stock', 'people', 'show', 'storefront'];
 
 // Stores the intended destination while the discard sheet is shown.
 let _intakePendingNav = null;
@@ -5854,6 +7091,7 @@ function showScreen(name) {
   if (name === 'inquiries') loadInquiries();
   if (name === 'people') { if (_currentPeopleTab === 'leads') renderLeads(); else renderCustomers(); }
   if (name === 'show') renderExhibitions();
+  if (name === 'storefront') renderStorefrontHome();
 }
 
 function goHomeFromAdd() {
@@ -7887,6 +9125,14 @@ async function _bootLoadData() {
     console.log('[BOOT] website settings loaded');
   } catch(e) {
     console.warn('[BOOT] website settings failed', e?.message || e);
+  }
+
+  try {
+    await loadCuratedEdits();
+    console.log('[BOOT] curated edits loaded', curatedEdits.length);
+  } catch(e) {
+    // Non-fatal: the Home screen shows no edits rather than refusing to open.
+    console.warn('[BOOT] curated edits failed', e?.message || e);
   }
 
   try {
