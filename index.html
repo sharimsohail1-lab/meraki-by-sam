@@ -4491,13 +4491,18 @@ function renderCollectionWebsiteControl(name) {
   if (!el) return;
   if (!name) { el.innerHTML = ''; return; }     // the Uncollected pseudo-collection
   const live = isCollectionLive(name);
-  el.innerHTML = `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer">
-      <input type="checkbox" ${live ? 'checked' : ''}
+  const locked = live ? campaignCollectionLock(name) : null;
+  el.innerHTML = `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:${locked ? 'var(--sand-light)' : '#fff'};cursor:${locked ? 'default' : 'pointer'}">
+      <input type="checkbox" ${live ? 'checked' : ''} ${locked ? 'disabled' : ''}
         onchange="setCollectionWebsiteVisibility(window._collDetailName, this.checked, this)"
-        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0">
+        style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0${locked ? ';opacity:.45' : ''}">
       <span style="flex:1;min-width:0">
         <span style="font-size:13px;color:var(--ink)">Show on website</span>
-        <span style="display:block;font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">${live ? 'This collection can appear on the website.' : 'Hidden — this collection will not appear on the website.'}</span>
+        ${locked ? '<span style="display:block;font-size:10px;color:#7a4500;background:#fff6e5;border-radius:10px;padding:2px 8px;margin-top:4px;width:fit-content">Used by current campaign</span>' : ''}
+        <span style="display:block;font-size:11px;color:${locked ? '#7a4500' : 'var(--muted)'};line-height:1.5;margin-top:2px">${
+          locked ? _esc(locked)
+                 : (live ? 'This collection can appear on the website.' : 'Hidden — this collection will not appear on the website.')
+        }</span>
       </span>
     </label>`;
 }
@@ -4506,6 +4511,14 @@ function renderCollectionWebsiteControl(name) {
 async function setCollectionWebsiteVisibility(name, visible, btn) {
   const n = String(name || '').trim();
   if (!n) return;
+
+  // The canonical writer refuses, not just the control that calls it — another
+  // caller must not be able to reach around the disabled checkbox.
+  if (!visible) {
+    const locked = campaignCollectionLock(n);
+    if (locked) { showToast(locked); renderCollectionWebsiteControl(n); return; }
+  }
+
   if (btn) btn.disabled = true;
   try {
     const c = await ensureCollection(n);
@@ -5080,6 +5093,35 @@ function campaignHasContent(c = getHomepageConfig().campaign) {
 
 // Is a section switched on? One place, because the campaign says it with `show`
 // on an active config and the other two say it with their own `show`.
+// ── The live campaign's dependency on its target ────────────────────────────
+// A campaign button points at a collection or an edit. Hiding that target while
+// the campaign is live leaves a button on the homepage that leads nowhere, and
+// the campaign editor's own validation cannot catch it — by then the operator is
+// in a different screen entirely, hiding something that looks unrelated. So the
+// rule is enforced from the other direction too, here, where the hiding happens.
+//
+// Returns the reason hiding is refused, or null when it is fine.
+//
+// Only a LIVE campaign creates a dependency. A campaign that is not running, a
+// button pointing at everything, and a campaign with no button at all all point
+// at nothing that can break.
+function campaignTargetLock(kind, id) {
+  if (!id) return null;
+  const cfg = getHomepageConfig();
+  if (!isCampaignActive(cfg)) return null;
+  const c = cfg.campaign;
+  if (c.cta_destination_type !== kind || c.cta_destination_ref !== id) return null;
+  return kind === 'curated_edit'
+    ? 'This edit is used by the current homepage campaign. Change or remove the campaign button before hiding it.'
+    : 'This collection is used by the current homepage campaign. Change or remove the campaign button before hiding it.';
+}
+
+// Collections are addressed by name everywhere in the app, so resolve first.
+function campaignCollectionLock(name) {
+  const c = collectionByName(String(name || '').trim());
+  return c ? campaignTargetLock('collection', c.id) : null;
+}
+
 function isHomepageSectionEnabled(key, cfg = getHomepageConfig()) {
   if (key === 'campaign') return isCampaignActive(cfg);
   return cfg[key] ? cfg[key].show === true : false;
@@ -5344,6 +5386,12 @@ async function createCuratedEdit(title, subtitle = null) {
 // Blank text is written as an empty string rather than null: /api/db strips
 // nulls from updates, so a null would leave the old subtitle in place.
 async function updateCuratedEdit(id, patch) {
+  // Same guard as collections, in the one function every edit update goes
+  // through — the editor's Save, and anything else that ever calls it.
+  if (patch.show_on_website === false) {
+    const locked = campaignTargetLock('curated_edit', id);
+    if (locked) throw new Error(locked);
+  }
   const data = { ...patch, updated_at: new Date().toISOString() };
   if ('title' in data)    data.title    = _homeText(data.title) || 'Untitled edit';
   if ('subtitle' in data) data.subtitle = _homeText(data.subtitle) || '';
@@ -6173,7 +6221,16 @@ function renderCuratedEditor() {
        oninput="curatedSet('subtitle', this.value)" style="margin-bottom:14px">
 
      ${address}` +
-    _homeToggle('Show this edit on the website', d.show_on_website, 'curatedSetShow') +
+    (_homeEditingEditId && campaignTargetLock('curated_edit', _homeEditingEditId)
+      ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--sand-light);margin-bottom:4px">
+           <input type="checkbox" checked disabled style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0;opacity:.45">
+           <span style="flex:1;min-width:0">
+             <span style="font-size:13px;color:var(--ink)">Show this edit on the website</span>
+             <span style="display:block;font-size:10px;color:#7a4500;background:#fff6e5;border-radius:10px;padding:2px 8px;margin-top:4px;width:fit-content">Used by current campaign</span>
+           </span>
+         </div>
+         <div style="font-size:11px;color:#7a4500;line-height:1.5;margin-bottom:12px">${_esc(campaignTargetLock('curated_edit', _homeEditingEditId))}</div>`
+      : _homeToggle('Show this edit on the website', d.show_on_website, 'curatedSetShow')) +
     `<div class="field-label">Pieces in this edit</div>
      ${_homeOrderedProductList(d.product_ids, 'curated')}
      <button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;margin-bottom:6px" onclick="curatedOpenProductPicker()"><i class="ti ti-plus"></i> Choose pieces</button>
