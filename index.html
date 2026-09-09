@@ -1749,7 +1749,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div class="size-pill" onclick="selectBudget(this,300)">$300</div>
       <div class="size-pill" onclick="selectBudget(this,500)">$500+</div>
     </div>
-    <div class="field-label">Preferred Colors</div>
+    <div class="field-label">Preferred Colours</div>
     <input type="text" id="custColorsInput" class="field-input" placeholder="e.g. green, pink, pastels" style="margin-bottom:12px">
     <div class="field-label">Occasions</div>
     <div class="chip-row" id="custOccasionChips" style="margin-bottom:12px">
@@ -1997,7 +1997,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
     <!-- Notes -->
     <div class="field-label">Notes (optional)</div>
-    <textarea id="exhItemNotesInput" class="field-input" rows="2" placeholder="Colors, fabric, etc." style="resize:none;margin-bottom:16px"></textarea>
+    <textarea id="exhItemNotesInput" class="field-input" rows="2" placeholder="Colours, fabric, etc." style="resize:none;margin-bottom:16px"></textarea>
 
     <input type="hidden" id="exhItemEditId" value="">
     <button onclick="saveExhItem()" class="btn btn-primary" id="saveExhItemBtn" style="width:100%"><i class="ti ti-device-floppy"></i> Save Item</button>
@@ -14422,7 +14422,7 @@ Revise the garment analysis to incorporate this correction precisely. Keep every
 }
 
 const _AMEND_FIELD_LABELS = {
-  description_en: 'Description', colors: 'Colors', occasion: 'Occasion',
+  description_en: 'Description', colors: 'Colours', occasion: 'Occasion',
   category: 'Category', neckline: 'Neckline', has_placket: 'Center front placket',
   has_dupatta: 'Dupatta included', motifs: 'Motifs', ideogram_prompt: 'AI model prompt',
   catalog_blurb: 'Catalog blurb', share_blurb: 'Share blurb',
@@ -15546,7 +15546,7 @@ function renderImportResult(d) {
     { label: 'Phone', key: 'phone' },
     { label: 'Size', key: 'sizes' },
     { label: 'Budget', key: 'budget', format: v => v ? '$' + v : null },
-    { label: 'Preferred Colors', key: 'preferred_colors' },
+    { label: 'Preferred Colours', key: 'preferred_colors' },
     { label: 'Occasions', key: 'preferred_occasions' },
     { label: 'Items Discussed', key: 'items_discussed' },
     { label: 'Notes', key: 'notes' },
@@ -16104,7 +16104,7 @@ function _exhInventoryHTML() {
     <span style="font-size:12px;color:var(--muted);white-space:nowrap">Sort by</span>
     <select onchange="_setExhSort(this.value)" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;color:var(--ink);cursor:pointer;touch-action:manipulation">
       <option value="default"${_exhInventorySort==='default'?' selected':''}>Default</option>
-      <option value="color"${_exhInventorySort==='color'?' selected':''}>Color / Shade</option>
+      <option value="color"${_exhInventorySort==='color'?' selected':''}>Colour / Shade</option>
       <option value="name"${_exhInventorySort==='name'?' selected':''}>Name A→Z</option>
       <option value="remaining_asc"${_exhInventorySort==='remaining_asc'?' selected':''}>Least Remaining</option>
       <option value="remaining_desc"${_exhInventorySort==='remaining_desc'?' selected':''}>Most Remaining</option>
