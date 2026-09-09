@@ -3314,8 +3314,14 @@ const PRODUCT_IMAGE_COLS =
 // Mirrors the PHOTO_SLOTS priorities so a synthesised gallery reads sensibly.
 const IMAGE_ROLE_ORDER = [
   'model', 'front', 'original', 'skirt-front', 'blouse', 'back', 'bottom', 'dupatta', 'full',
-  'neckline', 'sleeves', 'hemline', 'skirt-detail', 'border', 'embroidery', 'detail', 'gallery', 'other'
+  'neckline', 'sleeves', 'hemline', 'skirt-detail', 'border', 'embroidery', 'detail', 'gallery',
+  'customer_photo', 'other'
 ];
+
+// A real customer wearing this exact piece, kept as social proof. Deliberately
+// its own role rather than a gallery image with a note: it is not a studio shot,
+// it is not the AI model image, and the storefront will present it separately.
+const CUSTOMER_PHOTO_ROLE = 'customer_photo';
 
 function _roleRank(role) {
   const i = IMAGE_ROLE_ORDER.indexOf(role);
@@ -3439,7 +3445,10 @@ function getProductImagesSync(p) {
 // a legacy column. show_on_website is deliberately ignored here: it governs
 // storefront eligibility only, never what Saima sees inside the app.
 function getPrimaryProductImage(p) {
-  const list = getProductImagesSync(p);
+  // Customer photos are excluded from the fallback as well as from the flag: a
+  // product whose only other images were deleted must not quietly start leading
+  // with a customer's snapshot.
+  const list = _heroEligibleImages(p);
   return list.find(i => i.is_primary) || list[0] || null;
 }
 
@@ -3464,7 +3473,7 @@ async function _normalizeSortOrders(productId) {
 // delete, which is the only operation that can remove the hero and leave others
 // behind. Promotes the lowest sort_order survivor. Returns the promoted image.
 async function _ensureHero(productId) {
-  const list = getProductImagesSync({ id: productId });
+  const list = _heroEligibleImages({ id: productId });
   if (!list.length || list.some(i => i.is_primary)) return null;
   const next = list[0];
   await db('update', 'product_images', { id: next.id, data: { is_primary: true } });
@@ -3489,6 +3498,28 @@ function getWebsiteProductImages(p) {
   return getProductImagesSync(p).filter(i => i.show_on_website);
 }
 
+function isCustomerPhoto(img) {
+  return !!img && img.role === CUSTOMER_PHOTO_ROLE;
+}
+
+// Every customer photo on a product, in the app's one ordering: sort_order.
+// Zero of them is an ordinary state, not a gap to fill.
+function getCustomerPhotos(p) {
+  return getProductImagesSync(p).filter(isCustomerPhoto);
+}
+
+// The ones the storefront may show. Visibility is the existing per-image switch
+// — there is no second, customer-specific approval flag to keep in step.
+function getWebsiteCustomerPhotos(p) {
+  return getCustomerPhotos(p).filter(i => i.show_on_website);
+}
+
+// Hero candidates. A customer photo must never lead a product: the hero is the
+// garment as Saima shot it, not someone wearing it.
+function _heroEligibleImages(p) {
+  return getProductImagesSync(p).filter(i => !isCustomerPhoto(i));
+}
+
 // ─── PRODUCT DETAIL PHOTOS ───────────────────────────────────────────────────
 // Roles reuse the PHOTO_SLOTS vocabulary so there is one system, not two.
 // Built lazily: PHOTO_SLOTS is declared further down the file, so evaluating this
@@ -3500,7 +3531,8 @@ function imageRoleOptions() {
   Object.values(PHOTO_SLOTS).forEach(slots => slots.forEach(s => {
     if (!seen.has(s.id)) { seen.add(s.id); out.push({ value: s.id, label: s.label }); }
   }));
-  [['model','Model photo'],['original','Original photo'],['gallery','Gallery'],['other','Other']]
+  [['model','Model photo'],['original','Original photo'],['gallery','Gallery'],
+   [CUSTOMER_PHOTO_ROLE,'Customer Photo'],['other','Other']]
     .forEach(([v,l]) => { if (!seen.has(v)) { seen.add(v); out.push({ value: v, label: l }); } });
   _imageRoleOptions = out;
   return out;
@@ -3587,11 +3619,12 @@ async function renderProductPhotos(p, { force = false } = {}) {
     const roleOpts = imageRoleOptions().map(o =>
       `<option value="${_esc(o.value)}"${o.value === img.role ? ' selected' : ''}>${_esc(o.label)}</option>`).join('');
     return `
-    <div style="border:1px solid ${img.is_primary ? 'var(--burgundy)' : 'var(--border)'};border-radius:10px;overflow:hidden;background:#fff">
+    <div style="border:1px solid ${img.is_primary ? 'var(--burgundy)' : (isCustomerPhoto(img) ? '#1d5c3f' : 'var(--border)')};border-radius:10px;overflow:hidden;background:#fff">
       <div style="position:relative;aspect-ratio:3/4;background:var(--sand-light)">
         ${src ? `<img src="${_esc(src)}" loading="lazy" alt="${_esc(img.alt || '')}" onerror="_photoImgFallback(this, ${_esc(JSON.stringify(raw || ''))})" style="width:100%;height:100%;object-fit:cover;display:block">`
               : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)"><i class="ti ti-photo-off"></i></div>'}
         ${img.is_primary ? '<div style="position:absolute;top:6px;left:6px;background:var(--burgundy);color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">HERO</div>' : ''}
+        ${isCustomerPhoto(img) ? '<div style="position:absolute;top:6px;right:6px;background:#1d5c3f;color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">CUSTOMER</div>' : ''}
       </div>
       <div style="padding:8px">
         <select onchange="setPhotoRole('${img.id}',this.value)" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;margin-bottom:6px">${roleOpts}</select>
@@ -3602,7 +3635,7 @@ async function renderProductPhotos(p, { force = false } = {}) {
         <div style="display:flex;gap:4px;flex-wrap:wrap">
           <button onclick="movePhoto(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Move earlier" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-arrow-left"></i></button>
           <button onclick="movePhoto(${i},1)" ${i === images.length - 1 ? 'disabled' : ''} title="Move later" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === images.length - 1 ? '.35' : '1'}"><i class="ti ti-arrow-right"></i></button>
-          ${img.is_primary ? '' : `<button onclick="setPhotoHero('${img.id}')" title="Set as hero" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--burgundy)"><i class="ti ti-star"></i></button>`}
+          ${img.is_primary || isCustomerPhoto(img) ? '' : `<button onclick="setPhotoHero('${img.id}')" title="Set as hero" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--burgundy)"><i class="ti ti-star"></i></button>`}
           <button onclick="replacePhoto('${img.id}')" title="Replace" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink)"><i class="ti ti-refresh"></i></button>
           <button onclick="deletePhoto('${img.id}')" title="Delete" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:#c0392b"><i class="ti ti-trash"></i></button>
         </div>
@@ -3715,6 +3748,15 @@ async function handleGalleryUpload(input) {
 // is never momentarily violated.
 async function setPhotoHero(imageId) {
   if (!currentProduct || _photosBusy) return;
+
+  // Refused before anything is claimed, so a refusal cannot leave the photo
+  // controls stuck mid-update.
+  const target = (window._detailPhotos || []).find(i => i.id === imageId);
+  if (isCustomerPhoto(target)) {
+    showToast('A customer photo cannot lead the product. Change its role first.');
+    return;
+  }
+
   _photosBusy = true;
   _photosStatus('Updating…');
   const prev = (window._detailPhotos || []).find(i => i.is_primary && i.id !== imageId);
@@ -3733,8 +3775,30 @@ async function setPhotoHero(imageId) {
 
 async function setPhotoRole(imageId, role) {
   if (!currentProduct) return;
+
+  // Role and hero are stored separately — image_role and is_primary — so making
+  // the hero a customer photo would otherwise leave a customer's snapshot
+  // leading the product everywhere. The hero is handed to the next eligible
+  // image using the same rule a delete uses, and refused outright when there is
+  // nobody to hand it to.
+  const img = (window._detailPhotos || []).find(i => i.id === imageId);
+  const takingHero = img && img.is_primary && role === CUSTOMER_PHOTO_ROLE;
+  if (takingHero) {
+    const heir = _heroEligibleImages(currentProduct).find(i => i.id !== imageId);
+    if (!heir) {
+      showToast('This is the only photo and it leads the product. Add another photo first.');
+      await _refreshPhotos();
+      return;
+    }
+  }
+
   _photosStatus('Updating…');
   try {
+    if (takingHero) {
+      const heir = _heroEligibleImages(currentProduct).find(i => i.id !== imageId);
+      await db('update', 'product_images', { id: imageId, data: { is_primary: false } });
+      await db('update', 'product_images', { id: heir.id, data: { is_primary: true } });
+    }
     await db('update', 'product_images', { id: imageId, data: { image_role: role } });
     await _refreshPhotos();
     _photosStatus('');
@@ -6544,8 +6608,12 @@ function websiteAvailabilityLabel(v) {
 
 // The storefront gallery: website-visible images in order. Independent of the
 // internal hero, which Saima may deliberately keep off the website.
+// The studio gallery the storefront already renders. Customer photos are
+// deliberately NOT in here: they are social proof, shown in their own section,
+// and letting one into this list would put it in the product gallery and — when
+// the real hero is hidden — make it the image the product leads with.
 function websiteImages(p) {
-  return getWebsiteProductImages(p);
+  return getWebsiteProductImages(p).filter(i => !isCustomerPhoto(i));
 }
 
 // The image the storefront leads with. If the internal hero is hidden from the
@@ -6625,6 +6693,21 @@ function buildPublicProductPayload(p) {
         // Public rendition URLs by longest-side width. A width is absent when the
         // master was smaller, and the whole object is absent for images uploaded
         // before renditions existed — both cases fall back to src.
+        ...(Object.keys(variants).length ? { variants } : {}),
+      };
+    }),
+
+    // Real customers wearing this piece, in sort_order. Separate from `images`
+    // so the storefront never mixes them into the studio gallery. An empty array
+    // is an ordinary state and means "show no customer section at all".
+    customer_photos: getWebsiteCustomerPhotos(p).map(i => {
+      const variants = imageVariantUrls(i);
+      return {
+        src: i.src,
+        sort_order: i.sort_order,
+        alt: i.alt || p.name || null,
+        width: i.width,
+        height: i.height,
         ...(Object.keys(variants).length ? { variants } : {}),
       };
     }),
