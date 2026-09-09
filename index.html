@@ -3379,10 +3379,20 @@ function renderGarmentDetails(p) {
 
   const specs = getGarmentSpecs(p);
   const filled = GARMENT_SPEC_FIELDS.filter(f => specs[f.key].values.length);
+
+  // Nothing recorded yet: open the editor straight away rather than showing an
+  // empty read-only line behind an Edit button. A product with no details is
+  // exactly the one that needs the fields in front of you, and the read-only
+  // view of nothing has nothing to say.
   if (!filled.length) {
-    view.innerHTML = '<div style="font-size:12px;color:var(--muted);font-style:italic;opacity:.7">No garment details added</div>';
+    view.innerHTML = '<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:2px">Fabric, pieces, colour and more. Each row can be shown or hidden on the website on its own.</div>';
+    _gdDraft = getGarmentSpecs(p);
+    renderGarmentEditor({ cancellable: false });
+    edit.style.display = 'block';
+    if (btn) btn.style.display = 'none';        // nothing to toggle back to
     return;
   }
+  if (btn) btn.style.display = '';
   view.innerHTML = filled.map(f => {
     const s = specs[f.key];
     return `<div style="display:flex;gap:10px;margin-bottom:6px;align-items:flex-start">
@@ -3414,14 +3424,14 @@ function toggleGarmentDetailsEdit() {
   if (btn) btn.textContent = 'Close';
 }
 
-function renderGarmentEditor() {
+function renderGarmentEditor({ cancellable = true } = {}) {
   const edit = document.getElementById('garmentDetailsEdit');
   if (!edit || !_gdDraft) return;
   edit.innerHTML = GARMENT_SPEC_FIELDS.map(f => _gdFieldHtml(f)).join('') + `
     <div id="gdStatus" style="display:none;font-size:12px;line-height:1.5;border-radius:8px;padding:9px 11px;margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-primary" id="garmentDetailsSaveBtn" onclick="saveGarmentDetails(this)" style="flex:1"><i class="ti ti-device-floppy"></i> Save Details</button>
-      <button class="btn btn-secondary" onclick="toggleGarmentDetailsEdit()" style="flex:1">Cancel</button>
+      ${cancellable ? '<button class="btn btn-secondary" onclick="toggleGarmentDetailsEdit()" style="flex:1">Cancel</button>' : ''}
     </div>`;
 }
 
