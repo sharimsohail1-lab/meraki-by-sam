@@ -34,7 +34,7 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   product_images: new Set([
     'id','product_id','storage_provider','storage_key','public_url','image_role',
     'sort_order','is_primary','show_on_website','alt_text',
-    'width','height','bytes','mime_type','variants','created_at','updated_at'
+    'width','height','bytes','mime_type','variants','blur_meta','created_at','updated_at'
   ]),
   exh_items: new Set([
     'id','exhibition_id','name','photo','price_usd','cost_pkr',
