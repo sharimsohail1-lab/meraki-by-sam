@@ -3678,8 +3678,8 @@ async function renderProductPhotos(p, { force = false } = {}) {
         </label>
         ${isCustomerPhoto(img) ? (isFaceBlurred(img)
           ? `<div style="display:flex;gap:6px;margin-bottom:8px">
-               <button onclick="blurCustomerPhoto('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--ink)">Re-blur</button>
-               <button onclick="removeCustomerPhotoBlur('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--muted)">Remove blur</button>
+               <button onclick="blurCustomerPhoto('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--ink)">Blur another face</button>
+               <button onclick="removeCustomerPhotoBlur('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--muted)">Undo all blur</button>
              </div>`
           : `<button onclick="blurCustomerPhoto('${img.id}')" style="width:100%;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--ink);margin-bottom:8px"><i class="ti ti-eye-off"></i> Blur face</button>`) : ''}
         <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -3870,8 +3870,11 @@ async function setPhotoRole(imageId, role) {
 // real pixels, never a CSS filter, so what leaves the app is what leaves the
 // database.
 //
-// A re-blur always starts from the ORIGINAL, never from an already-mosaicked
-// copy, so repeated passes cannot degrade the photo.
+// Each pass starts from what is PUBLIC RIGHT NOW, so blurring a second face
+// keeps the first one blurred. One oval per pass is the editor's design, and a
+// photo of two people simply needs two passes. The true original is parked
+// untouched no matter how many passes are made, so Remove blur always goes back
+// to the unedited photo rather than to the previous pass.
 //
 // Nothing is written until the new asset is safely uploaded. If the editor is
 // cancelled, the blur is refused, or the upload fails, the row is untouched and
@@ -3881,12 +3884,15 @@ async function blurCustomerPhoto(imageId) {
   const img = (window._detailPhotos || []).find(i => i.id === imageId);
   if (!img || !isCustomerPhoto(img)) return;
 
+  // Two different assets, and the difference is the whole point: `original` is
+  // what Remove blur restores, `source` is what this pass edits.
   const original = blurOriginalAsset(img) || _assetSnapshot(img);
-  if (!original.public_url) { showToast('This photo has no image to blur.'); return; }
+  const source = _assetSnapshot(img);
+  if (!source.public_url) { showToast('This photo has no image to blur.'); return; }
 
   let blurred;
   try {
-    blurred = await _openBlurEditor(_canvasSafeImageSrc(original.public_url));
+    blurred = await _openBlurEditor(_canvasSafeImageSrc(source.public_url));
   } catch (e) {
     // 'cancelled' is Saima backing out, not a failure. Anything else already
     // showed its reason inside the editor — including the editor's own check
@@ -3937,7 +3943,7 @@ async function removeCustomerPhotoBlur(imageId) {
   if (!img || !isFaceBlurred(img)) return;
   const original = blurOriginalAsset(img);
   if (!original?.public_url) { showToast('The original photo is no longer available.'); return; }
-  if (!confirm('Show the original photo again, with the face unblurred?')) return;
+  if (!confirm('Show the original photo again, with every blur removed?')) return;
 
   _photosBusy = true;
   _photosStatus('Restoring original…');
