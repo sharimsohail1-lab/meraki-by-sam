@@ -869,6 +869,11 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <p class="key-note" style="margin-top:6px">Generate or upload model photos for FASHN virtual try-on. Choose which to use at generation time.</p>
     </div>
     <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+      <button class="btn" id="bulkPrefillBtn" style="width:100%;background:#fff;color:var(--ink);border:1.5px solid var(--border)" onclick="prefillAllGarmentDetails(this)"><i class="ti ti-wand"></i> Fill garment details from analysis</button>
+      <p style="font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.5">Fills Colour and Recommended Occasion on every piece that has none yet, using what the app already recorded. Anything you have written stays as it is.</p>
+    </div>
+
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
       <button class="btn" style="width:100%;background:var(--burgundy);color:#fff;font-weight:600" onclick="closeModal('settingsModal');openWebsiteSettings()"><i class="ti ti-world"></i> Website Settings</button>
       <p class="key-note" style="margin-top:6px">Featured piece, contact details and service notes for merakibysaima.com.</p>
     </div>
@@ -3564,6 +3569,15 @@ function garmentPrefillAvailable() {
   return !!(_gdDraft && currentProduct) && garmentPrefillableKeys(currentProduct, _gdDraft).length > 0;
 }
 
+// Fill the eligible EMPTY descriptors of one product's specs from its analysis.
+// Returns the keys that actually gained values.
+function applyGarmentPrefill(p, specs, pools) {
+  const keys = garmentPrefillableKeys(p, specs);
+  keys.forEach(key => garmentPrefillCandidates(p, key)
+    .forEach(v => _gdApplyValue(specs, key, v, pools && pools[key])));
+  return keys.filter(k => specs[k].values.length);
+}
+
 function prefillGarmentDetails() {
   if (!_gdDraft || !currentProduct) return;
   const keys = garmentPrefillableKeys(currentProduct, _gdDraft);
@@ -3577,10 +3591,11 @@ function prefillGarmentDetails() {
     return;
   }
 
-  // gdAddValue is the same path a tapped suggestion takes, so prefilled chips
-  // are trimmed, deduped case-insensitively and canonically cased exactly like
-  // hand-picked ones — and "Gold, gold, GOLD" becomes one chip.
-  keys.forEach(key => garmentPrefillCandidates(currentProduct, key).forEach(v => gdAddValue(key, v)));
+  // The same path a tapped suggestion takes, so prefilled chips are trimmed,
+  // deduped case-insensitively and canonically cased exactly like hand-picked
+  // ones — and "Gold, gold, GOLD" becomes one chip.
+  applyGarmentPrefill(currentProduct, _gdDraft);
+  keys.forEach(key => _gdRerenderField(key));
 
   const label = { color: 'Colour', occasion: 'Recommended Occasion' };
   const filled = keys.map(k => label[k]);
@@ -3593,23 +3608,32 @@ function prefillGarmentDetails() {
     (missing.length ? ` ${missing.join(', ')} still need your input.` : ''));
 }
 
-function gdAddValue(key, raw) {
+// Add one value to one descriptor, wherever it came from — a tapped suggestion,
+// something typed, or a prefill. Returns the spec so callers can chain.
+//
+// A value that already exists in ANY casing resolves to the one already there
+// rather than adding a near-duplicate, and a suggestion's casing wins over what
+// was typed, so "organza" becomes "Organza" and the vocabulary stays tidy.
+//
+// One implementation, because the editor and the bulk pass agreeing about this
+// is the whole point — two copies of these rules would drift.
+function _gdApplyValue(specs, key, raw, suggestions) {
   const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
-  const s = _gdDraft && _gdDraft[key];
-  if (!f || !s) return;
+  const s = specs && specs[key];
+  if (!f || !s) return false;
   const value = String(raw == null ? '' : raw).trim();
-  if (!value) return;
+  if (!value) return false;
+  if (s.values.some(v => v.toLowerCase() === value.toLowerCase())) return false;
+  const pool = suggestions || garmentSuggestions(key);
+  const canonical = pool.find(v => v.toLowerCase() === value.toLowerCase()) || value;
+  if (f.multi) s.values.push(canonical);
+  else s.values = [canonical];
+  return true;
+}
 
-  // Typing a value that already exists in any casing resolves to the one that is
-  // already there rather than adding a near-duplicate.
-  const existing = s.values.find(v => v.toLowerCase() === value.toLowerCase());
-  if (!existing) {
-    // A suggestion's casing wins over what was typed, so "organza" becomes
-    // "Organza" and the vocabulary stays tidy.
-    const canonical = garmentSuggestions(key).find(v => v.toLowerCase() === value.toLowerCase()) || value;
-    if (f.multi) s.values.push(canonical);
-    else s.values = [canonical];
-  }
+function gdAddValue(key, raw) {
+  if (!_gdDraft) return;
+  _gdApplyValue(_gdDraft, key, raw);
   closeGarmentSuggestions();
   _gdRerenderField(key);
 }
@@ -3625,6 +3649,83 @@ function gdRemoveValue(key, index) {
 function gdSetShow(key, on) {
   if (_gdDraft && _gdDraft[key]) _gdDraft[key].show = !!on;
   _gdUpdateWebsitePreview();
+}
+
+// ── The one-time pass over everything already in stock ──────────────────────
+// The per-product action is the normal way to do this. This is for the catalogue
+// that existed before the feature did: every product's colours are already on
+// its row, and opening a hundred products to tap the same button is not work
+// worth anyone's evening.
+//
+// It obeys exactly the same rule — fill only what is EMPTY — so it can be run
+// twice, or after hand-editing some products, without touching a single value
+// anyone reviewed. Running it again once everything is filled changes nothing.
+//
+// It is NOT automatic and never will be: it lives behind a button and a
+// confirmation that says how many products it is about to change.
+
+// What a run would do, without doing it. Used for the confirmation and to
+// decide whether the action is worth offering at all.
+function garmentBulkPrefillPlan() {
+  const pools = { color: garmentSuggestions('color'), occasion: garmentSuggestions('occasion') };
+  const plan = [];
+  (inventory || []).forEach(p => {
+    if (p.is_archived) return;
+    const specs = getGarmentSpecs(p);
+    const filled = applyGarmentPrefill(p, specs, pools);
+    if (filled.length) plan.push({ product: p, specs, filled });
+  });
+  return plan;
+}
+
+async function prefillAllGarmentDetails(btn) {
+  if (_photosBusy) return;
+  const plan = garmentBulkPrefillPlan();
+  if (!plan.length) {
+    showToast('Nothing to prefill — every piece already has its colours and occasion, or has no analysis to draw on.');
+    return;
+  }
+
+  const colours = plan.filter(x => x.filled.includes('color')).length;
+  const occasions = plan.filter(x => x.filled.includes('occasion')).length;
+  const parts = [];
+  if (colours) parts.push(`Colour on ${colours}`);
+  if (occasions) parts.push(`Recommended Occasion on ${occasions}`);
+  if (!confirm(
+    `Fill ${parts.join(' and ')} piece${plan.length === 1 ? '' : 's'} from what the app already knows?\n\n` +
+    `Only empty details are filled — anything you have already written stays exactly as it is. ` +
+    `You can edit any of it afterwards, piece by piece.`)) return;
+
+  const orig = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; }
+  let done = 0;
+  const failed = [];
+  for (const entry of plan) {
+    if (btn) btn.innerHTML = `Filling ${done + 1} of ${plan.length}…`;
+    const update = { garment_details: _buildGarmentDetails(entry.specs), ..._buildLegacyMirrors(entry.specs) };
+    try {
+      await db('update', 'products', { id: entry.product.id, data: update });
+      const idx = inventory.findIndex(x => x.id === entry.product.id);
+      if (idx >= 0) inventory[idx] = { ...inventory[idx], ...update };
+      done++;
+    } catch (e) {
+      // One product failing must not abandon the rest, and a product that
+      // failed is simply left untouched for the next run to pick up.
+      console.warn('[garment] bulk prefill failed for', entry.product.sku, e.message);
+      failed.push(entry.product.sku);
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  if (currentProduct) {
+    currentProduct = inventory.find(x => x.id === currentProduct.id) || currentProduct;
+    renderGarmentDetails(currentProduct);
+    renderWebsiteSection(currentProduct);
+  }
+  renderInventory();
+  showToast(failed.length
+    ? `Filled ${done} piece${done === 1 ? '' : 's'}. ${failed.length} could not be saved — try again.`
+    : `Filled ${done} piece${done === 1 ? '' : 's'} ✓ Check them before publishing.`);
 }
 
 // ── Suggestions ─────────────────────────────────────────────────────────────
