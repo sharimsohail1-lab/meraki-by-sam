@@ -3424,10 +3424,34 @@ function toggleGarmentDetailsEdit() {
   if (btn) btn.textContent = 'Close';
 }
 
+// The action and its feedback live together at the top of the editor, in their
+// own container: the note appears where the tap happened, and re-rendering just
+// this row cannot move anything below it.
+function _gdPrefillRowInner() {
+  if (!garmentPrefillAvailable()) return '';
+  return `<button type="button" onclick="prefillGarmentDetails()"
+      style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 13px;min-height:32px">
+      <i class="ti ti-wand"></i> Prefill from analysis</button>`;
+}
+
+function _gdRefreshPrefillRow() {
+  const el = document.getElementById('gdPrefillRow');
+  if (el) el.innerHTML = _gdPrefillRowInner();
+}
+
+function _gdPrefillNote(msg) {
+  const el = document.getElementById('gdPrefillNote');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
 function renderGarmentEditor({ cancellable = true } = {}) {
   const edit = document.getElementById('garmentDetailsEdit');
   if (!edit || !_gdDraft) return;
-  edit.innerHTML = GARMENT_SPEC_FIELDS.map(f => _gdFieldHtml(f)).join('') + `
+  edit.innerHTML = `<div id="gdPrefillRow">${_gdPrefillRowInner()}</div>
+    <div id="gdPrefillNote" style="display:none;font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px"></div>` +
+    GARMENT_SPEC_FIELDS.map(f => _gdFieldHtml(f)).join('') + `
     <div id="gdStatus" style="display:none;font-size:12px;line-height:1.5;border-radius:8px;padding:9px 11px;margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-primary" id="garmentDetailsSaveBtn" onclick="saveGarmentDetails(this)" style="flex:1"><i class="ti ti-device-floppy"></i> Save Details</button>
@@ -3474,10 +3498,100 @@ function _gdRerenderField(key) {
   const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
   const row = document.getElementById('gd-row-' + key);
   if (f && row) row.innerHTML = _gdFieldInner(f);
+  // Filling Colour by hand should retire the offer to fill it for you, and
+  // clearing it should bring the offer back.
+  _gdRefreshPrefillRow();
   _gdUpdateWebsitePreview();
 }
 
 // ── Draft edits ─────────────────────────────────────────────────────────────
+
+// ── Prefill from the analysis the app already has ───────────────────────────
+// The intake pills and the photo analysis already know a product's colours and
+// which occasion it was filed under. Retyping five colour chips that are already
+// on the row is the kind of work the app should do.
+//
+// Two rules make this safe. It fills only what is EMPTY — a value Saima reviewed
+// always wins over anything the analysis says — and it writes only to the draft,
+// so nothing is canonical until Save Details. That is also why an AI re-run can
+// never disturb reviewed details: nothing here runs by itself.
+//
+// Only Colour and Recommended Occasion. Fabric, Pieces, Made, Care and Style
+// have no structured source in the app, and guessing them from the marketing
+// description would put invented values into a vocabulary shared by every
+// future product.
+
+// products.season is an intake pill, stored as a lowercase id.
+const GD_SEASON_LABELS = {
+  eid: 'Eid', wedding: 'Wedding', summer: 'Summer',
+  winter: 'Winter', casual: 'Casual', formal: 'Formal',
+};
+
+// products.category is the analysis's formality classification, and only these
+// four values are recognised. Anything else is ignored rather than guessed at.
+const GD_CATEGORY_VALUES = ['Formal', 'Semi-Formal', 'Casual', 'Bridal'];
+
+// What the analysis can offer for one descriptor, before any of it is used.
+function garmentPrefillCandidates(p, key) {
+  if (!p) return [];
+  if (key === 'color') {
+    // "Black, Fuchsia Pink, Gold" is one string holding several colours.
+    return String(p.colors || '').split(',');
+  }
+  if (key === 'occasion') {
+    const out = [];
+    const season = GD_SEASON_LABELS[String(p.season || '').trim().toLowerCase()];
+    if (season) out.push(season);
+    const category = GD_CATEGORY_VALUES.find(
+      v => v.toLowerCase() === String(p.category || '').trim().toLowerCase());
+    if (category) out.push(category);
+    return out;
+  }
+  return [];
+}
+
+// Which descriptors this product could fill right now: a source exists and the
+// draft has nothing in it. Empty means the button has nothing to do.
+function garmentPrefillableKeys(p, draft) {
+  return ['color', 'occasion'].filter(key => {
+    const cur = draft && draft[key];
+    if (!cur || cur.values.length) return false;          // reviewed values win
+    return _specValues(garmentPrefillCandidates(p, key)).length > 0;
+  });
+}
+
+function garmentPrefillAvailable() {
+  return !!(_gdDraft && currentProduct) && garmentPrefillableKeys(currentProduct, _gdDraft).length > 0;
+}
+
+function prefillGarmentDetails() {
+  if (!_gdDraft || !currentProduct) return;
+  const keys = garmentPrefillableKeys(currentProduct, _gdDraft);
+
+  if (!keys.length) {
+    // Two different reasons for nothing to do, and they deserve different words.
+    const anySource = ['color', 'occasion'].some(k => _specValues(garmentPrefillCandidates(currentProduct, k)).length);
+    _gdPrefillNote(anySource
+      ? 'Nothing to prefill — existing details were kept.'
+      : 'No usable analysis found for Colour or Recommended Occasion.');
+    return;
+  }
+
+  // gdAddValue is the same path a tapped suggestion takes, so prefilled chips
+  // are trimmed, deduped case-insensitively and canonically cased exactly like
+  // hand-picked ones — and "Gold, gold, GOLD" becomes one chip.
+  keys.forEach(key => garmentPrefillCandidates(currentProduct, key).forEach(v => gdAddValue(key, v)));
+
+  const label = { color: 'Colour', occasion: 'Recommended Occasion' };
+  const filled = keys.map(k => label[k]);
+  const missing = GARMENT_SPEC_FIELDS
+    .filter(f => !_gdDraft[f.key].values.length)
+    .map(f => f.label);
+
+  _gdPrefillNote(
+    `Prefilled ${filled.join(' and ')} — check ${filled.length > 1 ? 'them' : 'it'} before saving.` +
+    (missing.length ? ` ${missing.join(', ')} still need your input.` : ''));
+}
 
 function gdAddValue(key, raw) {
   const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
