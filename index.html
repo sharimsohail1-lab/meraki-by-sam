@@ -3308,7 +3308,7 @@ async function saveGarmentDetails(btn) {
 
 const PRODUCT_IMAGE_COLS =
   'id,product_id,storage_provider,storage_key,public_url,image_role,sort_order,' +
-  'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,variants,created_at,updated_at';
+  'is_primary,show_on_website,alt_text,width,height,bytes,mime_type,variants,blur_meta,created_at,updated_at';
 
 // Role ordering, used as a tiebreak when sort_order matches.
 // Mirrors the PHOTO_SLOTS priorities so a synthesised gallery reads sensibly.
@@ -3376,6 +3376,10 @@ function _normalizeImageRow(row) {
     // NULL means the row predates renditions. Normalised once, here, so nothing
     // downstream has to distinguish "no column" from "no renditions".
     variants: _parseVariants(row.variants),
+    // {} when the image has never been blurred. When it has, storage_key,
+    // public_url and variants above are the BLURRED asset and the untouched
+    // original is parked in here.
+    blur: _parseVariants(row.blur_meta),
     legacy: false,
   };
 }
@@ -3520,6 +3524,45 @@ function _heroEligibleImages(p) {
   return getProductImagesSync(p).filter(i => !isCustomerPhoto(i));
 }
 
+// ── Customer photo face blur ────────────────────────────────────────────────
+// The blurred version REPLACES the original on the row rather than sitting
+// beside it. storage_key, public_url and variants always describe the asset the
+// public gets, so the app tile, the website payload and the storefront cannot
+// disagree about which version is live, and nothing downstream has to know a
+// blur happened. The original is parked in blur_meta and can be put back.
+
+function isFaceBlurred(img) {
+  return !!(img && img.blur && img.blur.blurred);
+}
+
+// The untouched original, in the shape of the columns it would be restored into.
+// Present only while a blur is active.
+function blurOriginalAsset(img) {
+  return (isFaceBlurred(img) && img.blur.original) || null;
+}
+
+// The current public asset described the same way, so a blur can park it.
+function _assetSnapshot(img) {
+  return {
+    storage_provider: img.storage_provider || 'supabase',
+    storage_key: img.storage_key || null,
+    public_url: img.src || null,
+    width: img.width ?? null,
+    height: img.height ?? null,
+    mime_type: img.mime_type || null,
+    variants: img.variants || {},
+  };
+}
+
+// Canvas export taints on a cross-origin image, and the blur editor reads pixels
+// back to check its own work. The app already proxies remote images through its
+// own origin for exactly this reason, so the blur reuses that rather than
+// inventing a second answer. A data URL is already same-origin.
+function _canvasSafeImageSrc(url) {
+  const u = String(url || '');
+  return /^https?:\/\//i.test(u) ? '/api/ideogram?url=' + encodeURIComponent(u) : u;
+}
+
 // ─── PRODUCT DETAIL PHOTOS ───────────────────────────────────────────────────
 // Roles reuse the PHOTO_SLOTS vocabulary so there is one system, not two.
 // Built lazily: PHOTO_SLOTS is declared further down the file, so evaluating this
@@ -3625,6 +3668,7 @@ async function renderProductPhotos(p, { force = false } = {}) {
               : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)"><i class="ti ti-photo-off"></i></div>'}
         ${img.is_primary ? '<div style="position:absolute;top:6px;left:6px;background:var(--burgundy);color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">HERO</div>' : ''}
         ${isCustomerPhoto(img) ? '<div style="position:absolute;top:6px;right:6px;background:#1d5c3f;color:#fff;font-size:9px;font-weight:700;padding:3px 7px;border-radius:10px;letter-spacing:.04em">CUSTOMER</div>' : ''}
+        ${isFaceBlurred(img) ? '<div style="position:absolute;bottom:6px;left:6px;background:rgba(28,20,16,.78);color:#fff;font-size:9px;font-weight:600;padding:3px 7px;border-radius:10px;letter-spacing:.03em">FACE BLURRED</div>' : ''}
       </div>
       <div style="padding:8px">
         <select onchange="setPhotoRole('${img.id}',this.value)" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;margin-bottom:6px">${roleOpts}</select>
@@ -3632,6 +3676,12 @@ async function renderProductPhotos(p, { force = false } = {}) {
           <input type="checkbox" ${img.show_on_website ? 'checked' : ''} onchange="setPhotoWebsite('${img.id}',this.checked)" style="accent-color:var(--burgundy);width:14px;height:14px">
           Show on website
         </label>
+        ${isCustomerPhoto(img) ? (isFaceBlurred(img)
+          ? `<div style="display:flex;gap:6px;margin-bottom:8px">
+               <button onclick="blurCustomerPhoto('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--ink)">Re-blur</button>
+               <button onclick="removeCustomerPhotoBlur('${img.id}')" style="flex:1;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--muted)">Remove blur</button>
+             </div>`
+          : `<button onclick="blurCustomerPhoto('${img.id}')" style="width:100%;min-height:30px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:11px;color:var(--ink);margin-bottom:8px"><i class="ti ti-eye-off"></i> Blur face</button>`) : ''}
         <div style="display:flex;gap:4px;flex-wrap:wrap">
           <button onclick="movePhoto(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Move earlier" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-arrow-left"></i></button>
           <button onclick="movePhoto(${i},1)" ${i === images.length - 1 ? 'disabled' : ''} title="Move later" style="flex:1;min-width:34px;min-height:34px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);opacity:${i === images.length - 1 ? '.35' : '1'}"><i class="ti ti-arrow-right"></i></button>
@@ -3782,6 +3832,15 @@ async function setPhotoRole(imageId, role) {
   // image using the same rule a delete uses, and refused outright when there is
   // nobody to hand it to.
   const img = (window._detailPhotos || []).find(i => i.id === imageId);
+
+  // A blurred photo would otherwise be stranded: the blurred version stays the
+  // public asset, but the controls to undo it only exist on customer photos.
+  if (img && isFaceBlurred(img) && role !== CUSTOMER_PHOTO_ROLE) {
+    showToast('Remove the blur first — a blurred photo can only be a customer photo.');
+    await _refreshPhotos();
+    return;
+  }
+
   const takingHero = img && img.is_primary && role === CUSTOMER_PHOTO_ROLE;
   if (takingHero) {
     const heir = _heroEligibleImages(currentProduct).find(i => i.id !== imageId);
@@ -3804,6 +3863,106 @@ async function setPhotoRole(imageId, role) {
     _photosStatus('');
     showToast('Saved ✓');
   } catch (e) { _photosStatus(''); showToast('Could not update role: ' + e.message); await _refreshPhotos(); }
+}
+
+// Blur, or blur again. The editor is the one Saima already uses on share cards:
+// she places an oval over the face and it is mosaicked into the image itself —
+// real pixels, never a CSS filter, so what leaves the app is what leaves the
+// database.
+//
+// A re-blur always starts from the ORIGINAL, never from an already-mosaicked
+// copy, so repeated passes cannot degrade the photo.
+//
+// Nothing is written until the new asset is safely uploaded. If the editor is
+// cancelled, the blur is refused, or the upload fails, the row is untouched and
+// the previous public asset stays exactly as it was.
+async function blurCustomerPhoto(imageId) {
+  if (!currentProduct || _photosBusy) return;
+  const img = (window._detailPhotos || []).find(i => i.id === imageId);
+  if (!img || !isCustomerPhoto(img)) return;
+
+  const original = blurOriginalAsset(img) || _assetSnapshot(img);
+  if (!original.public_url) { showToast('This photo has no image to blur.'); return; }
+
+  let blurred;
+  try {
+    blurred = await _openBlurEditor(_canvasSafeImageSrc(original.public_url));
+  } catch (e) {
+    // 'cancelled' is Saima backing out, not a failure. Anything else already
+    // showed its reason inside the editor — including the editor's own check
+    // that the oval actually covered something, which is what stops a photo
+    // being marked blurred when nothing was obscured.
+    if (e !== 'cancelled') showToast(e.message || 'Could not blur that photo.');
+    return;
+  }
+
+  _photosBusy = true;
+  _photosStatus('Saving blurred photo…');
+  // The objects currently on the row — a previous blur, on a re-blur. Removed
+  // only after the new ones are safely in place.
+  const supersededKeys = isFaceBlurred(img) ? imageObjectKeys(img) : [];
+  try {
+    // The existing pipeline, so every rendition comes from the blurred master.
+    // A new namespace each time: nothing is overwritten, so no CDN or browser
+    // can serve the unblurred bytes from the URL that now means "blurred".
+    const set = await prepareAndUploadImageSet(currentProduct.id, blurred,
+      { onProgress: msg => _photosStatus(msg) });
+
+    await db('update', 'product_images', { id: imageId, data: {
+      ...set.fields,
+      blur_meta: { blurred: true, blurred_at: new Date().toISOString(), original },
+      updated_at: new Date().toISOString(),
+    }});
+
+    if (supersededKeys.length) await deleteImageObjects(supersededKeys, img.storage_provider);
+
+    await _refreshPhotos();
+    _photosStatus('');
+    showToast('Face blurred ✓');
+  } catch (e) {
+    _photosStatus('');
+    showToast('Could not save the blurred photo: ' + e.message);
+    await _refreshPhotos();
+  } finally { _photosBusy = false; }
+}
+
+// Put the original back. The blurred objects are removed afterwards, so a stale
+// link cannot keep serving a version the operator has withdrawn.
+//
+// blur_meta is written as {} rather than null: /api/db strips nulls from every
+// write, so a null would leave the old record in place.
+async function removeCustomerPhotoBlur(imageId) {
+  if (!currentProduct || _photosBusy) return;
+  const img = (window._detailPhotos || []).find(i => i.id === imageId);
+  if (!img || !isFaceBlurred(img)) return;
+  const original = blurOriginalAsset(img);
+  if (!original?.public_url) { showToast('The original photo is no longer available.'); return; }
+  if (!confirm('Show the original photo again, with the face unblurred?')) return;
+
+  _photosBusy = true;
+  _photosStatus('Restoring original…');
+  const blurredKeys = imageObjectKeys(img);
+  try {
+    await db('update', 'product_images', { id: imageId, data: {
+      storage_provider: original.storage_provider || 'supabase',
+      storage_key: original.storage_key,
+      public_url: original.public_url,
+      width: original.width,
+      height: original.height,
+      mime_type: original.mime_type,
+      variants: original.variants || {},
+      blur_meta: {},
+      updated_at: new Date().toISOString(),
+    }});
+    await deleteImageObjects(blurredKeys, original.storage_provider);
+    await _refreshPhotos();
+    _photosStatus('');
+    showToast('Original photo restored ✓');
+  } catch (e) {
+    _photosStatus('');
+    showToast('Could not restore the original: ' + e.message);
+    await _refreshPhotos();
+  } finally { _photosBusy = false; }
 }
 
 async function setPhotoWebsite(imageId, checked) {

@@ -1,0 +1,34 @@
+-- Face blur for customer photos.
+--
+-- A customer photo may need a face obscured before it goes on the website. The
+-- blurred version is not a variant of the image and not a second image — it is
+-- what the public sees INSTEAD of the original, while the original has to stay
+-- recoverable so the operator can undo or redo the blur without asking the
+-- customer for the photo again.
+--
+-- The rule that shapes this column: storage_key, public_url and variants on
+-- product_images ALWAYS describe the asset the public gets. Nothing downstream —
+-- the website included — should have to know that a blur exists, let alone
+-- choose between two versions. So the blurred derivative takes over those
+-- columns, and the original is parked here.
+--
+-- Shape:
+--   {}                                    never blurred, or blur removed
+--   { blurred: true,
+--     blurred_at: <iso timestamp>,
+--     original: { storage_provider, storage_key, public_url,
+--                 width, height, bytes, mime_type, variants } }
+--
+-- One JSONB column rather than a set of original_* columns: the parked original
+-- is exactly the shape of the columns it will be restored into, it is written
+-- and read whole, and /api/db strips nulls from writes — which would make a
+-- nullable column impossible to clear. An empty object is how "not blurred" is
+-- written back.
+--
+-- NOTE: /api/migrate splits this file on the semicolon character. Do not use DO
+-- blocks or function bodies here, and keep semicolons out of comments. Every
+-- statement below must stand alone.
+
+-- Defaults to an empty object, so every existing image — customer photo or not —
+-- reads as unblurred and nothing about the current public assets changes.
+ALTER TABLE product_images ADD COLUMN IF NOT EXISTS blur_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
