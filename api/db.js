@@ -18,7 +18,7 @@ const ALLOWED_COLUMNS_BY_TABLE = {
     'description_source',
     'fabric','pieces','color','made','care',
     'website_status','website_availability','website_published_at','slug',
-    'fulfillment_note'
+    'fulfillment_note','garment_details'
   ]),
   website_settings: new Set([
     'id','featured_product_id','whatsapp','contact_email','instagram_url',
