@@ -2219,7 +2219,7 @@ const PRODUCT_SUMMARY_COLS = [
   'neckline','has_placket','has_dupatta','motifs',
   'size_inventory','collection_name','collection_names',
   'description_en','description_ur','description_source',
-  'fabric','pieces','color','made','care',
+  'fabric','pieces','color','made','care','garment_details',
   'caption_en','share_blurb','hashtags',
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at',
@@ -3195,13 +3195,66 @@ function getDisplaySrc(value) {
 // ─── GARMENT DETAILS ─────────────────────────────────────────────────────────
 // Five optional attributes shared by the app, catalog and the future storefront.
 // The UI says "Colour"; the column is `color` to match the rest of the schema.
-const GARMENT_DETAIL_FIELDS = [
-  { key: 'fabric', label: 'Fabric', placeholder: 'e.g. Crepe, resham thread work' },
-  { key: 'pieces', label: 'Pieces', placeholder: 'e.g. Jacket, inner slip, trouser' },
-  { key: 'color',  label: 'Colour', placeholder: 'e.g. Ivory / crimson' },
-  { key: 'made',   label: 'Made',   placeholder: 'e.g. Lahore, by hand' },
-  { key: 'care',   label: 'Care',   placeholder: 'e.g. Dry clean only' },
+// ─── GARMENT DETAILS ─────────────────────────────────────────────────────────
+// The factual description of the piece: what it is made of, how many pieces,
+// what to wear it to, how to look after it. The app is the authority for all of
+// it, and each descriptor decides for itself whether it is printed on the
+// website — recording a care instruction and printing one are different acts.
+//
+// products.garment_details (JSONB) is canonical:
+//   { fabric: { values: [...], show: true }, … }
+// Every descriptor has the same shape; a single-valued one simply carries one
+// entry. See migration 031.
+//
+// products.fabric / pieces / color / made / care are DERIVED mirrors, rewritten
+// on every save so the current storefront — which prints any non-blank column —
+// keeps working untouched and starts honouring the visibility switches
+// immediately. Nothing edits them directly. They are retired when the storefront
+// reads the structured contract.
+
+// Starter vocabularies. None of these is a closed list: anything typed and saved
+// becomes a suggestion on the next product, which is what keeps this from
+// needing a management screen.
+const FABRIC_VOCAB = [
+  'Raw Silk', 'Pure Silk', 'Korean Raw Silk', 'Grip Silk', 'Tissue Silk', 'Shimmer Silk',
+  'Farshi Silk', 'Organza', 'Chiffon', 'Net', 'Velvet', 'Jamawar', 'Banarsi', 'Brocade',
+  'Jacquard', 'Georgette', 'Satin', 'Lawn', 'Cotton', 'Cotton Silk', 'Cambric', 'Khaddar',
+  'Karandi', 'Linen', 'Viscose', 'Masuri', 'Tea Silk',
 ];
+
+const OCCASION_VOCAB = [
+  'Eid', 'Wedding', 'Wedding Guest', 'Bridal', 'Nikah', 'Mehndi', 'Baraat', 'Walima',
+  'Engagement', 'Dholki', 'Mayun', 'Reception', 'Festive', 'Formal', 'Semi-Formal',
+  'Casual', 'Party', 'Dinner', 'Evening', 'Daytime', 'Family Gathering', 'Religious Event',
+  'Modest Occasionwear',
+];
+
+const STYLE_VOCAB = [
+  'Kaftan', 'Farshi Shalwar', 'Straight Shirt', 'Long Shirt', 'Short Shirt', 'Kurta',
+  'Pishwas', 'Anarkali', 'Angrakha', 'Lehenga', 'Sharara', 'Gharara', 'Shalwar Kameez',
+  'Palazzo', 'Wide-Leg Trouser', 'Cigarette Trouser', 'Dhaka Pajama',
+];
+
+// Deliberately short. Colour vocabulary is Saima's, not a paint chart — this is
+// just enough that the field is not empty on the first product.
+const COLOUR_VOCAB = [
+  'Ivory', 'Off-White', 'Black', 'Gold', 'Silver', 'Champagne', 'Dusty Rose', 'Blush',
+  'Maroon', 'Crimson', 'Rust', 'Emerald', 'Teal', 'Navy', 'Powder Blue', 'Lilac',
+  'Mustard', 'Sage', 'Beige', 'Charcoal',
+];
+
+const GARMENT_SPEC_FIELDS = [
+  { key: 'fabric',   label: 'Fabric',               multi: true,  vocab: FABRIC_VOCAB,   legacy: true,  placeholder: 'Search or add a fabric' },
+  { key: 'pieces',   label: 'Pieces',               multi: false, vocab: ['1 Piece', '2 Piece', '3 Piece'], legacy: true, placeholder: 'e.g. 3 Piece' },
+  { key: 'color',    label: 'Colour',               multi: true,  vocab: COLOUR_VOCAB,   legacy: true,  placeholder: 'Search or add a colour' },
+  { key: 'made',     label: 'Made',                 multi: false, vocab: [],             legacy: true,  placeholder: 'e.g. Lahore, by hand' },
+  { key: 'care',     label: 'Care',                 multi: false, vocab: ['Dry clean only'], legacy: true, placeholder: 'e.g. Dry clean only' },
+  { key: 'occasion', label: 'Recommended Occasion', multi: true,  vocab: OCCASION_VOCAB, legacy: false, placeholder: 'Search or add an occasion' },
+  { key: 'style',    label: 'Style / Silhouette',   multi: true,  vocab: STYLE_VOCAB,    legacy: false, placeholder: 'Search or add a style' },
+];
+
+const GARMENT_SPEC_KEYS = GARMENT_SPEC_FIELDS.map(f => f.key);
+const GARMENT_LEGACY_KEYS = GARMENT_SPEC_FIELDS.filter(f => f.legacy).map(f => f.key);
 
 function _esc(s) {
   return String(s == null ? '' : s)
@@ -3209,28 +3262,142 @@ function _esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// Read-only view. Blank fields are omitted entirely — no "N/A" placeholders.
+// ── Reading ─────────────────────────────────────────────────────────────────
+// Normalised on read, so a hand-edited row, an older app version, or a product
+// that predates the column all produce the same shape. A product whose JSONB is
+// still empty falls back to its legacy columns, which is what makes the app work
+// correctly in the window between deploying and running the migration.
+
+function _specValues(raw) {
+  const out = [], seen = new Set();
+  (Array.isArray(raw) ? raw : []).forEach(v => {
+    const s = String(v == null ? '' : v).trim();
+    const k = s.toLowerCase();
+    if (s && !seen.has(k)) { seen.add(k); out.push(s); }
+  });
+  return out;
+}
+
+function getGarmentSpecs(p) {
+  const raw = (p && p.garment_details && typeof p.garment_details === 'object') ? p.garment_details : {};
+  const hasStructured = Object.keys(raw).length > 0;
+  const out = {};
+  GARMENT_SPEC_FIELDS.forEach(f => {
+    const entry = raw[f.key] && typeof raw[f.key] === 'object' ? raw[f.key] : null;
+    let values = entry ? _specValues(entry.values) : [];
+    // Nothing structured yet: read the legacy column so the product still shows
+    // its details before migration 031 has run.
+    if (!hasStructured && f.legacy && !values.length) {
+      const legacy = String((p && p[f.key]) || '').trim();
+      if (legacy) values = [legacy];
+    }
+    if (!f.multi) values = values.slice(0, 1);
+    out[f.key] = {
+      values,
+      // A descriptor with a value shows unless it was explicitly switched off.
+      // That is what today's storefront does, so nothing changes on migration.
+      show: entry && typeof entry.show === 'boolean' ? entry.show : true,
+    };
+  });
+  return out;
+}
+
+function garmentSpecShown(specs, key) {
+  return !!(specs[key] && specs[key].values.length && specs[key].show);
+}
+
+// What gets written. Descriptors with no values are dropped entirely rather than
+// stored as empty rows.
+function _buildGarmentDetails(specs) {
+  const out = {};
+  GARMENT_SPEC_FIELDS.forEach(f => {
+    const s = specs[f.key];
+    if (s && s.values.length) out[f.key] = { values: s.values.slice(), show: s.show !== false };
+  });
+  return out;
+}
+
+// The compatibility mirrors. Joined for the storefront to print as-is, and
+// blanked when the descriptor is hidden — which is how a visibility switch takes
+// effect on the live site before the website knows this feature exists.
+function _buildLegacyMirrors(specs) {
+  const out = {};
+  GARMENT_LEGACY_KEYS.forEach(k => {
+    out[k] = garmentSpecShown(specs, k) ? specs[k].values.join(', ') : '';
+  });
+  return out;
+}
+
+// ── Suggestions ─────────────────────────────────────────────────────────────
+// Starter vocabulary plus every distinct value already used across products.
+// Case-insensitive: "organza", "Organza" and "ORGANZA" are one suggestion, and
+// the casing kept is the one already saved on a product, since that is the one
+// Saima chose.
+function garmentSuggestions(key) {
+  const field = GARMENT_SPEC_FIELDS.find(f => f.key === key);
+  if (!field) return [];
+  const byLower = new Map();
+  const add = v => {
+    const s = String(v == null ? '' : v).trim();
+    if (!s) return;
+    const k = s.toLowerCase();
+    if (!byLower.has(k)) byLower.set(k, s);
+  };
+  field.vocab.forEach(add);
+  try {
+    (inventory || []).forEach(p => {
+      // Saved values win the casing contest: set() after get() would keep the
+      // starter spelling, so overwrite deliberately.
+      getGarmentSpecs(p)[key].values.forEach(v => {
+        const s = String(v).trim();
+        if (s) byLower.set(s.toLowerCase(), s);
+      });
+    });
+  } catch (e) {
+    // Suggestions are a convenience. If the product list is unavailable the
+    // field still accepts anything typed.
+    console.warn('[garment] could not derive suggestions', e.message);
+  }
+  return [...byLower.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// ── Read-only view ──────────────────────────────────────────────────────────
+// Blank descriptors are omitted entirely — no "N/A" rows. A descriptor that is
+// hidden from the website is still shown here, marked, because the app is where
+// Saima keeps the information whether or not customers see it.
 function renderGarmentDetails(p) {
   const view = document.getElementById('garmentDetailsView');
   const edit = document.getElementById('garmentDetailsEdit');
   const btn  = document.getElementById('garmentDetailsEditBtn');
   if (!view || !edit) return;
 
+  closeGarmentSuggestions();
+  _gdDraft = null;
   view.style.display = 'block';
   edit.style.display = 'none';
   if (btn) { btn.textContent = 'Edit'; btn.disabled = false; }
 
-  const filled = GARMENT_DETAIL_FIELDS.filter(f => (p?.[f.key] || '').trim());
+  const specs = getGarmentSpecs(p);
+  const filled = GARMENT_SPEC_FIELDS.filter(f => specs[f.key].values.length);
   if (!filled.length) {
     view.innerHTML = '<div style="font-size:12px;color:var(--muted);font-style:italic;opacity:.7">No garment details added</div>';
     return;
   }
-  view.innerHTML = filled.map(f => `
-    <div style="display:flex;gap:10px;margin-bottom:6px;align-items:flex-start">
-      <div style="font-size:11px;color:var(--muted);min-width:58px;flex-shrink:0;padding-top:1px">${f.label}</div>
-      <div style="font-size:12px;color:var(--ink);line-height:1.5;flex:1;white-space:pre-wrap;word-break:break-word">${_esc(p[f.key])}</div>
-    </div>`).join('');
+  view.innerHTML = filled.map(f => {
+    const s = specs[f.key];
+    return `<div style="display:flex;gap:10px;margin-bottom:6px;align-items:flex-start">
+      <div style="font-size:11px;color:var(--muted);min-width:92px;flex-shrink:0;padding-top:1px">${f.label}</div>
+      <div style="font-size:12px;color:var(--ink);line-height:1.5;flex:1;word-break:break-word">${_esc(s.values.join(', '))}${
+        s.show ? '' : ' <span style="font-size:10px;color:#7a4500;background:#fff6e5;border-radius:10px;padding:1px 7px;white-space:nowrap">Not on website</span>'
+      }</div>
+    </div>`;
+  }).join('');
 }
+
+// ── Editor ──────────────────────────────────────────────────────────────────
+// Everything is edited into a local draft and written on Save. That is what lets
+// a failed save keep every chip and toggle exactly where Saima left them.
+let _gdDraft = null;
 
 function toggleGarmentDetailsEdit() {
   const view = document.getElementById('garmentDetailsView');
@@ -3240,41 +3407,273 @@ function toggleGarmentDetailsEdit() {
 
   if (edit.style.display !== 'none') { renderGarmentDetails(currentProduct); return; }
 
-  edit.innerHTML = GARMENT_DETAIL_FIELDS.map(f => `
-    <div class="field-label" style="margin-top:8px">${f.label}</div>
-    <textarea id="gd-${f.key}" class="field-input" rows="2" dir="auto"
-      placeholder="${_esc(f.placeholder)}"
-      style="resize:vertical;min-height:38px"></textarea>`).join('') + `
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-primary" id="garmentDetailsSaveBtn" onclick="saveGarmentDetails(this)" style="flex:1"><i class="ti ti-device-floppy"></i> Save Details</button>
-      <button class="btn btn-secondary" onclick="toggleGarmentDetailsEdit()" style="flex:1">Cancel</button>
-    </div>`;
-
-  // Values set via .value so quotes, apostrophes and markup survive intact.
-  GARMENT_DETAIL_FIELDS.forEach(f => {
-    const el = document.getElementById('gd-' + f.key);
-    if (el) el.value = currentProduct[f.key] || '';
-  });
-
+  _gdDraft = getGarmentSpecs(currentProduct);
+  renderGarmentEditor();
   view.style.display = 'none';
   edit.style.display = 'block';
   if (btn) btn.textContent = 'Close';
 }
 
+function renderGarmentEditor() {
+  const edit = document.getElementById('garmentDetailsEdit');
+  if (!edit || !_gdDraft) return;
+  edit.innerHTML = GARMENT_SPEC_FIELDS.map(f => _gdFieldHtml(f)).join('') + `
+    <div id="gdStatus" style="display:none;font-size:12px;line-height:1.5;border-radius:8px;padding:9px 11px;margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-primary" id="garmentDetailsSaveBtn" onclick="saveGarmentDetails(this)" style="flex:1"><i class="ti ti-device-floppy"></i> Save Details</button>
+      <button class="btn btn-secondary" onclick="toggleGarmentDetailsEdit()" style="flex:1">Cancel</button>
+    </div>`;
+}
+
+// One field. Re-rendered on its own whenever its chips change, so nothing above
+// or below it moves and the sheet's scroll position is untouched.
+function _gdFieldHtml(f) {
+  return `<div id="gd-row-${f.key}" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">${_gdFieldInner(f)}</div>`;
+}
+
+function _gdFieldInner(f) {
+  const s = _gdDraft[f.key];
+  const chips = s.values.map((v, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--sand-light);border:1px solid var(--border);border-radius:16px;padding:5px 6px 5px 11px;font-size:12px;color:var(--ink);max-width:100%">
+       <span style="min-width:0;word-break:break-word">${_esc(v)}</span>
+       <button type="button" aria-label="Remove ${_esc(v)}" onclick="gdRemoveValue('${f.key}', ${i})"
+         style="flex-shrink:0;width:22px;height:22px;border:none;border-radius:11px;background:rgba(0,0,0,.06);color:var(--muted);cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center">×</button>
+     </span>`).join('');
+
+  // A single-valued descriptor that already has its value hides its input rather
+  // than pretending another can be added.
+  const inputHidden = !f.multi && s.values.length;
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
+      <div class="field-label" style="margin:0">${f.label}</div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">
+        <input type="checkbox" ${s.show ? 'checked' : ''} onchange="gdSetShow('${f.key}', this.checked)"
+          style="accent-color:var(--burgundy);width:15px;height:15px">
+        Show on website
+      </label>
+    </div>
+    ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${inputHidden ? '0' : '6px'}">${chips}</div>` : ''}
+    ${inputHidden ? '' : `<input type="text" id="gd-input-${f.key}" class="field-input" autocomplete="off"
+      placeholder="${_esc(f.placeholder)}" style="margin-bottom:0"
+      oninput="gdOpenSuggestions('${f.key}')" onfocus="gdOpenSuggestions('${f.key}')"
+      onkeydown="gdInputKey(event, '${f.key}')">`}`;
+}
+
+function _gdRerenderField(key) {
+  const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
+  const row = document.getElementById('gd-row-' + key);
+  if (f && row) row.innerHTML = _gdFieldInner(f);
+  _gdUpdateWebsitePreview();
+}
+
+// ── Draft edits ─────────────────────────────────────────────────────────────
+
+function gdAddValue(key, raw) {
+  const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
+  const s = _gdDraft && _gdDraft[key];
+  if (!f || !s) return;
+  const value = String(raw == null ? '' : raw).trim();
+  if (!value) return;
+
+  // Typing a value that already exists in any casing resolves to the one that is
+  // already there rather than adding a near-duplicate.
+  const existing = s.values.find(v => v.toLowerCase() === value.toLowerCase());
+  if (!existing) {
+    // A suggestion's casing wins over what was typed, so "organza" becomes
+    // "Organza" and the vocabulary stays tidy.
+    const canonical = garmentSuggestions(key).find(v => v.toLowerCase() === value.toLowerCase()) || value;
+    if (f.multi) s.values.push(canonical);
+    else s.values = [canonical];
+  }
+  closeGarmentSuggestions();
+  _gdRerenderField(key);
+}
+
+function gdRemoveValue(key, index) {
+  const s = _gdDraft && _gdDraft[key];
+  if (!s) return;
+  s.values = s.values.filter((_, i) => i !== index);
+  closeGarmentSuggestions();
+  _gdRerenderField(key);
+}
+
+function gdSetShow(key, on) {
+  if (_gdDraft && _gdDraft[key]) _gdDraft[key].show = !!on;
+  _gdUpdateWebsitePreview();
+}
+
+// ── Suggestions ─────────────────────────────────────────────────────────────
+// One panel for the whole app, fixed-positioned and parented to <body>. Fixed
+// positioning is what keeps it out of the Product Detail sheet's overflow: a
+// panel inside the sheet would be clipped at the sheet's edge, and near the
+// bottom of a long product the last suggestions would be unreachable.
+
+let _gdOpenKey = null;
+let _gdActiveIndex = -1;
+let _gdOptions = [];
+
+function _gdPanel() {
+  let el = document.getElementById('gdSuggestPanel');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'gdSuggestPanel';
+    el.setAttribute('role', 'listbox');
+    el.style.cssText = 'position:fixed;z-index:4000;display:none;background:#fff;border:1px solid var(--border);' +
+      'border-radius:10px;box-shadow:0 8px 24px rgba(28,20,16,.18);overflow-y:auto;overscroll-behavior:contain;' +
+      '-webkit-overflow-scrolling:touch;max-height:220px;padding:4px';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function closeGarmentSuggestions() {
+  const el = document.getElementById('gdSuggestPanel');
+  if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  _gdOpenKey = null; _gdActiveIndex = -1; _gdOptions = [];
+}
+
+// Opening one field closes any other, so only one panel is ever on screen.
+function gdOpenSuggestions(key) {
+  const f = GARMENT_SPEC_FIELDS.find(x => x.key === key);
+  const input = document.getElementById('gd-input-' + key);
+  if (!f || !input || !_gdDraft) return;
+  if (_gdOpenKey && _gdOpenKey !== key) closeGarmentSuggestions();
+
+  const typed = input.value.trim();
+  const chosen = new Set(_gdDraft[key].values.map(v => v.toLowerCase()));
+  const all = garmentSuggestions(key).filter(v => !chosen.has(v.toLowerCase()));
+  const matches = typed ? all.filter(v => v.toLowerCase().includes(typed.toLowerCase())) : all;
+
+  // Offering to add what was typed, unless it is already an exact suggestion or
+  // already chosen.
+  const exact = typed && (all.some(v => v.toLowerCase() === typed.toLowerCase()) || chosen.has(typed.toLowerCase()));
+  _gdOptions = matches.map(v => ({ value: v, add: false }));
+  if (typed && !exact) _gdOptions.unshift({ value: typed, add: true });
+
+  // An empty panel looks broken. With nothing to offer and nothing typed, there
+  // is simply no panel.
+  if (!_gdOptions.length) { closeGarmentSuggestions(); return; }
+
+  _gdOpenKey = key;
+  _gdActiveIndex = -1;
+  const panel = _gdPanel();
+  window._gdOptValues = _gdOptions.map(o => o.value);
+  panel.innerHTML = _gdOptions.map((o, i) =>
+    `<div role="option" data-i="${i}" onmousedown="event.preventDefault()" onclick="gdAddValue('${key}', window._gdOptValues[${i}])"
+       style="padding:9px 11px;border-radius:7px;font-size:13px;color:var(--ink);cursor:pointer;line-height:1.35">${
+      o.add ? `Add “${_esc(o.value)}”` : _esc(o.value)
+    }</div>`).join('');
+  panel.style.display = 'block';
+  _gdPositionPanel(input);
+}
+
+// Flips above the field when there is not enough room below, and never grows
+// past the viewport — so the last suggestion is always reachable, including at
+// the very bottom of the sheet and with a keyboard open.
+function _gdPositionPanel(input) {
+  const panel = _gdPanel();
+  const r = input.getBoundingClientRect();
+  const vh = window.innerHeight || 600;
+  const margin = 8;
+  const below = vh - r.bottom - margin;
+  const above = r.top - margin;
+  const flip = below < 140 && above > below;
+  const space = Math.max(96, Math.min(220, flip ? above : below));
+  panel.style.maxHeight = space + 'px';
+  panel.style.width = Math.round(r.width) + 'px';
+  panel.style.left = Math.round(r.left) + 'px';
+  if (flip) {
+    panel.style.top = 'auto';
+    panel.style.bottom = Math.round(vh - r.top + 4) + 'px';
+  } else {
+    panel.style.bottom = 'auto';
+    panel.style.top = Math.round(r.bottom + 4) + 'px';
+  }
+}
+
+function _gdHighlight(delta) {
+  if (!_gdOptions.length) return;
+  _gdActiveIndex = (_gdActiveIndex + delta + _gdOptions.length) % _gdOptions.length;
+  const panel = _gdPanel();
+  [...panel.children].forEach((c, i) => {
+    c.style.background = i === _gdActiveIndex ? 'var(--sand-light)' : '';
+    if (i === _gdActiveIndex) c.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function gdInputKey(e, key) {
+  if (e.key === 'ArrowDown') { e.preventDefault(); if (_gdOpenKey !== key) gdOpenSuggestions(key); _gdHighlight(1); return; }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); _gdHighlight(-1); return; }
+  if (e.key === 'Escape')    { closeGarmentSuggestions(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const picked = _gdActiveIndex >= 0 ? _gdOptions[_gdActiveIndex]?.value : e.target.value;
+    if (picked) gdAddValue(key, picked);
+    return;
+  }
+  // Tab is deliberately left alone: focus must be able to leave the field.
+  if (e.key === 'Tab') closeGarmentSuggestions();
+}
+
+// Outside taps, scrolling and resizing. The panel follows its field while the
+// sheet scrolls rather than detaching from it.
+document.addEventListener('click', e => {
+  if (!_gdOpenKey) return;
+  const panel = document.getElementById('gdSuggestPanel');
+  const input = document.getElementById('gd-input-' + _gdOpenKey);
+  if (panel && (panel.contains(e.target) || (input && input.contains(e.target)))) return;
+  closeGarmentSuggestions();
+}, true);
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeGarmentSuggestions(); });
+
+window.addEventListener('scroll', () => {
+  if (!_gdOpenKey) return;
+  const input = document.getElementById('gd-input-' + _gdOpenKey);
+  if (!input) return closeGarmentSuggestions();
+  const r = input.getBoundingClientRect();
+  // Scrolled out of view entirely — a panel pointing at nothing is worse than
+  // no panel.
+  if (r.bottom < 0 || r.top > (window.innerHeight || 600)) return closeGarmentSuggestions();
+  _gdPositionPanel(input);
+}, true);
+
+window.addEventListener('resize', () => {
+  if (!_gdOpenKey) return;
+  const input = document.getElementById('gd-input-' + _gdOpenKey);
+  if (input) _gdPositionPanel(input);
+});
+
+// ── Saving ──────────────────────────────────────────────────────────────────
+
+function _gdStatus(msg, kind) {
+  const el = document.getElementById('gdStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+  el.style.color = kind === 'error' ? '#8a1f1f' : 'var(--muted)';
+  el.style.background = kind === 'error' ? '#fdecea' : 'var(--sand-light)';
+}
+
 async function saveGarmentDetails(btn) {
-  if (!currentProduct) return;
+  if (!currentProduct || !_gdDraft) return;
   if (btn?.disabled) return;                       // guards double taps
   const p = currentProduct;
+  closeGarmentSuggestions();
 
-  const update = {};
-  GARMENT_DETAIL_FIELDS.forEach(f => {
-    // Empty string rather than null — /api/db strips nulls, so null would be a no-op
-    // and a cleared field would silently keep its old value.
-    update[f.key] = (document.getElementById('gd-' + f.key)?.value || '').trim();
+  // Anything typed but not yet turned into a chip is still what Saima meant.
+  GARMENT_SPEC_FIELDS.forEach(f => {
+    const el = document.getElementById('gd-input-' + f.key);
+    if (el && el.value.trim()) gdAddValue(f.key, el.value);
   });
+
+  const specs = _gdDraft;
+  const update = { garment_details: _buildGarmentDetails(specs), ..._buildLegacyMirrors(specs) };
 
   const orig = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
+  _gdStatus('');
   try {
     await db('update', 'products', { id: p.id, data: update });
     const idx = inventory.findIndex(x => x.id === p.id);
@@ -3284,14 +3683,23 @@ async function saveGarmentDetails(btn) {
     _invalidateMktPreview();
     setTimeout(() => { renderGarmentDetails(currentProduct); renderWebsiteSection(currentProduct); showToast('Garment details saved ✓'); }, 450);
   } catch (e) {
-    // Leave the editor open with everything the user typed still in place.
+    // The draft is untouched, so every chip and switch is still on screen and
+    // Save can simply be pressed again.
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = '<i class="ti ti-alert-circle"></i> Could not save';
       setTimeout(() => { if (btn) btn.innerHTML = orig; }, 2200);
     }
+    _gdStatus('Could not save: ' + e.message + ' Nothing was lost — press Save Details to try again.', 'error');
     showToast('Save failed: ' + e.message);
   }
+}
+
+// The Website section's preview lives elsewhere and reads saved data. While the
+// editor is open it has to reflect the draft instead, so a visibility switch
+// shows its consequence without saving first.
+function _gdUpdateWebsitePreview() {
+  if (currentProduct) renderWebsiteSection(currentProduct);
 }
 
 // ─── PRODUCT IMAGE RESOLVER (dual-read) ──────────────────────────────────────
@@ -6801,11 +7209,29 @@ function websiteHeroIsFallback(p) {
 }
 
 // Garment details with blank fields omitted — never "Made —" or "N/A".
+// The legacy shape the storefront reads today: the five original keys, joined
+// into one string each, and only the descriptors that are set to show. Built
+// from the canonical structured data rather than from the mirror columns, so the
+// preview and the payload cannot drift from what was just edited.
 function websiteGarmentDetails(p) {
+  const specs = getGarmentSpecs(p);
   const out = {};
-  GARMENT_DETAIL_FIELDS.forEach(f => {
-    const v = (p?.[f.key] || '').trim();
-    if (v) out[f.key] = v;
+  GARMENT_LEGACY_KEYS.forEach(k => {
+    if (garmentSpecShown(specs, k)) out[k] = specs[k].values.join(', ');
+  });
+  return out;
+}
+
+// The structured contract, for the storefront phase that follows. All seven
+// descriptors, values as arrays, hidden ones omitted entirely — the website
+// never has to know a hidden descriptor exists, and never has to decide whether
+// to print one.
+function websiteGarmentSpecs(p) {
+  const specs = getGarmentSpecs(p);
+  const out = [];
+  GARMENT_SPEC_FIELDS.forEach(f => {
+    if (!garmentSpecShown(specs, f.key)) return;
+    out.push({ key: f.key, label: f.label, values: specs[f.key].values.slice() });
   });
   return out;
 }
@@ -6837,6 +7263,9 @@ function buildPublicProductPayload(p) {
     sizes: getAvailableSizeLabels(p),
 
     garment_details: websiteGarmentDetails(p),
+    // Ordered, multi-valued and label-carrying. Supersedes garment_details once
+    // the storefront reads it.
+    garment_specs: websiteGarmentSpecs(p),
 
     images: websiteImages(p).map(i => {
       const variants = imageVariantUrls(i);
@@ -7029,7 +7458,9 @@ function renderWebsiteSection(p) {
     const payload = getPreviewProductPayload(p);
     const hero = websiteHeroImage(p);
     const totalPhotos = getProductImagesSync(p).length;
-    const gd = GARMENT_DETAIL_FIELDS.filter(f => payload.garment_details[f.key]);
+    const gdSpecs = (_gdDraft && currentProduct && p.id === currentProduct.id) ? _gdDraft : getGarmentSpecs(p);
+    const gdShown = GARMENT_SPEC_FIELDS.filter(f => garmentSpecShown(gdSpecs, f.key));
+    const gdHidden = GARMENT_SPEC_FIELDS.filter(f => gdSpecs[f.key].values.length && !gdSpecs[f.key].show).length;
     const row = (label, value) => `<div style="display:flex;gap:10px;margin-bottom:5px;align-items:flex-start">
         <div style="width:74px;flex-shrink:0;font-size:11px;color:var(--muted)">${label}</div>
         <div style="flex:1;min-width:0;font-size:12px;color:var(--ink);word-break:break-word">${value}</div>
@@ -7068,7 +7499,8 @@ function renderWebsiteSection(p) {
           : '';
         return row('Delivery', _esc(eff.text) + tag);
       })() +
-      (gd.length ? gd.map(f => row(f.label, _esc(payload.garment_details[f.key]))).join('') : '');
+      (gdShown.length ? gdShown.map(f => row(f.label, _esc(gdSpecs[f.key].values.join(', ')))).join('') : '') +
+      (gdHidden ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${gdHidden} detail${gdHidden === 1 ? '' : 's'} kept in the app but not shown on the website</div>` : '');
   }
 
   // Blocking issues and warnings, in plain language.
@@ -11696,7 +12128,7 @@ function openProductDetail(id, opts) {
   const _DETAIL_CORE_COLS = [
     'id','sku','name','name_ur','category','garment_type','season','colors','occasion','buyer_type',
     'description_en','description_ur','description_source','price','cost','status','reserved_for','customer_id',
-    'fabric','pieces','color','made','care',
+    'fabric','pieces','color','made','care','garment_details',
     'ideogram_prompt','caption_en','caption_ur','hashtags','collection_name',
     'exhibition_id','notes','created_at','sold_at','updated_at','size_inventory',
     'share_blurb','is_archived','collection_names','neckline','has_placket','has_dupatta','motifs',
