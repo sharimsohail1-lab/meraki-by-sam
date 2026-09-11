@@ -780,6 +780,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <button onclick="_setLeadsFilter('all',this)" class="tab-pill active" style="font-size:12px;padding:6px 14px">All</button>
           <button onclick="_setLeadsFilter('appna26',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">APPNA'26</button>
+          <button onclick="_setLeadsFilter('salon',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">Salon Rack</button>
         </div>
         <div id="leadsList"></div>
       </div>
@@ -2214,7 +2215,14 @@ let inventory = [];
 let customers = [];
 let exhibitions = [];
 let leads = [];
-let _leadsFilter = 'all'; // 'all' | 'appna26'
+let _leadsFilter = 'all'; // 'all' | one of LEAD_SOURCE_FILTERS
+
+// Which signup each QR belongs to. The values must match the allowlist in
+// signup.html exactly — they are what is actually stored on the lead.
+const LEAD_SOURCE_FILTERS = {
+  appna26: { label: "APPNA'26",    source_event: "APPNA'26" },
+  salon:   { label: 'Salon Rack',  source_event: 'Salon Rack 2026' },
+};
 
 // Columns fetched at boot for all list/summary views — excludes all base64 image fields.
 // Full product row (select *) is fetched on-demand when a product is opened.
@@ -15350,9 +15358,10 @@ function _setLeadsFilter(f, btn) {
 function renderLeads() {
   const list = document.getElementById('leadsList');
   let visible = [...leads];
-  if (_leadsFilter === 'appna26') visible = visible.filter(l => l.source_event === "APPNA'26");
+  const filter = LEAD_SOURCE_FILTERS[_leadsFilter];
+  if (filter) visible = visible.filter(l => l.source_event === filter.source_event);
   if (!visible.length) {
-    list.innerHTML = `<div class="empty" style="padding:40px 0"><i class="ti ti-user-plus"></i><p>${_leadsFilter === 'appna26' ? "No APPNA'26 leads yet." : 'No leads yet. Share the QR to get started.'}</p></div>`;
+    list.innerHTML = `<div class="empty" style="padding:40px 0"><i class="ti ti-user-plus"></i><p>${filter ? `No ${_esc(filter.label)} leads yet.` : 'No leads yet. Share the QR to get started.'}</p></div>`;
     return;
   }
   window._leadIds = [];
