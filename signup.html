@@ -53,11 +53,47 @@
 
 <div id="thankYou" class="thank-you">
   <div class="emoji">✨</div>
-  <h2>You're on the list!</h2>
-  <p>Saima will send new arrivals and catalog updates soon.<br>See you at the booth!</p>
+  <h2 id="thankYouTitle">You're on the list!</h2>
+  <p id="thankYouBody">Saima will send new arrivals and catalog updates soon.<br>See you at the booth!</p>
+  <a id="igLink" href="https://www.instagram.com/merakibysaima.usa/" style="display:none;margin-top:18px;font-size:14px;color:#6B1B2B;font-weight:600;text-decoration:underline">Follow us on Instagram</a>
 </div>
 
 <script>
+// One QR page, several places a rack can stand. The event a signup belongs to
+// comes from ?source= — but only through this allowlist, so a printed QR (or
+// anyone editing the address bar) can never write arbitrary text into the lead
+// record. An absent or unrecognised value stays on APPNA, which is what every
+// QR already in circulation encodes.
+const SOURCE_EVENTS = {
+  appna: "APPNA'26",
+  salon: 'Salon Rack 2026',
+};
+const DEFAULT_SOURCE = 'appna';
+
+// The salon rack has no booth and nobody standing at it, so the signup ends by
+// handing the visitor somewhere to keep looking. Hardcoded here because this
+// page is public and standalone: reaching the operator's configured Instagram
+// link would mean exposing the admin data proxy to the open web, which is a
+// worse trade than one constant. Keep it in step with Website Settings.
+const INSTAGRAM_URL = 'https://www.instagram.com/merakibysaima.usa/';
+const REDIRECT_DELAY_MS = 1300;
+
+const SOURCE_KEY = (() => {
+  const raw = String(new URLSearchParams(location.search).get('source') || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(SOURCE_EVENTS, raw) ? raw : DEFAULT_SOURCE;
+})();
+const SOURCE_EVENT = SOURCE_EVENTS[SOURCE_KEY];
+const IS_SALON = SOURCE_KEY === 'salon';
+
+// The salon visitor is not at an exhibition, so the booth language would be
+// nonsense to them. Everything else about the form is identical.
+if (IS_SALON) {
+  document.title = 'See new Meraki arrivals first';
+  document.querySelector('.header h1').textContent = 'See new Meraki arrivals first';
+  document.querySelector('.header p').textContent =
+    'Join our list for new collection drops, exhibitions, and special previews.';
+}
+
 async function submitLead() {
   const btn = document.getElementById('submitBtn');
   const errEl = document.getElementById('submitError');
@@ -77,7 +113,7 @@ async function submitLead() {
     phone,
     email: document.getElementById('f-email').value.trim() || null,
     source: 'qr',
-    source_event: "APPNA'26",
+    source_event: SOURCE_EVENT,
   };
 
   try {
@@ -91,6 +127,18 @@ async function submitLead() {
     document.getElementById('formSection').style.display = 'none';
     document.getElementById('thankYou').style.display = 'block';
     window.scrollTo(0, 0);
+
+    // Only here, after the API has confirmed the lead is saved. A failed save
+    // stays on the form — sending someone to Instagram having lost their
+    // details would be the worst of both.
+    if (IS_SALON) {
+      document.getElementById('thankYouTitle').textContent = "You're on the list ✓";
+      document.getElementById('thankYouBody').innerHTML = 'Taking you to Instagram…';
+      const link = document.getElementById('igLink');
+      link.href = INSTAGRAM_URL;
+      link.style.display = 'inline-block';      // a way through if the redirect is blocked
+      setTimeout(() => { location.href = INSTAGRAM_URL; }, REDIRECT_DELAY_MS);
+    }
   } catch(e) {
     errEl.textContent = e.message;
     errEl.style.display = 'block';
