@@ -979,7 +979,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-sparkles"></i> Current Campaign</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('homeCampaignSheet')"><i class="ti ti-x"></i></button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The big picture and words at the very top of the homepage.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The artwork at the very top of the homepage. Tapping it opens wherever the campaign goes.</div>
     <div id="homeCampaignBody"></div>
     <button class="btn btn-primary" style="width:100%" onclick="saveCampaign(this)"><i class="ti ti-device-floppy"></i> Save</button>
     <div style="height:20px"></div>
@@ -5894,6 +5894,8 @@ async function saveWebsiteSettings(btn) {
 // routable and ordered, and they deliberately cross collections.
 
 const HOMEPAGE_THEMES    = ['default', 'festive', 'bridal'];
+// Used when a campaign wants a button but nobody wrote words on it.
+const CAMPAIGN_CTA_FALLBACK = 'Shop Now';
 const HOMEPAGE_CTA_TYPES = ['none', 'collection', 'curated_edit', 'view_all'];
 const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
 const HOME_COUNT_MIN = 3;
@@ -6007,6 +6009,20 @@ function _normalizeCampaign(raw, index) {
   const seeded = !!(_homeText(c.heading) || _homeText(c.subheading) || mediaUrl ||
     (c.cta_destination_type && c.cta_destination_type !== 'none'));
 
+  // The website's hero is artwork-first: the whole picture is the link, so the
+  // button is a second, optional affordance rather than the only way in. A
+  // campaign saved before this flag existed had a visible button, so absent
+  // means true — nobody loses a button by upgrading.
+  const showCta = _homeBool(c.show_cta, true);
+  const cta = _normalizeCta(c);
+  // The storefront drops a button that has no words on it, so a wanted button
+  // gets the usual words rather than an error the operator has to clear. The
+  // destination is untouched either way: it is where the artwork goes now, not
+  // just where the button goes.
+  if (showCta && cta.cta_destination_type !== 'none' && !cta.cta_label) {
+    cta.cta_label = CAMPAIGN_CTA_FALLBACK;
+  }
+
   return {
     id:               _homeId(c.id) || _uuid(),
     show:             _homeBool(c.show, seeded),
@@ -6016,7 +6032,8 @@ function _normalizeCampaign(raw, index) {
     media_url:        mediaUrl,
     media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
     theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
-    ..._normalizeCta(c),
+    ...cta,
+    show_cta: showCta,
   };
 }
 
@@ -6247,9 +6264,13 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
 
   // Shared by both CTAs. A button that points nowhere reachable is worse than
   // no button: the customer taps it and lands on an error.
-  const checkCta = (block, c) => {
+  // requireLabel is false for campaigns: there the destination is where the
+  // artwork goes, the button is optional, and a blank label falls back rather
+  // than blocking a save. Everywhere else the button is the only way in, so it
+  // still has to have words on it.
+  const checkCta = (block, c, requireLabel = true) => {
     if (c.cta_destination_type === 'none') return;
-    if (!c.cta_label) add(block, 'cta_label', 'error', 'The button needs words on it.');
+    if (requireLabel && !c.cta_label) add(block, 'cta_label', 'error', 'The button needs words on it.');
     if (c.cta_destination_type === 'collection') {
       if (!c.cta_destination_ref) { add(block, 'cta_destination_ref', 'error', 'Choose the collection the button opens.'); return; }
       const name = collectionNameById(c.cta_destination_ref);
@@ -6269,10 +6290,15 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
   // itself rather than condemning the row.
   activeCampaigns(cfg).forEach((c, i) => {
     const who = c.heading ? `“${c.heading}”` : `Campaign ${i + 1}`;
-    if (!c.heading && !c.media_url) add('campaign', 'heading', 'error', `${who} needs a heading or a picture — otherwise there is nothing to show.`);
+    // The name is what the operator picks this campaign out of a list by, so it
+    // is required even though the website need not print it anywhere.
+    if (!c.heading) add('campaign', 'heading', 'error', `This campaign needs a name — otherwise the list just says “Campaign ${i + 1}”.`);
+    // Artwork carries the campaign now. Said, not enforced: a campaign can be
+    // set up before its artwork is ready.
+    if (!c.media_url) add('campaign', 'media_url', 'warning', `${who} has no artwork. The hero is the picture, so there is nothing to see until one is added.`);
     if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', `${who}: that picture or video did not finish adding. Add it again.`);
     if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', `${who} has no still image for its video. Visitors see a blank space until it loads.`);
-    checkCta('campaign', c);
+    checkCta('campaign', c, false);
   });
 
   if (cfg.featured_edit.show) {
@@ -6755,9 +6781,11 @@ function renderStorefrontHome() {
             : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Off</span>'}
         </div>
         <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">
-          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Image') : 'No picture'} ·
+          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Artwork') : '<span style="color:#7a4500">No artwork</span>'} ·
           ${{ default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[cam.theme]} ·
-          ${cam.cta_destination_type === 'none' ? 'no button' : _esc(describeCtaDestination(cam))}
+          ${cam.cta_destination_type === 'none'
+            ? 'goes nowhere'
+            : `${_esc(describeCtaDestination(cam))}${cam.show_cta === false ? ' · no button' : ''}`}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
@@ -6913,9 +6941,13 @@ function _homeToggle(label, on, handler, hint) {
 }
 
 // The CTA editor. Type first, then a destination only where one is meaningful.
-function _homeCtaBlock(cta, prefix) {
+//
+// `opts.destinationLead` rewords the block for the campaign, where the
+// destination is where the whole artwork goes and the button is optional.
+function _homeCtaBlock(cta, prefix, opts = {}) {
+  const lead = opts.destinationLead;
   const typeOptions = [
-    { value: 'none',         label: 'No button' },
+    { value: 'none',         label: lead ? 'Nowhere' : 'No button' },
     { value: 'collection',   label: 'A collection' },
     { value: 'curated_edit', label: 'An edit' },
     { value: 'view_all',     label: 'Everything' },
@@ -6934,15 +6966,33 @@ function _homeCtaBlock(cta, prefix) {
       </div>`
     : '';
 
-  const labelRow = cta.cta_destination_type === 'none' ? '' :
-    `<div class="field-label">Button text</div>
-     <input type="text" class="field-input" value="${_esc(cta.cta_label || '')}" placeholder="e.g. Shop Eid Picks"
-       oninput="${prefix}SetCtaLabel(this.value)" style="margin-bottom:8px">`;
+  const hasDest = cta.cta_destination_type !== 'none';
+  // On a campaign the button can be switched off without giving up the
+  // destination: the artwork still goes there.
+  const showCtaRow = lead && hasDest
+    ? _homeToggle('Show the button', cta.show_cta !== false, prefix + 'SetShowCta',
+        cta.show_cta === false
+          ? 'Off — the picture is still the link, there is just no button drawn on it.'
+          : 'A small button over the artwork. The picture itself is the link either way.')
+    : '';
 
-  return `<div class="field-label">Button goes to</div>
+  const wantsLabel = hasDest && (!lead || cta.show_cta !== false);
+  const labelRow = !wantsLabel ? '' :
+    `<div class="field-label">Button text${lead ? ' <span style="font-weight:400;color:var(--muted)">— optional</span>' : ''}</div>
+     <input type="text" class="field-input" value="${_esc(cta.cta_label || '')}" placeholder="${lead ? _esc(CAMPAIGN_CTA_FALLBACK) : 'e.g. Shop Eid Picks'}"
+       oninput="${prefix}SetCtaLabel(this.value)" style="margin-bottom:8px">
+     ${lead ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Left blank, the button says “${_esc(CAMPAIGN_CTA_FALLBACK)}”.</div>` : ''}`;
+
+  return `<div class="field-label">${lead ? 'The campaign goes to' : 'Button goes to'}</div>
     ${_homePills(typeOptions, cta.cta_destination_type, prefix + 'SetCtaType')}
-    ${refRow}${labelRow}
-    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.</div>`;
+    ${refRow}${showCtaRow}${labelRow}
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">${
+      lead
+        ? (hasDest
+            ? `Tapping the artwork opens ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
+            : 'The artwork is shown but leads nowhere — nothing happens when it is tapped.')
+        : `Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
+    }</div>`;
 }
 
 // ── Campaign editor ─────────────────────────────────────────────────────────
@@ -6984,15 +7034,16 @@ function renderCampaignEditor() {
 
   el.innerHTML =
     _homeIssueBanner('campaign', { ...d, show: true }) +
-    `<div class="field-label">Heading</div>
-     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Eid, in colour"
-       oninput="campaignSet('heading', this.value)" style="margin-bottom:10px">
+    `<div class="field-label">Campaign name</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Roselle"
+       oninput="campaignSet('heading', this.value)" style="margin-bottom:6px">
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">What you call this campaign in here — Roselle, Royal Muse, Eid 2027. The website may not print it anywhere, so put the name you want customers to read into the artwork itself.</div>
 
-     <div class="field-label">Under the heading</div>
+     <div class="field-label">Subheading <span style="font-weight:400;color:var(--muted)">— optional</span></div>
      <input type="text" class="field-input" value="${_esc(d.subheading || '')}" placeholder="e.g. Hand-finished pieces for the season"
        oninput="campaignSet('subheading', this.value)" style="margin-bottom:14px">
 
-     <div class="field-label">Picture or video</div>
+     <div class="field-label">Campaign artwork</div>
      ${media}
      <div id="homeCampaignUploadStatus" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
      <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -7000,7 +7051,7 @@ function renderCampaignEditor() {
        <button class="btn" style="flex:1;background:#fff;border:1px solid var(--border);font-size:12px" onclick="document.getElementById('homeCampaignVideoInput').click()"><i class="ti ti-video"></i> Video</button>
      </div>
      ${posterBtn}
-     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Landscape works best. Videos should be short and silent — the website plays them without sound.</div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The artwork is the homepage hero. Put the campaign or collection name into the picture itself if you want it read.<br>Use 16:9 — 1920×1080 or 1600×900. Other shapes are accepted and cropped to fit.<br>Videos should be short and silent — the website plays them without sound.</div>
 
      <div class="field-label">Look</div>
      ${_homePills([
@@ -7010,7 +7061,7 @@ function renderCampaignEditor() {
       ], d.theme, 'campaignSetTheme')}
      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Chooses the colours and mood the website already has ready. You are not picking colours yourself.</div>
 
-     ${_homeCtaBlock(d, 'campaign')}
+     ${_homeCtaBlock(d, 'campaign', { destinationLead: true })}
 
      ${_homeCampaignId
         ? `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px;margin-bottom:4px" onclick="deleteCampaignFromEditor()">Delete this campaign</button>`
@@ -7136,6 +7187,9 @@ function campaignSetCtaType(v) {
   renderCampaignEditor();
 }
 function campaignSetCtaLabel(v) { _homeDraft.cta_label = v; }
+// Switching the button off keeps the destination and the label: the artwork
+// still goes there, and turning the button back on restores its words.
+function campaignSetShowCta(v) { _homeDraft.show_cta = !!v; renderCampaignEditor(); }
 function campaignOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'campaign'); }
 function campaignClearMedia() {
   _homeDraft.media_url = null; _homeDraft.media_type = null; _homeDraft.media_poster_url = null;
