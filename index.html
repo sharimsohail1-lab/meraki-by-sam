@@ -3696,7 +3696,7 @@ function _newestEligibleProducts(limit) {
 // or deleted simply drops out here — its id stays in the stored config, because
 // unpublishing is reversible and the operator's choice should survive it.
 function effectiveNewArrivals(cfg = getHomepageConfig()) {
-  const n = cfg.new_arrivals;
+  const n = cfg.new_arrivals_selection;
   const excluded = new Set(n.excluded_ids);
   return n.included_ids
     .filter(id => !excluded.has(id))
@@ -3707,7 +3707,7 @@ function effectiveNewArrivals(cfg = getHomepageConfig()) {
 
 // Pieces that could be added back: publishable, not already in, not excluded.
 function newArrivalCandidates(cfg = getHomepageConfig()) {
-  const n = cfg.new_arrivals;
+  const n = cfg.new_arrivals_selection;
   const inSet = new Set(n.included_ids);
   return _newestEligibleProducts().filter(p => !inSet.has(p.id));
 }
@@ -3718,15 +3718,24 @@ function newArrivalCandidates(cfg = getHomepageConfig()) {
 async function seedNewArrivalsIfNeeded() {
   if (!websiteSettings) return false;
   const cfg = getHomepageConfig();
-  if (cfg.new_arrivals.seeded_at) return false;
+  if (cfg.new_arrivals_selection.seeded_at) return false;
   const ids = _newestEligibleProducts(NEW_ARRIVALS_SEED_COUNT).map(p => p.id);
   const stored = (websiteSettings.homepage_config && typeof websiteSettings.homepage_config === 'object')
     ? websiteSettings.homepage_config : {};
   // Written narrowly, on top of whatever is stored, so seeding an untouched
   // homepage does not turn it into a configured one.
+  // Deliberately NOT a normalized write. Normalizing would emit every block,
+  // and the storefront treats the mere existence of new_arrivals as "show this
+  // section" — so a background seed would switch a public section on. Only the
+  // selection key is added; everything already stored is passed through as it
+  // is, so an untouched homepage stays untouched.
   await _persistWebsiteSettings({ homepage_config: {
     ...stored,
-    new_arrivals: { ...(stored.new_arrivals || {}), seeded_at: new Date().toISOString(), included_ids: ids },
+    new_arrivals_selection: {
+      ...(stored.new_arrivals_selection || {}),
+      seeded_at: new Date().toISOString(),
+      included_ids: ids,
+    },
   }});
   console.log('[home] New Arrivals seeded with', ids.length, 'pieces');
   return true;
@@ -3738,11 +3747,11 @@ async function noteProductPublished(productId) {
   const id = _homeId(productId);
   if (!id || !websiteSettings) return false;
   const cfg = getHomepageConfig();
-  const n = cfg.new_arrivals;
+  const n = cfg.new_arrivals_selection;
   if (!n.seeded_at) return false;                 // seeding will pick it up
   if (n.excluded_ids.includes(id)) return false;  // removed by hand, stays removed
   if (n.included_ids.includes(id)) return false;  // already there
-  await saveHomepageConfig('new_arrivals', { included_ids: n.included_ids.concat(id) });
+  await saveHomepageConfig('new_arrivals_selection', { included_ids: n.included_ids.concat(id) });
   return true;
 }
 
@@ -3751,8 +3760,8 @@ async function noteProductPublished(productId) {
 async function includeNewArrival(productId) {
   const id = _homeId(productId);
   if (!id) return;
-  const n = getHomepageConfig().new_arrivals;
-  await saveHomepageConfig('new_arrivals', {
+  const n = getHomepageConfig().new_arrivals_selection;
+  await saveHomepageConfig('new_arrivals_selection', {
     included_ids: n.included_ids.includes(id) ? n.included_ids : n.included_ids.concat(id),
     excluded_ids: n.excluded_ids.filter(x => x !== id),
   });
@@ -3764,8 +3773,8 @@ async function includeNewArrival(productId) {
 async function excludeNewArrival(productId) {
   const id = _homeId(productId);
   if (!id) return;
-  const n = getHomepageConfig().new_arrivals;
-  await saveHomepageConfig('new_arrivals', {
+  const n = getHomepageConfig().new_arrivals_selection;
+  await saveHomepageConfig('new_arrivals_selection', {
     included_ids: n.included_ids.filter(x => x !== id),
     excluded_ids: n.excluded_ids.includes(id) ? n.excluded_ids : n.excluded_ids.concat(id),
   });
@@ -6022,11 +6031,12 @@ function _blankCampaign() {
 // its media, copy, button and visibility untouched, so nothing has to be
 // recreated by hand.
 function _normalizeCampaigns(src) {
-  // An empty array is not an answer while a legacy campaign object is still
-  // sitting there with content in it — that config predates this phase and its
-  // campaign must survive.
-  const raw = Array.isArray(src.campaigns) ? src.campaigns.filter(c => c && typeof c === 'object') : null;
-  const list = (raw && raw.length) ? raw : null;
+  // The presence of the key is what decides, not its length. A config that has
+  // campaigns[] at all was written by this phase, so an empty array means "no
+  // campaigns" and the singular mirror sitting beside it must not resurrect one.
+  // Only a config that predates the array falls back to the legacy object.
+  const list = Array.isArray(src.campaigns)
+    ? src.campaigns.filter(c => c && typeof c === 'object') : null;
   if (list) {
     const seen = new Set();
     return list.map((c, i) => _normalizeCampaign(c, i))
@@ -6043,6 +6053,7 @@ function normalizeHomepageConfig(raw) {
   const src = (raw && typeof raw === 'object') ? raw : {};
   const f = src.featured_edit || {};
   const n = src.new_arrivals || {};
+  const sel = src.new_arrivals_selection || {};
   const campaigns = _normalizeCampaigns(src);
 
   const sourceType = _homeEnum(f.source_type, FEATURED_SOURCES, 'new_arrivals');
@@ -6071,15 +6082,23 @@ function normalizeHomepageConfig(raw) {
       // as pieces are published. Kept so an older stored value round-trips.
       count:            _homeCount(n.count),
       exclude_featured: _homeBool(n.exclude_featured, true),
-      // The one-time seed. Null means it has not run; a timestamp means it has
-      // and must never run again, or a removal would come back on the next boot.
-      seeded_at:        _homeText(n.seeded_at),
-      // Everything in the section: the seed, everything published since, and
-      // anything added by hand. Order here is not meaningful — the effective
-      // list is sorted newest-first at read time.
-      included_ids:     _normalizeProductIds(n.included_ids),
-      // Removed by hand, and sticky: publishing cannot put these back.
-      excluded_ids:     _normalizeProductIds(n.excluded_ids),
+    },
+
+    // The hybrid New Arrivals selection, deliberately NOT inside new_arrivals.
+    //
+    // The deployed website hides its New Arrivals section while
+    // homepage_config.new_arrivals is absent, and shows it as soon as that key
+    // exists. The seed runs by itself at boot, so writing into that block would
+    // switch a public section on behind the operator's back. A sibling key is
+    // invisible to the storefront until Website Claude reads it.
+    //
+    //   seeded_at     null until the one-time seed has run, then never again
+    //   included_ids  the seed, everything published since, and manual adds
+    //   excluded_ids  removed by hand, and sticky against republishing
+    new_arrivals_selection: {
+      seeded_at:    _homeText(sel.seeded_at),
+      included_ids: _normalizeProductIds(sel.included_ids),
+      excluded_ids: _normalizeProductIds(sel.excluded_ids),
     },
     section_order: _normalizeSectionOrder(src.section_order),
     // Customer Looks is not built in this phase. The key is reserved so adding
@@ -6097,18 +6116,18 @@ function normalizeHomepageConfig(raw) {
 // The New Arrivals seed runs by itself at boot and writes into this object, so
 // key presence alone is no longer the test — a seeded-but-otherwise-untouched
 // config still means "unconfigured". Only an operator's own choices count.
-const _NA_SEED_KEYS = ['seeded_at', 'included_ids', 'excluded_ids'];
+// Written by the app itself rather than chosen by the operator: the New Arrivals
+// seed, and the compatibility mirror of the first campaign. Neither is evidence
+// that a homepage has been merchandised.
+const _HOMEPAGE_DERIVED_KEYS = ['new_arrivals_selection', 'campaign'];
 
 function isHomepageUnconfigured() {
   const raw = websiteSettings?.homepage_config;
   if (!raw || typeof raw !== 'object') return true;
   return !Object.keys(raw).some(k => {
+    if (_HOMEPAGE_DERIVED_KEYS.includes(k)) return false;
     const v = raw[k];
     if (v == null) return false;
-    if (k === 'new_arrivals') {
-      // Seed bookkeeping is not a choice. Anything else in here is.
-      return typeof v === 'object' && Object.keys(v).some(x => !_NA_SEED_KEYS.includes(x));
-    }
     if (Array.isArray(v)) return v.length > 0;
     if (typeof v === 'object') return Object.keys(v).length > 0;
     return true;
@@ -6322,12 +6341,24 @@ function validateSectionDraft(section, draft) {
 // of these rather than through the block writer. `campaign` on the config is
 // derived and is never written back on its own.
 
-// `campaign` is derived from campaigns[0] on every read, so storing it would
-// create a second copy that can disagree with the array. It is stripped from
-// everything written.
+// COMPATIBILITY MIRROR — audited against the deployed website, not assumed.
+//
+// api/site-settings.js on the website's main reads homepage_config.campaign and
+// knows nothing about campaigns[]. Dropping the singular key would take the live
+// hero down the moment this merges, so it is written on every save as a copy of
+// the first campaign, and {show:false} when there are none — which is exactly
+// what tells the storefront to put its default hero back.
+//
+// campaigns[] stays canonical: the mirror is derived on write and never read
+// back by this app. It comes out once Website Claude ships multi-campaign
+// support, and not before.
 function _storableHomepageConfig(cfg) {
-  const { campaign, ...rest } = cfg;
-  return rest;
+  const { campaign, campaigns, ...rest } = cfg;
+  return {
+    ...rest,
+    campaigns,
+    campaign: campaigns && campaigns.length ? campaigns[0] : { show: false },
+  };
 }
 
 async function saveCampaignList(list) {
@@ -6765,6 +6796,7 @@ function renderStorefrontHome() {
       ? '<span style="color:var(--muted)">No button</span>'
       : `${_esc(f.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(f))}`);
 
+  const sel = cfg.new_arrivals_selection;
   const arrivals = effectiveNewArrivals(cfg);
   window._naIds = arrivals.map(p => p.id);
   const newArrivalsBody =
@@ -6782,8 +6814,8 @@ function renderStorefrontHome() {
     (newArrivalCandidates(cfg).length
       ? `<button onclick="openNewArrivalPicker()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px"><i class="ti ti-plus"></i> Add a piece</button>`
       : '') +
-    (n.excluded_ids.length
-      ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px">${n.excluded_ids.length} piece${n.excluded_ids.length === 1 ? '' : 's'} removed by hand. Publishing will not bring ${n.excluded_ids.length === 1 ? 'it' : 'them'} back — add ${n.excluded_ids.length === 1 ? 'it' : 'them'} again above.</div>`
+    (sel.excluded_ids.length
+      ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px">${sel.excluded_ids.length} piece${sel.excluded_ids.length === 1 ? '' : 's'} removed by hand. Publishing will not bring ${sel.excluded_ids.length === 1 ? 'it' : 'them'} back — add ${sel.excluded_ids.length === 1 ? 'it' : 'them'} again above.</div>`
       : '');
 
   // Section cards, in the operator's order, each carrying its position and the
