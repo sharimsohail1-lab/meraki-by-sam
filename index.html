@@ -3659,6 +3659,128 @@ function gdSetShow(key, on) {
   _gdUpdateWebsitePreview();
 }
 
+// ── New Arrivals: seeded once, then it grows ────────────────────────────────
+// Not a fixed list and not a live query. It starts as the ten newest published
+// pieces, every piece published afterwards joins it, and nothing is evicted to
+// make room — the section is allowed to get longer.
+//
+// What makes it merchandising rather than a feed is that removals stick.
+// Excluding a piece by hand puts it in excluded_ids, and publishing can never
+// put it back; including an older piece adds it to included_ids and it stays.
+// The effective set is:  included − excluded, filtered to what is actually
+// publishable, newest first.
+
+const NEW_ARRIVALS_SEED_COUNT = 10;
+
+// Newness is publication, not editing. website_published_at is set once when a
+// piece first goes live and survives hide-and-republish, so correcting a price
+// cannot shuffle the homepage. created_at is the fallback for rows that predate
+// the column.
+function _publishedAtKey(p) {
+  return String(p?.website_published_at || p?.created_at || '');
+}
+
+// Eligibility is the app's existing rule, not a second opinion: published and
+// not archived.
+function isNewArrivalEligible(p) {
+  return isWebsiteVisibleProduct(p);
+}
+
+function _newestEligibleProducts(limit) {
+  const list = (inventory || []).filter(isNewArrivalEligible)
+    .sort((a, b) => _publishedAtKey(b).localeCompare(_publishedAtKey(a)));
+  return limit ? list.slice(0, limit) : list;
+}
+
+// The pieces the website should show, in order. Anything unpublished, archived
+// or deleted simply drops out here — its id stays in the stored config, because
+// unpublishing is reversible and the operator's choice should survive it.
+function effectiveNewArrivals(cfg = getHomepageConfig()) {
+  const n = cfg.new_arrivals_selection;
+  const excluded = new Set(n.excluded_ids);
+  return n.included_ids
+    .filter(id => !excluded.has(id))
+    .map(id => (inventory || []).find(p => p.id === id))
+    .filter(isNewArrivalEligible)
+    .sort((a, b) => _publishedAtKey(b).localeCompare(_publishedAtKey(a)));
+}
+
+// Pieces that could be added back: publishable, not already in, not excluded.
+function newArrivalCandidates(cfg = getHomepageConfig()) {
+  const n = cfg.new_arrivals_selection;
+  const inSet = new Set(n.included_ids);
+  return _newestEligibleProducts().filter(p => !inSet.has(p.id));
+}
+
+// The one-time seed. Runs when the section has never been seeded, fills it with
+// the ten newest publishable pieces, and stamps seeded_at so it can never run
+// again — otherwise every boot would undo the operator's removals.
+async function seedNewArrivalsIfNeeded() {
+  if (!websiteSettings) return false;
+  const cfg = getHomepageConfig();
+  if (cfg.new_arrivals_selection.seeded_at) return false;
+  const ids = _newestEligibleProducts(NEW_ARRIVALS_SEED_COUNT).map(p => p.id);
+  const stored = (websiteSettings.homepage_config && typeof websiteSettings.homepage_config === 'object')
+    ? websiteSettings.homepage_config : {};
+  // Written narrowly, on top of whatever is stored, so seeding an untouched
+  // homepage does not turn it into a configured one.
+  // Deliberately NOT a normalized write. Normalizing would emit every block,
+  // and the storefront treats the mere existence of new_arrivals as "show this
+  // section" — so a background seed would switch a public section on. Only the
+  // selection key is added; everything already stored is passed through as it
+  // is, so an untouched homepage stays untouched.
+  await _persistWebsiteSettings({ homepage_config: {
+    ...stored,
+    new_arrivals_selection: {
+      ...(stored.new_arrivals_selection || {}),
+      seeded_at: new Date().toISOString(),
+      included_ids: ids,
+    },
+  }});
+  console.log('[home] New Arrivals seeded with', ids.length, 'pieces');
+  return true;
+}
+
+// Called when a piece is published. No operator action, no button: publishing
+// IS the action. A piece removed by hand stays removed.
+async function noteProductPublished(productId) {
+  const id = _homeId(productId);
+  if (!id || !websiteSettings) return false;
+  const cfg = getHomepageConfig();
+  const n = cfg.new_arrivals_selection;
+  if (!n.seeded_at) return false;                 // seeding will pick it up
+  if (n.excluded_ids.includes(id)) return false;  // removed by hand, stays removed
+  if (n.included_ids.includes(id)) return false;  // already there
+  await saveHomepageConfig('new_arrivals_selection', { included_ids: n.included_ids.concat(id) });
+  return true;
+}
+
+// Add an older piece back by hand. Clears any exclusion, since choosing it is a
+// louder statement than having removed it once.
+async function includeNewArrival(productId) {
+  const id = _homeId(productId);
+  if (!id) return;
+  const n = getHomepageConfig().new_arrivals_selection;
+  await saveHomepageConfig('new_arrivals_selection', {
+    included_ids: n.included_ids.includes(id) ? n.included_ids : n.included_ids.concat(id),
+    excluded_ids: n.excluded_ids.filter(x => x !== id),
+  });
+  renderStorefrontHome();
+}
+
+// Remove by hand. The id is recorded in excluded_ids rather than merely dropped,
+// because that is what stops the automatic rule adding it back.
+async function excludeNewArrival(productId) {
+  const id = _homeId(productId);
+  if (!id) return;
+  const n = getHomepageConfig().new_arrivals_selection;
+  await saveHomepageConfig('new_arrivals_selection', {
+    included_ids: n.included_ids.filter(x => x !== id),
+    excluded_ids: n.excluded_ids.includes(id) ? n.excluded_ids : n.excluded_ids.concat(id),
+  });
+  renderStorefrontHome();
+}
+
 // ── The one-time pass over everything already in stock ──────────────────────
 // The per-product action is the normal way to do this. This is for the catalogue
 // that existed before the feature did: every product's colours are already on
@@ -5872,45 +5994,75 @@ function _normalizeProductIds(raw) {
   return out;
 }
 
-function normalizeHomepageConfig(raw) {
-  const src = (raw && typeof raw === 'object') ? raw : {};
-  const c = src.campaign || {};
-  const f = src.featured_edit || {};
-  const n = src.new_arrivals || {};
-
-  // media_type is only meaningful with a URL, and a poster only with a video.
+// One campaign. The same fields the single campaign always had, plus an id so
+// the app can edit one of several without position being its identity.
+function _normalizeCampaign(raw, index) {
+  const c = (raw && typeof raw === 'object') ? raw : {};
   const mediaUrl  = _homeText(c.media_url);
   const mediaType = mediaUrl ? _homeEnum(c.media_type, ['image', 'video'], 'image') : null;
 
-  const sourceType = _homeEnum(f.source_type, FEATURED_SOURCES, 'new_arrivals');
-
-  // "No campaign is running" and "a campaign is running that has no button" are
-  // different states and have to stay different in storage. `show` is what
-  // separates them, matching how the other two blocks already work.
-  //
-  // A campaign block that predates this flag is treated as active: it was saved
-  // deliberately, and inventing a false here would silently take a live campaign
-  // off the homepage.
-  // Default only. An explicit `show` always wins, including an explicit false.
-  // A campaign block carrying actual content but no flag predates this field and
-  // was saved deliberately, so it is treated as live; an empty block has nothing
-  // to put on screen and is not.
-  const campaignSeeded = !!src.campaign && typeof src.campaign === 'object' && !!(
-    _homeText(c.heading) || _homeText(c.subheading) || _homeText(c.media_url) ||
-    (c.cta_destination_type && c.cta_destination_type !== 'none')
-  );
+  // A campaign carrying content but no `show` predates the flag and was saved
+  // deliberately, so it counts as live; an empty one has nothing to put on
+  // screen and does not.
+  const seeded = !!(_homeText(c.heading) || _homeText(c.subheading) || mediaUrl ||
+    (c.cta_destination_type && c.cta_destination_type !== 'none'));
 
   return {
-    campaign: {
-      show:             _homeBool(c.show, campaignSeeded),
-      heading:          _homeText(c.heading),
-      subheading:       _homeText(c.subheading),
-      media_type:       mediaType,
-      media_url:        mediaUrl,
-      media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
-      theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
-      ..._normalizeCta(c),
-    },
+    id:               _homeId(c.id) || _uuid(),
+    show:             _homeBool(c.show, seeded),
+    heading:          _homeText(c.heading),
+    subheading:       _homeText(c.subheading),
+    media_type:       mediaType,
+    media_url:        mediaUrl,
+    media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
+    theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
+    ..._normalizeCta(c),
+  };
+}
+
+// The empty campaign, for the editor and for code that reads "the campaign"
+// when none exists yet.
+function _blankCampaign() {
+  return _normalizeCampaign({ show: false });
+}
+
+// campaigns[] is canonical. A config written before this phase has one
+// `campaign` object and no array — that campaign becomes the first entry, with
+// its media, copy, button and visibility untouched, so nothing has to be
+// recreated by hand.
+function _normalizeCampaigns(src) {
+  // The presence of the key is what decides, not its length. A config that has
+  // campaigns[] at all was written by this phase, so an empty array means "no
+  // campaigns" and the singular mirror sitting beside it must not resurrect one.
+  // Only a config that predates the array falls back to the legacy object.
+  const list = Array.isArray(src.campaigns)
+    ? src.campaigns.filter(c => c && typeof c === 'object') : null;
+  if (list) {
+    const seen = new Set();
+    return list.map((c, i) => _normalizeCampaign(c, i))
+      .filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+  }
+  const legacy = src.campaign;
+  const legacyHasContent = legacy && typeof legacy === 'object' && !!(
+    _homeText(legacy.heading) || _homeText(legacy.subheading) || _homeText(legacy.media_url) ||
+    (legacy.cta_destination_type && legacy.cta_destination_type !== 'none'));
+  return legacyHasContent ? [_normalizeCampaign(legacy, 0)] : [];
+}
+
+function normalizeHomepageConfig(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const f = src.featured_edit || {};
+  const n = src.new_arrivals || {};
+  const sel = src.new_arrivals_selection || {};
+  const campaigns = _normalizeCampaigns(src);
+
+  const sourceType = _homeEnum(f.source_type, FEATURED_SOURCES, 'new_arrivals');
+
+  return {
+    campaigns,
+    // The first campaign, kept under the old key so the many places that read
+    // "the campaign" keep working. Derived — never written back on its own.
+    campaign: campaigns[0] || _blankCampaign(),
     featured_edit: {
       show:        _homeBool(f.show, false),
       heading:     _homeText(f.heading),
@@ -5926,8 +6078,27 @@ function normalizeHomepageConfig(raw) {
     new_arrivals: {
       show:             _homeBool(n.show, true),
       heading:          _homeText(n.heading) || 'New Arrivals',
+      // Legacy. New Arrivals is no longer capped — it starts at ten and grows
+      // as pieces are published. Kept so an older stored value round-trips.
       count:            _homeCount(n.count),
       exclude_featured: _homeBool(n.exclude_featured, true),
+    },
+
+    // The hybrid New Arrivals selection, deliberately NOT inside new_arrivals.
+    //
+    // The deployed website hides its New Arrivals section while
+    // homepage_config.new_arrivals is absent, and shows it as soon as that key
+    // exists. The seed runs by itself at boot, so writing into that block would
+    // switch a public section on behind the operator's back. A sibling key is
+    // invisible to the storefront until Website Claude reads it.
+    //
+    //   seeded_at     null until the one-time seed has run, then never again
+    //   included_ids  the seed, everything published since, and manual adds
+    //   excluded_ids  removed by hand, and sticky against republishing
+    new_arrivals_selection: {
+      seeded_at:    _homeText(sel.seeded_at),
+      included_ids: _normalizeProductIds(sel.included_ids),
+      excluded_ids: _normalizeProductIds(sel.excluded_ids),
     },
     section_order: _normalizeSectionOrder(src.section_order),
     // Customer Looks is not built in this phase. The key is reserved so adding
@@ -5939,9 +6110,28 @@ function normalizeHomepageConfig(raw) {
 
 // True when nothing has ever been configured. The storefront's fallback signal:
 // an empty object means "keep doing exactly what you do today".
+// The storefront's fallback signal: nothing the operator has chosen, so keep
+// doing exactly what you do today.
+//
+// The New Arrivals seed runs by itself at boot and writes into this object, so
+// key presence alone is no longer the test — a seeded-but-otherwise-untouched
+// config still means "unconfigured". Only an operator's own choices count.
+// Written by the app itself rather than chosen by the operator: the New Arrivals
+// seed, and the compatibility mirror of the first campaign. Neither is evidence
+// that a homepage has been merchandised.
+const _HOMEPAGE_DERIVED_KEYS = ['new_arrivals_selection', 'campaign'];
+
 function isHomepageUnconfigured() {
   const raw = websiteSettings?.homepage_config;
-  return !raw || typeof raw !== 'object' || !Object.keys(raw).length;
+  if (!raw || typeof raw !== 'object') return true;
+  return !Object.keys(raw).some(k => {
+    if (_HOMEPAGE_DERIVED_KEYS.includes(k)) return false;
+    const v = raw[k];
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v).length > 0;
+    return true;
+  });
 }
 
 function getHomepageConfig() {
@@ -5951,7 +6141,17 @@ function getHomepageConfig() {
 // Is a campaign actually running? Nothing else may be used to answer this — a
 // campaign with no button, or with no heading, is still a running campaign.
 function isCampaignActive(cfg = getHomepageConfig()) {
-  return !isHomepageUnconfigured() && cfg.campaign.show === true;
+  return !isHomepageUnconfigured() && cfg.campaigns.some(c => c.show === true);
+}
+
+// The campaigns the website would show, in order. Order is the array's own
+// order — explicit, moved by the operator, and nothing else decides it.
+function activeCampaigns(cfg = getHomepageConfig()) {
+  return cfg.campaigns.filter(c => c.show === true);
+}
+
+function campaignById(id, cfg = getHomepageConfig()) {
+  return cfg.campaigns.find(c => c.id === id) || null;
 }
 
 // Whether a deactivated campaign still has something to switch back on. Turning
@@ -5959,6 +6159,10 @@ function isCampaignActive(cfg = getHomepageConfig()) {
 // true until the operator changes the fields themselves.
 function campaignHasContent(c = getHomepageConfig().campaign) {
   return !!(c.heading || c.subheading || c.media_url || c.cta_destination_type !== 'none');
+}
+
+function anyCampaignHasContent(cfg = getHomepageConfig()) {
+  return cfg.campaigns.some(campaignHasContent);
 }
 
 // Is a section switched on? One place, because the campaign says it with `show`
@@ -5978,9 +6182,10 @@ function campaignHasContent(c = getHomepageConfig().campaign) {
 function campaignTargetLock(kind, id) {
   if (!id) return null;
   const cfg = getHomepageConfig();
-  if (!isCampaignActive(cfg)) return null;
-  const c = cfg.campaign;
-  if (c.cta_destination_type !== kind || c.cta_destination_ref !== id) return null;
+  // Any live campaign pointing here is enough to hold the target open.
+  const holder = activeCampaigns(cfg).find(
+    c => c.cta_destination_type === kind && c.cta_destination_ref === id);
+  if (!holder) return null;
   return kind === 'curated_edit'
     ? 'This edit is used by the current homepage campaign. Change or remove the campaign button before hiding it.'
     : 'This collection is used by the current homepage campaign. Change or remove the campaign button before hiding it.';
@@ -6006,7 +6211,7 @@ function enabledHomepageSections(cfg = getHomepageConfig()) {
 async function saveHomepageSectionOrder(order) {
   const cfg = getHomepageConfig();
   const next = normalizeHomepageConfig({ ...cfg, section_order: _normalizeSectionOrder(order) });
-  await _persistWebsiteSettings({ homepage_config: next });
+  await _persistWebsiteSettings({ homepage_config: _storableHomepageConfig(next) });
   return next;
 }
 
@@ -6060,15 +6265,15 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
   };
 
   const campaignLive = isCampaignActive(cfg);
-  if (campaignLive) {
-    const c = cfg.campaign;
-    // Something has to be on screen. A heading or a picture is enough; neither
-    // means the website would render an empty band.
-    if (!c.heading && !c.media_url) add('campaign', 'heading', 'error', 'A campaign needs a heading or a picture — otherwise there is nothing to show.');
-    if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', 'That picture or video did not finish adding. Add it again.');
-    if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', 'No still image for the video. Visitors see a blank space until it loads.');
+  // Each live campaign is checked on its own — one broken campaign should name
+  // itself rather than condemning the row.
+  activeCampaigns(cfg).forEach((c, i) => {
+    const who = c.heading ? `“${c.heading}”` : `Campaign ${i + 1}`;
+    if (!c.heading && !c.media_url) add('campaign', 'heading', 'error', `${who} needs a heading or a picture — otherwise there is nothing to show.`);
+    if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', `${who}: that picture or video did not finish adding. Add it again.`);
+    if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', `${who} has no still image for its video. Visitors see a blank space until it loads.`);
     checkCta('campaign', c);
-  }
+  });
 
   if (cfg.featured_edit.show) {
     const f = cfg.featured_edit;
@@ -6122,27 +6327,92 @@ function homepageIssuesFor(section, cfg = getHomepageConfig()) {
 // to be correct before it can be stored.
 function validateSectionDraft(section, draft) {
   const cfg = getHomepageConfig();
-  const next = normalizeHomepageConfig({ ...cfg, [section]: { ...cfg[section], ...draft } });
+  // A campaign draft is validated as itself — alone, so another campaign's
+  // problems do not appear in this editor and vice versa.
+  const next = section === 'campaign'
+    ? normalizeHomepageConfig({ ...cfg, campaigns: [{ ...draft, id: draft.id || _uuid() }] })
+    : normalizeHomepageConfig({ ...cfg, [section]: { ...cfg[section], ...draft } });
   return { result: validateHomepageConfig(next), issues: homepageIssuesFor(section, next) };
 }
 
 // Every write goes through here: normalise, then store the whole object.
+// ── Writing campaigns ───────────────────────────────────────────────────────
+// campaigns[] is the canonical array, so every campaign write goes through one
+// of these rather than through the block writer. `campaign` on the config is
+// derived and is never written back on its own.
+
+// COMPATIBILITY MIRROR — audited against the deployed website, not assumed.
+//
+// api/site-settings.js on the website's main reads homepage_config.campaign and
+// knows nothing about campaigns[]. Dropping the singular key would take the live
+// hero down the moment this merges, so it is written on every save as a copy of
+// the first campaign, and {show:false} when there are none — which is exactly
+// what tells the storefront to put its default hero back.
+//
+// campaigns[] stays canonical: the mirror is derived on write and never read
+// back by this app. It comes out once Website Claude ships multi-campaign
+// support, and not before.
+function _storableHomepageConfig(cfg) {
+  const { campaign, campaigns, ...rest } = cfg;
+  return {
+    ...rest,
+    campaigns,
+    campaign: campaigns && campaigns.length ? campaigns[0] : { show: false },
+  };
+}
+
+async function saveCampaignList(list) {
+  const cfg = getHomepageConfig();
+  const next = normalizeHomepageConfig({ ...cfg, campaigns: list });
+  await _persistWebsiteSettings({ homepage_config: _storableHomepageConfig(next) });
+  return next;
+}
+
+// Named for the array it writes into, deliberately: saveCampaign() is already
+// the editor's Save button handler further down this file, and in one shared
+// scope the later declaration silently wins.
+async function saveCampaignById(id, patch) {
+  const cfg = getHomepageConfig();
+  return saveCampaignList(cfg.campaigns.map(c => c.id === id ? { ...c, ...patch } : c));
+}
+
+async function addCampaign(draft) {
+  const cfg = getHomepageConfig();
+  const created = _normalizeCampaign({ ...draft, id: _uuid() });
+  await saveCampaignList(cfg.campaigns.concat(created));
+  return created;
+}
+
+async function removeCampaign(id) {
+  const cfg = getHomepageConfig();
+  return saveCampaignList(cfg.campaigns.filter(c => c.id !== id));
+}
+
+async function moveCampaign(id, dir) {
+  const cfg = getHomepageConfig();
+  const i = cfg.campaigns.findIndex(c => c.id === id);
+  if (i < 0) return;
+  const next = _moveInArray(cfg.campaigns, i, dir);
+  if (next === cfg.campaigns) return;
+  await saveCampaignList(next);
+  renderStorefrontHome();
+}
+
 async function saveHomepageConfig(block, patch) {
   const cfg = getHomepageConfig();
-  const rawBlock = (websiteSettings?.homepage_config || {})[block];
-  const merged = { ...cfg[block], ...patch };
 
-  // Whether a campaign is live is only ever an explicit decision — saving one
-  // from an editor, or Use Default Homepage. A `show` the stored config never
-  // actually had must not be carried in by this merge, or the very first save
-  // of a campaign would inherit the "no campaign yet" default and file a live
-  // campaign as inactive.
-  if (block === 'campaign' && !('show' in patch) && !(rawBlock && typeof rawBlock === 'object' && 'show' in rawBlock)) {
-    delete merged.show;
+  // `campaign` is a view of the first entry in campaigns[]. Writing through it
+  // is still supported — there is one campaign on most homepages, and every
+  // existing caller means "the campaign" — but it lands in the array, which is
+  // what is actually stored.
+  if (block === 'campaign') {
+    if (!cfg.campaigns.length) { await addCampaign(patch); return getHomepageConfig(); }
+    return saveCampaignById(cfg.campaigns[0].id, patch);
   }
 
+  const merged = { ...cfg[block], ...patch };
   const next = normalizeHomepageConfig({ ...cfg, [block]: merged });
-  await _persistWebsiteSettings({ homepage_config: next });
+  await _persistWebsiteSettings({ homepage_config: _storableHomepageConfig(next) });
   return next;
 }
 
@@ -6282,8 +6552,11 @@ async function deleteCuratedEdit(id) {
   // not the same as a product merely being unpublished, which is left alone.
   const cfg = getHomepageConfig();
   const patch = {};
-  if (cfg.campaign.cta_destination_type === 'curated_edit' && cfg.campaign.cta_destination_ref === id) {
-    patch.campaign = { cta_destination_type: 'none', cta_destination_ref: null, cta_label: null };
+  if (cfg.campaigns.some(c => c.cta_destination_type === 'curated_edit' && c.cta_destination_ref === id)) {
+    await saveCampaignList(cfg.campaigns.map(c =>
+      (c.cta_destination_type === 'curated_edit' && c.cta_destination_ref === id)
+        ? { ...c, cta_destination_type: 'none', cta_destination_ref: null, cta_label: null }
+        : c));
   }
   if (cfg.featured_edit.cta_destination_type === 'curated_edit' && cfg.featured_edit.cta_destination_ref === id) {
     patch.featured_edit = { cta_destination_type: 'none', cta_destination_ref: null, cta_label: null };
@@ -6467,24 +6740,50 @@ function renderStorefrontHome() {
   }[f.source_type];
 
   const campaignActive = isCampaignActive(cfg);
-  const campaignBody = !campaignActive
-    ? `<div style="font-size:12px;color:var(--ink);line-height:1.6">The website is showing its usual homepage.</div>` +
-      (campaignHasContent(c)
-        ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">Your last campaign${c.heading ? ' — ' + _esc(c.heading) : ''} is kept and can be switched back on.</div>
-           <button onclick="reactivateCampaign()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use this campaign again</button>`
-        : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">No campaign has been set up yet.</div>`)
-    :
-    _homeRow('Heading',  c.heading ? _esc(c.heading) : _homeMissing) +
-    _homeRow('Look',     { default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[c.theme]) +
-    _homeRow('Picture',  c.media_url
-      ? (c.media_type === 'video'
-          ? 'A video' + (c.media_poster_url ? ' with a still' : ' — no still image set')
-          : 'An image')
-      : _homeMissing) +
-    _homeRow('Button',   c.cta_destination_type === 'none'
-      ? '<span style="color:var(--muted)">No button</span>'
-      : `${_esc(c.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(c))}`) +
-    `<button onclick="useDefaultHomepage()" style="margin-top:12px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use Default Homepage</button>`;
+  const live = activeCampaigns(cfg);
+
+  // One row per campaign, in the order the website will show them.
+  const campaignRow = (cam, i) => {
+    const pos = cam.show ? live.indexOf(cam) + 1 : null;
+    const last = i === cfg.campaigns.length - 1;
+    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-top:${i ? '1px solid var(--border)' : 'none'}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600;color:var(--ink);word-break:break-word">${cam.heading ? _esc(cam.heading) : '<span style="font-weight:400;color:var(--muted)">Untitled campaign</span>'}</span>
+          ${cam.show
+            ? `<span style="font-size:10px;color:#1d5c3f;background:#e7f4ed;border-radius:10px;padding:2px 8px">Live · ${pos}</span>`
+            : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Off</span>'}
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">
+          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Image') : 'No picture'} ·
+          ${{ default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[cam.theme]} ·
+          ${cam.cta_destination_type === 'none' ? 'no button' : _esc(describeCtaDestination(cam))}
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="moveCampaign('${cam.id}', -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:30px;height:30px;opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-chevron-up"></i></button>
+        <button onclick="moveCampaign('${cam.id}', 1)" ${last ? 'disabled' : ''} title="Move down" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:30px;height:30px;opacity:${last ? '.35' : '1'}"><i class="ti ti-chevron-down"></i></button>
+        <button onclick="toggleCampaignShow('${cam.id}')" title="${cam.show ? 'Switch off' : 'Switch on'}" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:30px;height:30px"><i class="ti ti-${cam.show ? 'eye-off' : 'eye'}"></i></button>
+        <button onclick="openCampaignEditor('${cam.id}')" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 12px;min-height:30px">Edit</button>
+      </div>
+    </div>`;
+  };
+
+  const addCampaignBtn = `<button onclick="openCampaignEditor(null)" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px"><i class="ti ti-plus"></i> Add campaign</button>`;
+
+  const campaignBody = !cfg.campaigns.length
+    ? `<div style="font-size:12px;color:var(--ink);line-height:1.6">The website is showing its usual homepage.</div>
+       <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">No campaign has been set up yet.</div>` + addCampaignBtn
+    : cfg.campaigns.map(campaignRow).join('') +
+      (campaignActive
+        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${addCampaignBtn}
+             <button onclick="useDefaultHomepage()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use Default Homepage</button>
+           </div>`
+        : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px">The website is showing its usual homepage. ${anyCampaignHasContent(cfg) ? 'These are kept and can be switched back on.' : ''}</div>
+           <div style="display:flex;gap:8px;flex-wrap:wrap">
+             ${anyCampaignHasContent(cfg) ? `<button onclick="reactivateCampaign()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px">Use these campaigns again</button>` : ''}
+             ${addCampaignBtn}
+           </div>`);
 
   const featuredBody =
     `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Pieces you pick yourself, for a story you want to tell.</div>` +
@@ -6497,11 +6796,27 @@ function renderStorefrontHome() {
       ? '<span style="color:var(--muted)">No button</span>'
       : `${_esc(f.cta_label || 'Unnamed button')} → ${_esc(describeCtaDestination(f))}`);
 
+  const sel = cfg.new_arrivals_selection;
+  const arrivals = effectiveNewArrivals(cfg);
+  window._naIds = arrivals.map(p => p.id);
   const newArrivalsBody =
-    `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Your newest pieces, kept up to date by the website on its own.</div>` +
+    `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Starts with your ten newest pieces and grows on its own — every piece you publish joins it. Remove one and it stays removed.</div>` +
     _homeRow('Heading', _esc(n.heading)) +
-    _homeRow('Pieces',  `${n.count} newest`) +
-    _homeRow('Overlap', n.exclude_featured ? 'Skips anything already featured above' : 'May repeat featured pieces');
+    _homeRow('Showing', `${arrivals.length} piece${arrivals.length === 1 ? '' : 's'}`) +
+    _homeRow('Overlap', n.exclude_featured ? 'Skips anything already featured above' : 'May repeat featured pieces') +
+    (arrivals.length
+      ? `<div style="margin-top:8px">` + arrivals.map((p, i) => `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:${i ? '1px solid var(--border)' : '1px solid var(--border)'}">
+            <span style="flex:1;min-width:0;font-size:12px;color:var(--ink);word-break:break-word">${_esc(p.name || p.sku)}</span>
+            <button onclick="excludeNewArrival(window._naIds[${i}])" title="Remove from New Arrivals" style="flex-shrink:0;background:none;border:none;color:var(--muted);cursor:pointer;width:28px;height:28px;font-size:14px">×</button>
+          </div>`).join('') + `</div>`
+      : `<div style="font-size:11px;color:#7a4500;line-height:1.5;margin-top:6px">Nothing publishable is in New Arrivals yet.</div>`) +
+    (newArrivalCandidates(cfg).length
+      ? `<button onclick="openNewArrivalPicker()" style="margin-top:10px;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:7px 14px;min-height:32px"><i class="ti ti-plus"></i> Add a piece</button>`
+      : '') +
+    (sel.excluded_ids.length
+      ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px">${sel.excluded_ids.length} piece${sel.excluded_ids.length === 1 ? '' : 's'} removed by hand. Publishing will not bring ${sel.excluded_ids.length === 1 ? 'it' : 'them'} back — add ${sel.excluded_ids.length === 1 ? 'it' : 'them'} again above.</div>`
+      : '');
 
   // Section cards, in the operator's order, each carrying its position and the
   // controls to move it. A section that is off keeps its place in this list so
@@ -6509,7 +6824,7 @@ function renderStorefrontHome() {
   // position on the website.
   const bodies  = { campaign: campaignBody, featured_edit: featuredBody, new_arrivals: newArrivalsBody };
   const icons   = { campaign: 'ti-sparkles', featured_edit: 'ti-star', new_arrivals: 'ti-clock-plus' };
-  const editors = { campaign: 'openCampaignEditor()', featured_edit: 'openFeaturedEditEditor()', new_arrivals: 'openNewArrivalsEditor()' };
+  const editors = { campaign: 'openCampaignEditor(null)', featured_edit: 'openFeaturedEditEditor()', new_arrivals: 'openNewArrivalsEditor()' };
 
   const sectionCards = cfg.section_order.map((key, i) => {
     const on = isHomepageSectionEnabled(key, cfg);
@@ -6535,7 +6850,7 @@ function renderStorefrontHome() {
         <div style="display:flex;gap:4px;flex-shrink:0">
           <button onclick="moveHomepageSection('${key}', -1)" ${i === 0 ? 'disabled' : ''} title="Move up" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:32px;height:32px;opacity:${i === 0 ? '.35' : '1'}"><i class="ti ti-chevron-up"></i></button>
           <button onclick="moveHomepageSection('${key}', 1)" ${i === cfg.section_order.length - 1 ? 'disabled' : ''} title="Move down" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink);cursor:pointer;width:32px;height:32px;opacity:${i === cfg.section_order.length - 1 ? '.35' : '1'}"><i class="ti ti-chevron-down"></i></button>
-          <button onclick="${editors[key]}" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px">Edit</button>
+          <button onclick="${editors[key]}" style="background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 13px;min-height:32px">${key === 'campaign' ? 'Add' : 'Edit'}</button>
         </div>
       </div>
       ${bodies[key]}
@@ -6632,8 +6947,13 @@ function _homeCtaBlock(cta, prefix) {
 
 // ── Campaign editor ─────────────────────────────────────────────────────────
 
-function openCampaignEditor() {
-  _homeDraft = { ...getHomepageConfig().campaign };
+// null id means "a new campaign" — the editor is the same either way.
+let _homeCampaignId = null;
+
+function openCampaignEditor(id) {
+  const existing = id ? campaignById(id) : null;
+  _homeCampaignId = existing ? existing.id : null;
+  _homeDraft = existing ? { ...existing } : _blankCampaign();
   renderCampaignEditor();
   openSheet('homeCampaignSheet');
 }
@@ -6692,6 +7012,9 @@ function renderCampaignEditor() {
 
      ${_homeCtaBlock(d, 'campaign')}
 
+     ${_homeCampaignId
+        ? `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px;margin-bottom:4px" onclick="deleteCampaignFromEditor()">Delete this campaign</button>`
+        : ''}
      ${d.show
         ? `<div style="border-top:1px solid var(--border);padding-top:12px">
              <button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;color:var(--ink)" onclick="useDefaultHomepage()">Use Default Homepage instead</button>
@@ -6706,10 +7029,15 @@ function renderCampaignEditor() {
 // — deactivating is not saving a campaign, so an incomplete one is no obstacle.
 async function useDefaultHomepage() {
   if (_homeBusy) return;
-  if (!confirm('Use the default homepage instead of the current campaign?')) return;
+  const running = activeCampaigns().length;
+  if (!confirm(running > 1
+    ? `Use the default homepage instead of the ${running} campaigns running now?`
+    : 'Use the default homepage instead of the current campaign?')) return;
   _homeBusy = true;
   try {
-    await saveHomepageConfig('campaign', { show: false });
+    // Every campaign, not just the first: the homepage is either running
+    // campaigns or it is not.
+    await saveCampaignList(getHomepageConfig().campaigns.map(c => ({ ...c, show: false })));
     closeSheet('homeCampaignSheet');
     renderStorefrontHome();
     showToast('Default homepage is showing ✓');
@@ -6718,11 +7046,60 @@ async function useDefaultHomepage() {
   } finally { _homeBusy = false; }
 }
 
+async function toggleCampaignShow(id) {
+  const c = campaignById(id);
+  if (!c) return;
+  try {
+    await saveCampaignById(id, { show: !c.show });
+    renderStorefrontHome();
+  } catch (e) { showToast('Could not save: ' + e.message); }
+}
+
+// Adding an older piece back. The same sheet the destination pickers use, so
+// there is one list pattern on this screen rather than two.
+function openNewArrivalPicker() {
+  const list = document.getElementById('homeCtaRefList');
+  const title = document.getElementById('homeCtaRefTitle');
+  if (!list) return;
+  if (title) title.textContent = 'Add a piece';
+  const options = newArrivalCandidates();
+  window._naAddIds = options.map(p => p.id);
+  list.innerHTML = options.length
+    ? options.map((p, i) => `<div onclick="pickNewArrival(window._naAddIds[${i}])" style="display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-bottom:6px;cursor:pointer">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--ink);word-break:break-word">${_esc(p.name || p.sku)}</div>
+          <div style="font-size:11px;color:var(--muted)">${_esc(p.sku || '')}</div>
+        </div>
+      </div>`).join('')
+    : '<div style="font-size:13px;color:var(--muted);text-align:center;padding:24px 8px;line-height:1.6">Every published piece is already in New Arrivals.</div>';
+  openSheet('homeCtaRefSheet');
+}
+
+async function pickNewArrival(id) {
+  closeSheet('homeCtaRefSheet');
+  try { await includeNewArrival(id); showToast('Added to New Arrivals ✓'); }
+  catch (e) { showToast('Could not add: ' + e.message); }
+}
+
+async function deleteCampaignFromEditor() {
+  const c = _homeCampaignId && campaignById(_homeCampaignId);
+  if (!c) return;
+  if (!confirm(`Delete ${c.heading ? '“' + c.heading + '”' : 'this campaign'}? The other campaigns are not affected.`)) return;
+  try {
+    await removeCampaign(c.id);
+    closeSheet('homeCampaignSheet');
+    renderStorefrontHome();
+    showToast('Campaign deleted');
+  } catch (e) { showToast('Could not delete: ' + e.message); }
+}
+
 async function reactivateCampaign() {
   if (_homeBusy) return;
   _homeBusy = true;
   try {
-    await saveHomepageConfig('campaign', { show: true });
+    // Everything that has something to show comes back on.
+    await saveCampaignList(getHomepageConfig().campaigns.map(
+      c => campaignHasContent(c) ? { ...c, show: true } : c));
     renderStorefrontHome();
     showToast('Campaign is showing again ✓');
   } catch (e) {
@@ -6776,7 +7153,8 @@ async function saveCampaign(btn) {
     // exactly why it has to be fit to be live before it can be saved.
     const blocked = _homeBlockedBySection('campaign', { ..._homeDraft, show: true }, true);
     if (blocked) { showToast(blocked); renderCampaignEditor(); return; }
-    await saveHomepageConfig('campaign', { ..._homeDraft, show: true });
+    if (_homeCampaignId) await saveCampaignById(_homeCampaignId, { ..._homeDraft, show: true });
+    else await addCampaign({ ..._homeDraft, show: true });
     closeSheet('homeCampaignSheet');
     renderStorefrontHome();
     showToast('Campaign saved ✓');
@@ -7961,6 +8339,14 @@ async function publishProductToWebsite() {
 
   const okSave = await _saveWebsiteFields(data, { busyMsg: 'Publishing…', doneMsg: 'Published ✓' });
   if (!okSave && btn) btn.disabled = false;
+
+  // Publishing is what puts a piece in New Arrivals — there is no second button
+  // to remember. A piece the operator removed by hand stays removed; this is
+  // best-effort and never blocks the publish that already succeeded.
+  if (okSave) {
+    try { await noteProductPublished(currentProduct.id); }
+    catch (e) { console.warn('[home] could not add to New Arrivals', e.message); }
+  }
 }
 
 async function hideProductFromWebsite() {
@@ -10454,6 +10840,14 @@ async function _bootLoadData() {
   } catch(e) {
     // Non-fatal: the Home screen shows no edits rather than refusing to open.
     console.warn('[BOOT] curated edits failed', e?.message || e);
+  }
+
+  try {
+    // Once, ever. seeded_at is what stops a later boot undoing a removal.
+    await seedNewArrivalsIfNeeded();
+  } catch(e) {
+    // Non-fatal: New Arrivals is simply empty until a boot manages it.
+    console.warn('[BOOT] New Arrivals seed failed', e?.message || e);
   }
 
   try {
