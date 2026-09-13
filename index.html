@@ -5902,23 +5902,27 @@ const CAMPAIGN_CTA_FALLBACK = 'Shop Now';
 // a short wide one above them on a phone — the same photograph cannot be framed
 // well in both by accident.
 //
-// ⚠ PROVISIONAL RATIOS — NOT YET CONFIRMED BY THE WEBSITE.
+// The two preview shapes, stated once and nowhere else.
 //
-// These two numbers are the only place either frame's shape is stated, and they
-// are the only thing that has to change when the website's hero settles. They
-// are measured from the hero as it stands on the website's main today —
-// .hero-img is flex 1 1 520px against copy at 1 1 420px with min-height
-// clamp(420px,72vh,820px), landing near 5:4 on a desktop; under 899px it is full
-// width at clamp(330px,56vh,540px), landing near 5:6 — but that layout is still
-// being finished and has not merged, so treat both as placeholders.
+// 4:5 for a phone and 1:1 for a desktop are representative, not a promise: the
+// website's hero is responsive — a flex block with a min-height clamp — so its
+// exact shape moves with the viewport and no single ratio could be literally
+// true on every device. What these frames buy is real control over composition:
+// a portrait frame for the tall crop a phone takes, a square for the wider one
+// a desktop takes, both close enough that what the operator keeps in view is
+// what survives.
 //
-// The stored crop metadata does not depend on them: x, y and zoom mean the same
-// thing whatever shape the frame is. Only what the operator sees while choosing
-// does, which is why these must be corrected before anyone crops in earnest.
+// The stored metadata does not depend on them: x, y and zoom mean the same
+// thing whatever shape the frame is, so changing a ratio here changes only what
+// the operator sees while choosing.
 const CAMPAIGN_CROP_FRAMES = [
-  { key: 'mobile',  label: 'Mobile',  field: 'media_crop_mobile',  ratio: 5 / 6, provisional: true },
-  { key: 'desktop', label: 'Website', field: 'media_crop_desktop', ratio: 5 / 4, provisional: true },
+  { key: 'mobile',  label: 'Mobile',  field: 'media_crop_mobile',  ratio: 4 / 5 },
+  { key: 'desktop', label: 'Website', field: 'media_crop_desktop', ratio: 1 },
 ];
+
+// Every preview is this tall, whatever its shape. Big enough to judge framing
+// on a phone, small enough that the crop tool does not become the editor.
+const CAMPAIGN_CROP_PREVIEW_H = 290;
 
 // x and y are percentages read exactly as object-position: 0 is left/top, 100 is
 // right/bottom, 50 is centred. zoom scales the picture about that same point.
@@ -7298,9 +7302,10 @@ function _campaignCropBlock(d) {
     `<button class="tab-pill ${f.key === frame.key ? 'active' : ''}" onclick="campaignSetCropTab('${f.key}')">${_esc(f.label)}</button>`
   ).join('');
 
-  // A portrait frame would run off a phone screen at full editor width, so the
-  // preview is capped by height rather than stretched to the column.
-  const maxW = frame.ratio < 1 ? `max-width:${Math.round(230 * frame.ratio)}px;` : '';
+  // Capped by height, not stretched to the column: a portrait frame at full
+  // editor width would run off a phone screen, and sizing both frames to the
+  // same height means switching tabs cannot shift everything below them.
+  const maxW = `max-width:${Math.round(CAMPAIGN_CROP_PREVIEW_H * frame.ratio)}px;`;
 
   return `
     <div class="field-label">Adjust homepage crop</div>
@@ -7320,8 +7325,7 @@ function _campaignCropBlock(d) {
       <button onclick="campaignZoomBy(${CAMPAIGN_ZOOM_STEP})" aria-label="Zoom in" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:8px;font-size:17px;line-height:1;color:var(--ink);cursor:pointer;width:38px;height:38px">+</button>
       <button id="homeCampaignCropReset" onclick="campaignResetCrop()" ${isDefault ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:8px 12px;min-height:38px;opacity:${isDefault ? '.4' : '1'}">Reset</button>
     </div>
-    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:${frame.provisional ? '6px' : '14px'}">Drag the image to choose what stays visible. This does not change the original photo.</div>
-    ${frame.provisional ? `<div style="font-size:11px;color:#7a4500;background:#fff6e5;border-radius:8px;padding:9px 11px;line-height:1.55;margin-bottom:14px">The website is still settling the exact shape of this frame, so treat the preview as close rather than exact. What you choose here is kept — only the preview shape will change.</div>` : ''}`;
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Drag the image to choose what stays visible. This does not change the original photo.</div>`;
 }
 
 // Painted straight onto the element, never through a re-render: re-rendering
