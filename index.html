@@ -979,7 +979,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-sparkles"></i> Current Campaign</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('homeCampaignSheet')"><i class="ti ti-x"></i></button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The big picture and words at the very top of the homepage.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The picture and words at the very top of the homepage. Tapping it opens wherever the campaign goes.</div>
     <div id="homeCampaignBody"></div>
     <button class="btn btn-primary" style="width:100%" onclick="saveCampaign(this)"><i class="ti ti-device-floppy"></i> Save</button>
     <div style="height:20px"></div>
@@ -5894,6 +5894,71 @@ async function saveWebsiteSettings(btn) {
 // routable and ordered, and they deliberately cross collections.
 
 const HOMEPAGE_THEMES    = ['default', 'festive', 'bridal'];
+// Used when a campaign wants a button but nobody wrote words on it.
+const CAMPAIGN_CTA_FALLBACK = 'Shop Now';
+
+// How a campaign picture is positioned inside the website's hero. One upload,
+// two crops, because the hero is a tall block beside the words on a desktop and
+// a short wide one above them on a phone — the same photograph cannot be framed
+// well in both by accident.
+//
+// The two preview shapes, stated once and nowhere else.
+//
+// 4:5 for a phone and 1:1 for a desktop are representative, not a promise: the
+// website's hero is responsive — a flex block with a min-height clamp — so its
+// exact shape moves with the viewport and no single ratio could be literally
+// true on every device. What these frames buy is real control over composition:
+// a portrait frame for the tall crop a phone takes, a square for the wider one
+// a desktop takes, both close enough that what the operator keeps in view is
+// what survives.
+//
+// The stored metadata does not depend on them: x, y and zoom mean the same
+// thing whatever shape the frame is, so changing a ratio here changes only what
+// the operator sees while choosing.
+const CAMPAIGN_CROP_FRAMES = [
+  { key: 'mobile',  label: 'Mobile',  field: 'media_crop_mobile',  ratio: 4 / 5 },
+  { key: 'desktop', label: 'Website', field: 'media_crop_desktop', ratio: 1 },
+];
+
+// Every preview is this tall, whatever its shape. Big enough to judge framing
+// on a phone, small enough that the crop tool does not become the editor.
+const CAMPAIGN_CROP_PREVIEW_H = 290;
+
+// x and y are percentages read exactly as object-position: 0 is left/top, 100 is
+// right/bottom, 50 is centred. zoom scales the picture about that same point.
+const CAMPAIGN_CROP_CENTRE = 50;
+const CAMPAIGN_ZOOM_MIN = 1;
+const CAMPAIGN_ZOOM_MAX = 2.5;
+const CAMPAIGN_ZOOM_STEP = 0.1;
+
+function _homePct(v, fallback = CAMPAIGN_CROP_CENTRE) {
+  // Number(null) and Number('') are 0, which would read as "the far left" when
+  // what was meant was "nobody said".
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.round(Math.min(100, Math.max(0, n)));
+}
+
+function _homeZoom(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CAMPAIGN_ZOOM_MIN;
+  return Math.round(Math.min(CAMPAIGN_ZOOM_MAX, Math.max(CAMPAIGN_ZOOM_MIN, n)) * 100) / 100;
+}
+
+// `seed` carries the old focal point forward on a config written by an earlier
+// build of this branch: one remembered choice becomes the starting position of
+// both crops rather than being thrown away.
+function _normalizeCrop(raw, seed) {
+  const c = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    x:    _homePct(c.x, seed ? seed.x : CAMPAIGN_CROP_CENTRE),
+    y:    _homePct(c.y, seed ? seed.y : CAMPAIGN_CROP_CENTRE),
+    zoom: _homeZoom(c.zoom),
+  };
+}
+
+function _blankCrop() { return { x: CAMPAIGN_CROP_CENTRE, y: CAMPAIGN_CROP_CENTRE, zoom: CAMPAIGN_ZOOM_MIN }; }
 const HOMEPAGE_CTA_TYPES = ['none', 'collection', 'curated_edit', 'view_all'];
 const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
 const HOME_COUNT_MIN = 3;
@@ -6007,6 +6072,28 @@ function _normalizeCampaign(raw, index) {
   const seeded = !!(_homeText(c.heading) || _homeText(c.subheading) || mediaUrl ||
     (c.cta_destination_type && c.cta_destination_type !== 'none'));
 
+  // The whole campaign picture is the link, so the button is a second, optional
+  // affordance rather than the only way in. A campaign saved before this flag
+  // existed had a visible button, so absent means true — nobody loses a button
+  // by upgrading.
+  const showCta = _homeBool(c.show_cta, true);
+
+  // An earlier build of this branch stored one focal point. It was never
+  // released, so there is no contract to keep — but a config written by it can
+  // still be sitting in the database, and the point it remembers is a better
+  // starting place for both crops than the middle.
+  const legacyFocal = (c.media_focal_x != null || c.media_focal_y != null)
+    ? { x: _homePct(c.media_focal_x), y: _homePct(c.media_focal_y) }
+    : null;
+  const cta = _normalizeCta(c);
+  // The storefront drops a button that has no words on it, so a wanted button
+  // gets the usual words rather than an error the operator has to clear. The
+  // destination is untouched either way: it is where the campaign goes now, not
+  // just where the button goes.
+  if (showCta && cta.cta_destination_type !== 'none' && !cta.cta_label) {
+    cta.cta_label = CAMPAIGN_CTA_FALLBACK;
+  }
+
   return {
     id:               _homeId(c.id) || _uuid(),
     show:             _homeBool(c.show, seeded),
@@ -6015,8 +6102,14 @@ function _normalizeCampaign(raw, index) {
     media_type:       mediaType,
     media_url:        mediaUrl,
     media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
+    // Kept on video campaigns too rather than nulled: the fields cost nothing,
+    // and swapping a video for a picture should not lose the framing that was
+    // chosen for it.
+    media_crop_mobile:  _normalizeCrop(c.media_crop_mobile, legacyFocal),
+    media_crop_desktop: _normalizeCrop(c.media_crop_desktop, legacyFocal),
     theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
-    ..._normalizeCta(c),
+    ...cta,
+    show_cta: showCta,
   };
 }
 
@@ -6247,9 +6340,13 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
 
   // Shared by both CTAs. A button that points nowhere reachable is worse than
   // no button: the customer taps it and lands on an error.
-  const checkCta = (block, c) => {
+  // requireLabel is false for campaigns: there the destination is where the
+  // campaign goes, the button is optional, and a blank label falls back rather
+  // than blocking a save. Everywhere else the button is the only way in, so it
+  // still has to have words on it.
+  const checkCta = (block, c, requireLabel = true) => {
     if (c.cta_destination_type === 'none') return;
-    if (!c.cta_label) add(block, 'cta_label', 'error', 'The button needs words on it.');
+    if (requireLabel && !c.cta_label) add(block, 'cta_label', 'error', 'The button needs words on it.');
     if (c.cta_destination_type === 'collection') {
       if (!c.cta_destination_ref) { add(block, 'cta_destination_ref', 'error', 'Choose the collection the button opens.'); return; }
       const name = collectionNameById(c.cta_destination_ref);
@@ -6269,10 +6366,15 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
   // itself rather than condemning the row.
   activeCampaigns(cfg).forEach((c, i) => {
     const who = c.heading ? `“${c.heading}”` : `Campaign ${i + 1}`;
-    if (!c.heading && !c.media_url) add('campaign', 'heading', 'error', `${who} needs a heading or a picture — otherwise there is nothing to show.`);
+    // The name is what the operator picks this campaign out of a list by, so it
+    // is required even though the website need not print it anywhere.
+    if (!c.heading) add('campaign', 'heading', 'error', `This campaign needs a name — otherwise the list just says “Campaign ${i + 1}”.`);
+    // The picture carries the campaign. Said, not enforced: a campaign can be
+    // set up before its photography is ready.
+    if (!c.media_url) add('campaign', 'media_url', 'warning', `${who} has no picture yet. The campaign is mostly the picture, so there is little to see until one is added.`);
     if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', `${who}: that picture or video did not finish adding. Add it again.`);
     if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', `${who} has no still image for its video. Visitors see a blank space until it loads.`);
-    checkCta('campaign', c);
+    checkCta('campaign', c, false);
   });
 
   if (cfg.featured_edit.show) {
@@ -6755,9 +6857,11 @@ function renderStorefrontHome() {
             : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Off</span>'}
         </div>
         <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">
-          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Image') : 'No picture'} ·
+          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Image') : '<span style="color:#7a4500">No picture</span>'} ·
           ${{ default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[cam.theme]} ·
-          ${cam.cta_destination_type === 'none' ? 'no button' : _esc(describeCtaDestination(cam))}
+          ${cam.cta_destination_type === 'none'
+            ? 'goes nowhere'
+            : `${_esc(describeCtaDestination(cam))}${cam.show_cta === false ? ' · no button' : ''}`}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
@@ -6913,9 +7017,13 @@ function _homeToggle(label, on, handler, hint) {
 }
 
 // The CTA editor. Type first, then a destination only where one is meaningful.
-function _homeCtaBlock(cta, prefix) {
+//
+// `opts.destinationLead` rewords the block for the campaign, where the
+// destination is where the whole campaign goes and the button is optional.
+function _homeCtaBlock(cta, prefix, opts = {}) {
+  const lead = opts.destinationLead;
   const typeOptions = [
-    { value: 'none',         label: 'No button' },
+    { value: 'none',         label: lead ? 'Nowhere' : 'No button' },
     { value: 'collection',   label: 'A collection' },
     { value: 'curated_edit', label: 'An edit' },
     { value: 'view_all',     label: 'Everything' },
@@ -6934,15 +7042,33 @@ function _homeCtaBlock(cta, prefix) {
       </div>`
     : '';
 
-  const labelRow = cta.cta_destination_type === 'none' ? '' :
-    `<div class="field-label">Button text</div>
-     <input type="text" class="field-input" value="${_esc(cta.cta_label || '')}" placeholder="e.g. Shop Eid Picks"
-       oninput="${prefix}SetCtaLabel(this.value)" style="margin-bottom:8px">`;
+  const hasDest = cta.cta_destination_type !== 'none';
+  // On a campaign the button can be switched off without giving up the
+  // destination: the campaign still goes there.
+  const showCtaRow = lead && hasDest
+    ? _homeToggle('Show the button', cta.show_cta !== false, prefix + 'SetShowCta',
+        cta.show_cta === false
+          ? 'Off — the picture is still the link, there is just no button drawn on it.'
+          : 'A small button over the picture. The picture itself is the link either way.')
+    : '';
 
-  return `<div class="field-label">Button goes to</div>
+  const wantsLabel = hasDest && (!lead || cta.show_cta !== false);
+  const labelRow = !wantsLabel ? '' :
+    `<div class="field-label">Button text${lead ? ' <span style="font-weight:400;color:var(--muted)">— optional</span>' : ''}</div>
+     <input type="text" class="field-input" value="${_esc(cta.cta_label || '')}" placeholder="${lead ? _esc(CAMPAIGN_CTA_FALLBACK) : 'e.g. Shop Eid Picks'}"
+       oninput="${prefix}SetCtaLabel(this.value)" style="margin-bottom:8px">
+     ${lead ? `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Left blank, the button says “${_esc(CAMPAIGN_CTA_FALLBACK)}”.</div>` : ''}`;
+
+  return `<div class="field-label">${lead ? 'The campaign goes to' : 'Button goes to'}</div>
     ${_homePills(typeOptions, cta.cta_destination_type, prefix + 'SetCtaType')}
-    ${refRow}${labelRow}
-    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.</div>`;
+    ${refRow}${showCtaRow}${labelRow}
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">${
+      lead
+        ? (hasDest
+            ? `Tapping the campaign opens ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
+            : 'The campaign is shown but leads nowhere — nothing happens when it is tapped.')
+        : `Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
+    }</div>`;
 }
 
 // ── Campaign editor ─────────────────────────────────────────────────────────
@@ -6954,6 +7080,12 @@ function openCampaignEditor(id) {
   const existing = id ? campaignById(id) : null;
   _homeCampaignId = existing ? existing.id : null;
   _homeDraft = existing ? { ...existing } : _blankCampaign();
+  // The crops are objects, and a shallow copy would hand the editor the very
+  // ones the live config is holding — dragging would then edit the website
+  // before anything was saved, and Cancel would not undo it.
+  CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _normalizeCrop(_homeDraft[f.field]); });
+  // Mobile is the harder crop and the one most customers see, so it opens first.
+  _homeCropTab = 'mobile';
   renderCampaignEditor();
   openSheet('homeCampaignSheet');
 }
@@ -6984,15 +7116,17 @@ function renderCampaignEditor() {
 
   el.innerHTML =
     _homeIssueBanner('campaign', { ...d, show: true }) +
-    `<div class="field-label">Heading</div>
-     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Eid, in colour"
-       oninput="campaignSet('heading', this.value)" style="margin-bottom:10px">
+    `<div class="field-label">Campaign name</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Roselle"
+       oninput="campaignSet('heading', this.value)" style="margin-bottom:6px">
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Used to identify the campaign here, and as the campaign heading on the website.</div>
 
-     <div class="field-label">Under the heading</div>
+     <div class="field-label">Subheading <span style="font-weight:400;color:var(--muted)">— optional</span></div>
      <input type="text" class="field-input" value="${_esc(d.subheading || '')}" placeholder="e.g. Hand-finished pieces for the season"
-       oninput="campaignSet('subheading', this.value)" style="margin-bottom:14px">
+       oninput="campaignSet('subheading', this.value)" style="margin-bottom:6px">
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Supporting text shown with the campaign on the website.</div>
 
-     <div class="field-label">Picture or video</div>
+     <div class="field-label">Campaign image or video</div>
      ${media}
      <div id="homeCampaignUploadStatus" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
      <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -7000,7 +7134,8 @@ function renderCampaignEditor() {
        <button class="btn" style="flex:1;background:#fff;border:1px solid var(--border);font-size:12px" onclick="document.getElementById('homeCampaignVideoInput').click()"><i class="ti ti-video"></i> Video</button>
      </div>
      ${posterBtn}
-     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Landscape works best. Videos should be short and silent — the website plays them without sound.</div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Shown in the homepage campaign carousel. Use your existing campaign photography — the website adapts the framing for mobile and desktop.<br>Videos should be short and silent — the website plays them without sound.</div>
+     <div id="homeCampaignCropBlock">${_campaignCropBlock(d)}</div>
 
      <div class="field-label">Look</div>
      ${_homePills([
@@ -7010,7 +7145,7 @@ function renderCampaignEditor() {
       ], d.theme, 'campaignSetTheme')}
      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Chooses the colours and mood the website already has ready. You are not picking colours yourself.</div>
 
-     ${_homeCtaBlock(d, 'campaign')}
+     ${_homeCtaBlock(d, 'campaign', { destinationLead: true })}
 
      ${_homeCampaignId
         ? `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px;margin-bottom:4px" onclick="deleteCampaignFromEditor()">Delete this campaign</button>`
@@ -7128,6 +7263,149 @@ function _homeBlockedBySection(section, draft, enabled) {
   return err ? err.message : null;
 }
 
+// ── Homepage crop ───────────────────────────────────────────────────────────
+// One upload, two crops. The operator drags the photograph around under a fixed
+// frame shaped like the real hero and sees exactly what survives — no markers,
+// no percentages, no second file. What is stored is position and zoom; the
+// uploaded picture is never read, re-encoded or written a second time.
+//
+// The frame and the website render the same way, which is what makes the
+// preview trustworthy:
+//     object-fit: cover
+//     object-position: x% y%
+//     transform: scale(zoom)
+//     transform-origin: x% y%
+// Origin and position are the same point, so zooming enlarges about whatever
+// the operator chose to keep, and at zoom 1 it is plain object-position.
+//
+// Pictures only. A video is positioned by the website itself.
+
+let _homeCropTab = 'mobile';
+
+function _cropFrame(key) {
+  return CAMPAIGN_CROP_FRAMES.find(f => f.key === key) || CAMPAIGN_CROP_FRAMES[0];
+}
+function _draftCrop(key) {
+  const f = _cropFrame(key);
+  if (!_homeDraft[f.field]) _homeDraft[f.field] = _blankCrop();
+  return _homeDraft[f.field];
+}
+
+function _campaignCropBlock(d) {
+  if (d.media_type !== 'image' || !d.media_url) return '';
+  const frame = _cropFrame(_homeCropTab);
+  const crop = _normalizeCrop(d[frame.field]);
+  const isDefault = crop.x === CAMPAIGN_CROP_CENTRE && crop.y === CAMPAIGN_CROP_CENTRE &&
+                    crop.zoom === CAMPAIGN_ZOOM_MIN;
+
+  const tabs = CAMPAIGN_CROP_FRAMES.map(f =>
+    `<button class="tab-pill ${f.key === frame.key ? 'active' : ''}" onclick="campaignSetCropTab('${f.key}')">${_esc(f.label)}</button>`
+  ).join('');
+
+  // Capped by height, not stretched to the column: a portrait frame at full
+  // editor width would run off a phone screen, and sizing both frames to the
+  // same height means switching tabs cannot shift everything below them.
+  const maxW = `max-width:${Math.round(CAMPAIGN_CROP_PREVIEW_H * frame.ratio)}px;`;
+
+  return `
+    <div class="field-label">Adjust homepage crop</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Position the same campaign image separately for mobile and website.</div>
+    <div class="tab-pills">${tabs}</div>
+    <div style="display:flex;justify-content:center;margin-bottom:10px">
+      <div id="homeCampaignCropFrame" onpointerdown="campaignCropDragStart(event)"
+        style="position:relative;width:100%;${maxW}aspect-ratio:${frame.ratio.toFixed(4)};border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--sand-light);cursor:grab;touch-action:none">
+        <img id="homeCampaignCropImg" src="${_esc(d.media_url)}" alt="" draggable="false"
+          style="width:100%;height:100%;object-fit:cover;object-position:${crop.x}% ${crop.y}%;transform:scale(${crop.zoom});transform-origin:${crop.x}% ${crop.y}%;pointer-events:none;user-select:none">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <button onclick="campaignZoomBy(${-CAMPAIGN_ZOOM_STEP})" aria-label="Zoom out" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:8px;font-size:17px;line-height:1;color:var(--ink);cursor:pointer;width:38px;height:38px">−</button>
+      <input id="homeCampaignZoom" type="range" min="${CAMPAIGN_ZOOM_MIN}" max="${CAMPAIGN_ZOOM_MAX}" step="${CAMPAIGN_ZOOM_STEP}" value="${crop.zoom}"
+        oninput="campaignSetZoom(this.value)" aria-label="Zoom" style="flex:1;min-width:0;accent-color:var(--burgundy);height:38px">
+      <button onclick="campaignZoomBy(${CAMPAIGN_ZOOM_STEP})" aria-label="Zoom in" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:8px;font-size:17px;line-height:1;color:var(--ink);cursor:pointer;width:38px;height:38px">+</button>
+      <button id="homeCampaignCropReset" onclick="campaignResetCrop()" ${isDefault ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:8px 12px;min-height:38px;opacity:${isDefault ? '.4' : '1'}">Reset</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Drag the image to choose what stays visible. This does not change the original photo.</div>`;
+}
+
+// Painted straight onto the element, never through a re-render: re-rendering
+// under a moving finger loses the drag, and re-rendering the editor scrolls the
+// sheet back to the top.
+function _campaignPaintCrop() {
+  const img = document.getElementById('homeCampaignCropImg');
+  if (!img) return;
+  const crop = _draftCrop(_homeCropTab);
+  img.style.objectPosition  = `${crop.x}% ${crop.y}%`;
+  img.style.transform       = `scale(${crop.zoom})`;
+  img.style.transformOrigin = `${crop.x}% ${crop.y}%`;
+  const zoom = document.getElementById('homeCampaignZoom');
+  if (zoom && Number(zoom.value) !== crop.zoom) zoom.value = crop.zoom;
+  const reset = document.getElementById('homeCampaignCropReset');
+  if (reset) {
+    const isDefault = crop.x === CAMPAIGN_CROP_CENTRE && crop.y === CAMPAIGN_CROP_CENTRE &&
+                      crop.zoom === CAMPAIGN_ZOOM_MIN;
+    reset.disabled = isDefault;
+    reset.style.opacity = isDefault ? '.4' : '1';
+  }
+}
+
+// Only the crop section is redrawn, so switching frames cannot move the rest of
+// the editor. The other frame's values are untouched — they live on the draft.
+function campaignSetCropTab(key) {
+  _homeCropTab = _cropFrame(key).key;
+  const host = document.getElementById('homeCampaignCropBlock');
+  if (host && _homeDraft) host.innerHTML = _campaignCropBlock(_homeDraft);
+}
+
+function campaignCropDragStart(e) {
+  const box = document.getElementById('homeCampaignCropFrame');
+  if (!box || !_homeDraft) return;
+  const r = box.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const crop = _draftCrop(_homeCropTab);
+  const from = { x: e.clientX, y: e.clientY, cx: crop.x, cy: crop.y };
+  box.style.cursor = 'grabbing';
+
+  // Dragging the picture right reveals what was off its left edge, which is a
+  // smaller object-position — hence the negative sign. A full frame's travel
+  // covers the whole range, which is what makes the control feel direct.
+  const move = ev => {
+    ev.preventDefault();
+    const c = _draftCrop(_homeCropTab);
+    c.x = _homePct(from.cx - ((ev.clientX - from.x) / r.width) * 100);
+    c.y = _homePct(from.cy - ((ev.clientY - from.y) / r.height) * 100);
+    _campaignPaintCrop();
+  };
+  const up = () => {
+    box.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    box.style.cursor = 'grab';
+  };
+  box.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+function campaignSetZoom(v) {
+  _draftCrop(_homeCropTab).zoom = _homeZoom(v);
+  _campaignPaintCrop();
+}
+
+function campaignZoomBy(delta) {
+  const crop = _draftCrop(_homeCropTab);
+  crop.zoom = _homeZoom(crop.zoom + delta);
+  _campaignPaintCrop();
+}
+
+// This frame only. The other one is a separate decision about a different shape.
+function campaignResetCrop() {
+  _homeDraft[_cropFrame(_homeCropTab).field] = _blankCrop();
+  _campaignPaintCrop();
+}
+
+function _campaignResetAllCrops() {
+  CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _blankCrop(); });
+}
+
 function campaignSet(field, value) { _homeDraft[field] = value; }
 function campaignSetTheme(v) { _homeDraft.theme = v; renderCampaignEditor(); }
 function campaignSetCtaType(v) {
@@ -7136,9 +7414,13 @@ function campaignSetCtaType(v) {
   renderCampaignEditor();
 }
 function campaignSetCtaLabel(v) { _homeDraft.cta_label = v; }
+// Switching the button off keeps the destination and the label: the campaign
+// still goes there, and turning the button back on restores its words.
+function campaignSetShowCta(v) { _homeDraft.show_cta = !!v; renderCampaignEditor(); }
 function campaignOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'campaign'); }
 function campaignClearMedia() {
   _homeDraft.media_url = null; _homeDraft.media_type = null; _homeDraft.media_poster_url = null;
+  _campaignResetAllCrops();
   renderCampaignEditor();
 }
 
@@ -7199,6 +7481,9 @@ async function handleCampaignImage(input, role = 'media') {
       _homeDraft.media_url = publicUrl;
       _homeDraft.media_type = 'image';
       _homeDraft.media_poster_url = null;
+      // A new picture, so both crops are framing something that is no longer
+      // there.
+      _campaignResetAllCrops();
     }
     _homeUploadStatus('');
     renderCampaignEditor();
