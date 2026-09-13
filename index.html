@@ -5897,20 +5897,64 @@ const HOMEPAGE_THEMES    = ['default', 'festive', 'bridal'];
 // Used when a campaign wants a button but nobody wrote words on it.
 const CAMPAIGN_CTA_FALLBACK = 'Shop Now';
 
-// The focal point: which part of a campaign picture matters, as a percentage
-// of the picture. 0 is left/top, 100 is right/bottom, 50 is the middle. The
-// website turns this into object-position and decides its own hero shape for
-// each screen, which is why there is one focal point and not one per
-// breakpoint. It is metadata only — the uploaded file is never touched.
-const CAMPAIGN_FOCAL_DEFAULT = 50;
-function _homeFocal(v) {
+// How a campaign picture is positioned inside the website's hero. One upload,
+// two crops, because the hero is a tall block beside the words on a desktop and
+// a short wide one above them on a phone — the same photograph cannot be framed
+// well in both by accident.
+//
+// ⚠ PROVISIONAL RATIOS — NOT YET CONFIRMED BY THE WEBSITE.
+//
+// These two numbers are the only place either frame's shape is stated, and they
+// are the only thing that has to change when the website's hero settles. They
+// are measured from the hero as it stands on the website's main today —
+// .hero-img is flex 1 1 520px against copy at 1 1 420px with min-height
+// clamp(420px,72vh,820px), landing near 5:4 on a desktop; under 899px it is full
+// width at clamp(330px,56vh,540px), landing near 5:6 — but that layout is still
+// being finished and has not merged, so treat both as placeholders.
+//
+// The stored crop metadata does not depend on them: x, y and zoom mean the same
+// thing whatever shape the frame is. Only what the operator sees while choosing
+// does, which is why these must be corrected before anyone crops in earnest.
+const CAMPAIGN_CROP_FRAMES = [
+  { key: 'mobile',  label: 'Mobile',  field: 'media_crop_mobile',  ratio: 5 / 6, provisional: true },
+  { key: 'desktop', label: 'Website', field: 'media_crop_desktop', ratio: 5 / 4, provisional: true },
+];
+
+// x and y are percentages read exactly as object-position: 0 is left/top, 100 is
+// right/bottom, 50 is centred. zoom scales the picture about that same point.
+const CAMPAIGN_CROP_CENTRE = 50;
+const CAMPAIGN_ZOOM_MIN = 1;
+const CAMPAIGN_ZOOM_MAX = 2.5;
+const CAMPAIGN_ZOOM_STEP = 0.1;
+
+function _homePct(v, fallback = CAMPAIGN_CROP_CENTRE) {
   // Number(null) and Number('') are 0, which would read as "the far left" when
   // what was meant was "nobody said".
-  if (v === null || v === undefined || v === '') return CAMPAIGN_FOCAL_DEFAULT;
+  if (v === null || v === undefined || v === '') return fallback;
   const n = Number(v);
-  if (!Number.isFinite(n)) return CAMPAIGN_FOCAL_DEFAULT;
+  if (!Number.isFinite(n)) return fallback;
   return Math.round(Math.min(100, Math.max(0, n)));
 }
+
+function _homeZoom(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CAMPAIGN_ZOOM_MIN;
+  return Math.round(Math.min(CAMPAIGN_ZOOM_MAX, Math.max(CAMPAIGN_ZOOM_MIN, n)) * 100) / 100;
+}
+
+// `seed` carries the old focal point forward on a config written by an earlier
+// build of this branch: one remembered choice becomes the starting position of
+// both crops rather than being thrown away.
+function _normalizeCrop(raw, seed) {
+  const c = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    x:    _homePct(c.x, seed ? seed.x : CAMPAIGN_CROP_CENTRE),
+    y:    _homePct(c.y, seed ? seed.y : CAMPAIGN_CROP_CENTRE),
+    zoom: _homeZoom(c.zoom),
+  };
+}
+
+function _blankCrop() { return { x: CAMPAIGN_CROP_CENTRE, y: CAMPAIGN_CROP_CENTRE, zoom: CAMPAIGN_ZOOM_MIN }; }
 const HOMEPAGE_CTA_TYPES = ['none', 'collection', 'curated_edit', 'view_all'];
 const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
 const HOME_COUNT_MIN = 3;
@@ -6029,6 +6073,14 @@ function _normalizeCampaign(raw, index) {
   // existed had a visible button, so absent means true — nobody loses a button
   // by upgrading.
   const showCta = _homeBool(c.show_cta, true);
+
+  // An earlier build of this branch stored one focal point. It was never
+  // released, so there is no contract to keep — but a config written by it can
+  // still be sitting in the database, and the point it remembers is a better
+  // starting place for both crops than the middle.
+  const legacyFocal = (c.media_focal_x != null || c.media_focal_y != null)
+    ? { x: _homePct(c.media_focal_x), y: _homePct(c.media_focal_y) }
+    : null;
   const cta = _normalizeCta(c);
   // The storefront drops a button that has no words on it, so a wanted button
   // gets the usual words rather than an error the operator has to clear. The
@@ -6046,11 +6098,11 @@ function _normalizeCampaign(raw, index) {
     media_type:       mediaType,
     media_url:        mediaUrl,
     media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
-    // Kept on video campaigns too rather than nulled: the field costs nothing,
+    // Kept on video campaigns too rather than nulled: the fields cost nothing,
     // and swapping a video for a picture should not lose the framing that was
     // chosen for it.
-    media_focal_x:    _homeFocal(c.media_focal_x),
-    media_focal_y:    _homeFocal(c.media_focal_y),
+    media_crop_mobile:  _normalizeCrop(c.media_crop_mobile, legacyFocal),
+    media_crop_desktop: _normalizeCrop(c.media_crop_desktop, legacyFocal),
     theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
     ...cta,
     show_cta: showCta,
@@ -7024,6 +7076,12 @@ function openCampaignEditor(id) {
   const existing = id ? campaignById(id) : null;
   _homeCampaignId = existing ? existing.id : null;
   _homeDraft = existing ? { ...existing } : _blankCampaign();
+  // The crops are objects, and a shallow copy would hand the editor the very
+  // ones the live config is holding — dragging would then edit the website
+  // before anything was saved, and Cancel would not undo it.
+  CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _normalizeCrop(_homeDraft[f.field]); });
+  // Mobile is the harder crop and the one most customers see, so it opens first.
+  _homeCropTab = 'mobile';
   renderCampaignEditor();
   openSheet('homeCampaignSheet');
 }
@@ -7073,7 +7131,7 @@ function renderCampaignEditor() {
      </div>
      ${posterBtn}
      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Shown in the homepage campaign carousel. Use your existing campaign photography — the website adapts the framing for mobile and desktop.<br>Videos should be short and silent — the website plays them without sound.</div>
-     ${_campaignFramingBlock(d)}
+     <div id="homeCampaignCropBlock">${_campaignCropBlock(d)}</div>
 
      <div class="field-label">Look</div>
      ${_homePills([
@@ -7201,76 +7259,147 @@ function _homeBlockedBySection(section, draft, enabled) {
   return err ? err.message : null;
 }
 
-// ── Framing ─────────────────────────────────────────────────────────────────
-// One marker on a preview of the picture, and nothing else. The uploaded file
-// is never read, re-encoded or re-uploaded: what is chosen here is two numbers
-// the website uses as object-position, so the same photograph can be framed
-// differently on a phone and on a desktop without a second upload.
+// ── Homepage crop ───────────────────────────────────────────────────────────
+// One upload, two crops. The operator drags the photograph around under a fixed
+// frame shaped like the real hero and sees exactly what survives — no markers,
+// no percentages, no second file. What is stored is position and zoom; the
+// uploaded picture is never read, re-encoded or written a second time.
 //
-// Pictures only. A video is positioned by the website itself and a poster is a
-// still the operator already chose, so there is nothing here to aim.
-function _campaignFramingBlock(d) {
+// The frame and the website render the same way, which is what makes the
+// preview trustworthy:
+//     object-fit: cover
+//     object-position: x% y%
+//     transform: scale(zoom)
+//     transform-origin: x% y%
+// Origin and position are the same point, so zooming enlarges about whatever
+// the operator chose to keep, and at zoom 1 it is plain object-position.
+//
+// Pictures only. A video is positioned by the website itself.
+
+let _homeCropTab = 'mobile';
+
+function _cropFrame(key) {
+  return CAMPAIGN_CROP_FRAMES.find(f => f.key === key) || CAMPAIGN_CROP_FRAMES[0];
+}
+function _draftCrop(key) {
+  const f = _cropFrame(key);
+  if (!_homeDraft[f.field]) _homeDraft[f.field] = _blankCrop();
+  return _homeDraft[f.field];
+}
+
+function _campaignCropBlock(d) {
   if (d.media_type !== 'image' || !d.media_url) return '';
-  const x = _homeFocal(d.media_focal_x), y = _homeFocal(d.media_focal_y);
-  const centred = x === CAMPAIGN_FOCAL_DEFAULT && y === CAMPAIGN_FOCAL_DEFAULT;
+  const frame = _cropFrame(_homeCropTab);
+  const crop = _normalizeCrop(d[frame.field]);
+  const isDefault = crop.x === CAMPAIGN_CROP_CENTRE && crop.y === CAMPAIGN_CROP_CENTRE &&
+                    crop.zoom === CAMPAIGN_ZOOM_MIN;
+
+  const tabs = CAMPAIGN_CROP_FRAMES.map(f =>
+    `<button class="tab-pill ${f.key === frame.key ? 'active' : ''}" onclick="campaignSetCropTab('${f.key}')">${_esc(f.label)}</button>`
+  ).join('');
+
+  // A portrait frame would run off a phone screen at full editor width, so the
+  // preview is capped by height rather than stretched to the column.
+  const maxW = frame.ratio < 1 ? `max-width:${Math.round(230 * frame.ratio)}px;` : '';
+
   return `
-    <div class="field-label">Adjust image framing</div>
-    <div id="homeCampaignFocal" onclick="campaignSetFocalFromEvent(event)" onpointerdown="campaignFocalDragStart(event)"
-      style="position:relative;width:100%;aspect-ratio:3/2;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--sand-light);cursor:crosshair;touch-action:none;margin-bottom:8px">
-      <img src="${_esc(d.media_url)}" alt="" draggable="false" style="width:100%;height:100%;object-fit:contain;pointer-events:none;user-select:none">
-      <div id="homeCampaignFocalDot" style="position:absolute;left:${x}%;top:${y}%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgba(122,26,44,.55);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 1px 4px rgba(0,0,0,.4);pointer-events:none"></div>
+    <div class="field-label">Adjust homepage crop</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Position the same campaign image separately for mobile and website.</div>
+    <div class="tab-pills">${tabs}</div>
+    <div style="display:flex;justify-content:center;margin-bottom:10px">
+      <div id="homeCampaignCropFrame" onpointerdown="campaignCropDragStart(event)"
+        style="position:relative;width:100%;${maxW}aspect-ratio:${frame.ratio.toFixed(4)};border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--sand-light);cursor:grab;touch-action:none">
+        <img id="homeCampaignCropImg" src="${_esc(d.media_url)}" alt="" draggable="false"
+          style="width:100%;height:100%;object-fit:cover;object-position:${crop.x}% ${crop.y}%;transform:scale(${crop.zoom});transform-origin:${crop.x}% ${crop.y}%;pointer-events:none;user-select:none">
+      </div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-      <div style="flex:1;font-size:11px;color:var(--muted);line-height:1.5">Keeping <b id="homeCampaignFocalRead" style="color:var(--ink);font-weight:600">${centred ? 'the middle' : `${x}% across, ${y}% down`}</b> in view.</div>
-      <button id="homeCampaignFocalReset" onclick="campaignResetFocal()" ${centred ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 12px;min-height:30px;opacity:${centred ? '.4' : '1'}">Reset to centre</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <button onclick="campaignZoomBy(${-CAMPAIGN_ZOOM_STEP})" aria-label="Zoom out" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:8px;font-size:17px;line-height:1;color:var(--ink);cursor:pointer;width:38px;height:38px">−</button>
+      <input id="homeCampaignZoom" type="range" min="${CAMPAIGN_ZOOM_MIN}" max="${CAMPAIGN_ZOOM_MAX}" step="${CAMPAIGN_ZOOM_STEP}" value="${crop.zoom}"
+        oninput="campaignSetZoom(this.value)" aria-label="Zoom" style="flex:1;min-width:0;accent-color:var(--burgundy);height:38px">
+      <button onclick="campaignZoomBy(${CAMPAIGN_ZOOM_STEP})" aria-label="Zoom in" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:8px;font-size:17px;line-height:1;color:var(--ink);cursor:pointer;width:38px;height:38px">+</button>
+      <button id="homeCampaignCropReset" onclick="campaignResetCrop()" ${isDefault ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:8px 12px;min-height:38px;opacity:${isDefault ? '.4' : '1'}">Reset</button>
     </div>
-    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Choose the part of the photo the website should keep in view when it adapts the image to different screen sizes. This does not change the original image.</div>`;
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:${frame.provisional ? '6px' : '14px'}">Drag the image to choose what stays visible. This does not change the original photo.</div>
+    ${frame.provisional ? `<div style="font-size:11px;color:#7a4500;background:#fff6e5;border-radius:8px;padding:9px 11px;line-height:1.55;margin-bottom:14px">The website is still settling the exact shape of this frame, so treat the preview as close rather than exact. What you choose here is kept — only the preview shape will change.</div>` : ''}`;
 }
 
-// Written straight to the DOM rather than through a re-render: dragging a
-// marker that re-renders its own container under the pointer loses the drag.
-function _campaignPaintFocal() {
-  const dot = document.getElementById('homeCampaignFocalDot');
-  if (!dot) return;
-  const x = _homeDraft.media_focal_x, y = _homeDraft.media_focal_y;
-  dot.style.left = x + '%';
-  dot.style.top  = y + '%';
-  const centred = x === CAMPAIGN_FOCAL_DEFAULT && y === CAMPAIGN_FOCAL_DEFAULT;
-  const read = document.getElementById('homeCampaignFocalRead');
-  if (read) read.textContent = centred ? 'the middle' : `${x}% across, ${y}% down`;
-  const reset = document.getElementById('homeCampaignFocalReset');
-  if (reset) { reset.disabled = centred; reset.style.opacity = centred ? '.4' : '1'; }
+// Painted straight onto the element, never through a re-render: re-rendering
+// under a moving finger loses the drag, and re-rendering the editor scrolls the
+// sheet back to the top.
+function _campaignPaintCrop() {
+  const img = document.getElementById('homeCampaignCropImg');
+  if (!img) return;
+  const crop = _draftCrop(_homeCropTab);
+  img.style.objectPosition  = `${crop.x}% ${crop.y}%`;
+  img.style.transform       = `scale(${crop.zoom})`;
+  img.style.transformOrigin = `${crop.x}% ${crop.y}%`;
+  const zoom = document.getElementById('homeCampaignZoom');
+  if (zoom && Number(zoom.value) !== crop.zoom) zoom.value = crop.zoom;
+  const reset = document.getElementById('homeCampaignCropReset');
+  if (reset) {
+    const isDefault = crop.x === CAMPAIGN_CROP_CENTRE && crop.y === CAMPAIGN_CROP_CENTRE &&
+                      crop.zoom === CAMPAIGN_ZOOM_MIN;
+    reset.disabled = isDefault;
+    reset.style.opacity = isDefault ? '.4' : '1';
+  }
 }
 
-function campaignSetFocalFromEvent(e) {
-  const box = document.getElementById('homeCampaignFocal');
+// Only the crop section is redrawn, so switching frames cannot move the rest of
+// the editor. The other frame's values are untouched — they live on the draft.
+function campaignSetCropTab(key) {
+  _homeCropTab = _cropFrame(key).key;
+  const host = document.getElementById('homeCampaignCropBlock');
+  if (host && _homeDraft) host.innerHTML = _campaignCropBlock(_homeDraft);
+}
+
+function campaignCropDragStart(e) {
+  const box = document.getElementById('homeCampaignCropFrame');
   if (!box || !_homeDraft) return;
   const r = box.getBoundingClientRect();
   if (!r.width || !r.height) return;
-  _homeDraft.media_focal_x = _homeFocal(((e.clientX - r.left) / r.width) * 100);
-  _homeDraft.media_focal_y = _homeFocal(((e.clientY - r.top) / r.height) * 100);
-  _campaignPaintFocal();
-}
+  const crop = _draftCrop(_homeCropTab);
+  const from = { x: e.clientX, y: e.clientY, cx: crop.x, cy: crop.y };
+  box.style.cursor = 'grabbing';
 
-function campaignFocalDragStart(e) {
-  const box = document.getElementById('homeCampaignFocal');
-  if (!box) return;
-  campaignSetFocalFromEvent(e);
-  const move = ev => { ev.preventDefault(); campaignSetFocalFromEvent(ev); };
+  // Dragging the picture right reveals what was off its left edge, which is a
+  // smaller object-position — hence the negative sign. A full frame's travel
+  // covers the whole range, which is what makes the control feel direct.
+  const move = ev => {
+    ev.preventDefault();
+    const c = _draftCrop(_homeCropTab);
+    c.x = _homePct(from.cx - ((ev.clientX - from.x) / r.width) * 100);
+    c.y = _homePct(from.cy - ((ev.clientY - from.y) / r.height) * 100);
+    _campaignPaintCrop();
+  };
   const up = () => {
     box.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
+    box.style.cursor = 'grab';
   };
   box.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
 }
 
-function campaignResetFocal() {
-  _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
-  _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
-  // Painted, not re-rendered: re-rendering the editor scrolls the sheet back to
-  // the top, and aiming a picture should not move the page under the operator.
-  _campaignPaintFocal();
+function campaignSetZoom(v) {
+  _draftCrop(_homeCropTab).zoom = _homeZoom(v);
+  _campaignPaintCrop();
+}
+
+function campaignZoomBy(delta) {
+  const crop = _draftCrop(_homeCropTab);
+  crop.zoom = _homeZoom(crop.zoom + delta);
+  _campaignPaintCrop();
+}
+
+// This frame only. The other one is a separate decision about a different shape.
+function campaignResetCrop() {
+  _homeDraft[_cropFrame(_homeCropTab).field] = _blankCrop();
+  _campaignPaintCrop();
+}
+
+function _campaignResetAllCrops() {
+  CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _blankCrop(); });
 }
 
 function campaignSet(field, value) { _homeDraft[field] = value; }
@@ -7287,8 +7416,7 @@ function campaignSetShowCta(v) { _homeDraft.show_cta = !!v; renderCampaignEditor
 function campaignOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'campaign'); }
 function campaignClearMedia() {
   _homeDraft.media_url = null; _homeDraft.media_type = null; _homeDraft.media_poster_url = null;
-  _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
-  _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
+  _campaignResetAllCrops();
   renderCampaignEditor();
 }
 
@@ -7349,10 +7477,9 @@ async function handleCampaignImage(input, role = 'media') {
       _homeDraft.media_url = publicUrl;
       _homeDraft.media_type = 'image';
       _homeDraft.media_poster_url = null;
-      // A new picture, so the old framing is aimed at something that is no
-      // longer there.
-      _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
-      _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
+      // A new picture, so both crops are framing something that is no longer
+      // there.
+      _campaignResetAllCrops();
     }
     _homeUploadStatus('');
     renderCampaignEditor();
