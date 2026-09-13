@@ -979,7 +979,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-sparkles"></i> Current Campaign</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('homeCampaignSheet')"><i class="ti ti-x"></i></button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The artwork at the very top of the homepage. Tapping it opens wherever the campaign goes.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The picture and words at the very top of the homepage. Tapping it opens wherever the campaign goes.</div>
     <div id="homeCampaignBody"></div>
     <button class="btn btn-primary" style="width:100%" onclick="saveCampaign(this)"><i class="ti ti-device-floppy"></i> Save</button>
     <div style="height:20px"></div>
@@ -5896,6 +5896,21 @@ async function saveWebsiteSettings(btn) {
 const HOMEPAGE_THEMES    = ['default', 'festive', 'bridal'];
 // Used when a campaign wants a button but nobody wrote words on it.
 const CAMPAIGN_CTA_FALLBACK = 'Shop Now';
+
+// The focal point: which part of a campaign picture matters, as a percentage
+// of the picture. 0 is left/top, 100 is right/bottom, 50 is the middle. The
+// website turns this into object-position and decides its own hero shape for
+// each screen, which is why there is one focal point and not one per
+// breakpoint. It is metadata only — the uploaded file is never touched.
+const CAMPAIGN_FOCAL_DEFAULT = 50;
+function _homeFocal(v) {
+  // Number(null) and Number('') are 0, which would read as "the far left" when
+  // what was meant was "nobody said".
+  if (v === null || v === undefined || v === '') return CAMPAIGN_FOCAL_DEFAULT;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return CAMPAIGN_FOCAL_DEFAULT;
+  return Math.round(Math.min(100, Math.max(0, n)));
+}
 const HOMEPAGE_CTA_TYPES = ['none', 'collection', 'curated_edit', 'view_all'];
 const FEATURED_SOURCES   = ['collection', 'products', 'new_arrivals'];
 const HOME_COUNT_MIN = 3;
@@ -6009,15 +6024,15 @@ function _normalizeCampaign(raw, index) {
   const seeded = !!(_homeText(c.heading) || _homeText(c.subheading) || mediaUrl ||
     (c.cta_destination_type && c.cta_destination_type !== 'none'));
 
-  // The website's hero is artwork-first: the whole picture is the link, so the
-  // button is a second, optional affordance rather than the only way in. A
-  // campaign saved before this flag existed had a visible button, so absent
-  // means true — nobody loses a button by upgrading.
+  // The whole campaign picture is the link, so the button is a second, optional
+  // affordance rather than the only way in. A campaign saved before this flag
+  // existed had a visible button, so absent means true — nobody loses a button
+  // by upgrading.
   const showCta = _homeBool(c.show_cta, true);
   const cta = _normalizeCta(c);
   // The storefront drops a button that has no words on it, so a wanted button
   // gets the usual words rather than an error the operator has to clear. The
-  // destination is untouched either way: it is where the artwork goes now, not
+  // destination is untouched either way: it is where the campaign goes now, not
   // just where the button goes.
   if (showCta && cta.cta_destination_type !== 'none' && !cta.cta_label) {
     cta.cta_label = CAMPAIGN_CTA_FALLBACK;
@@ -6031,6 +6046,11 @@ function _normalizeCampaign(raw, index) {
     media_type:       mediaType,
     media_url:        mediaUrl,
     media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
+    // Kept on video campaigns too rather than nulled: the field costs nothing,
+    // and swapping a video for a picture should not lose the framing that was
+    // chosen for it.
+    media_focal_x:    _homeFocal(c.media_focal_x),
+    media_focal_y:    _homeFocal(c.media_focal_y),
     theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
     ...cta,
     show_cta: showCta,
@@ -6265,7 +6285,7 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
   // Shared by both CTAs. A button that points nowhere reachable is worse than
   // no button: the customer taps it and lands on an error.
   // requireLabel is false for campaigns: there the destination is where the
-  // artwork goes, the button is optional, and a blank label falls back rather
+  // campaign goes, the button is optional, and a blank label falls back rather
   // than blocking a save. Everywhere else the button is the only way in, so it
   // still has to have words on it.
   const checkCta = (block, c, requireLabel = true) => {
@@ -6293,9 +6313,9 @@ function validateHomepageConfig(cfg = getHomepageConfig()) {
     // The name is what the operator picks this campaign out of a list by, so it
     // is required even though the website need not print it anywhere.
     if (!c.heading) add('campaign', 'heading', 'error', `This campaign needs a name — otherwise the list just says “Campaign ${i + 1}”.`);
-    // Artwork carries the campaign now. Said, not enforced: a campaign can be
-    // set up before its artwork is ready.
-    if (!c.media_url) add('campaign', 'media_url', 'warning', `${who} has no artwork. The hero is the picture, so there is nothing to see until one is added.`);
+    // The picture carries the campaign. Said, not enforced: a campaign can be
+    // set up before its photography is ready.
+    if (!c.media_url) add('campaign', 'media_url', 'warning', `${who} has no picture yet. The campaign is mostly the picture, so there is little to see until one is added.`);
     if (c.media_url && !c.media_type) add('campaign', 'media_type', 'error', `${who}: that picture or video did not finish adding. Add it again.`);
     if (c.media_type === 'video' && !c.media_poster_url) add('campaign', 'media_poster_url', 'warning', `${who} has no still image for its video. Visitors see a blank space until it loads.`);
     checkCta('campaign', c, false);
@@ -6781,7 +6801,7 @@ function renderStorefrontHome() {
             : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Off</span>'}
         </div>
         <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px">
-          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Artwork') : '<span style="color:#7a4500">No artwork</span>'} ·
+          ${cam.media_url ? (cam.media_type === 'video' ? 'Video' : 'Image') : '<span style="color:#7a4500">No picture</span>'} ·
           ${{ default: 'Everyday', festive: 'Festive', bridal: 'Bridal' }[cam.theme]} ·
           ${cam.cta_destination_type === 'none'
             ? 'goes nowhere'
@@ -6943,7 +6963,7 @@ function _homeToggle(label, on, handler, hint) {
 // The CTA editor. Type first, then a destination only where one is meaningful.
 //
 // `opts.destinationLead` rewords the block for the campaign, where the
-// destination is where the whole artwork goes and the button is optional.
+// destination is where the whole campaign goes and the button is optional.
 function _homeCtaBlock(cta, prefix, opts = {}) {
   const lead = opts.destinationLead;
   const typeOptions = [
@@ -6968,12 +6988,12 @@ function _homeCtaBlock(cta, prefix, opts = {}) {
 
   const hasDest = cta.cta_destination_type !== 'none';
   // On a campaign the button can be switched off without giving up the
-  // destination: the artwork still goes there.
+  // destination: the campaign still goes there.
   const showCtaRow = lead && hasDest
     ? _homeToggle('Show the button', cta.show_cta !== false, prefix + 'SetShowCta',
         cta.show_cta === false
           ? 'Off — the picture is still the link, there is just no button drawn on it.'
-          : 'A small button over the artwork. The picture itself is the link either way.')
+          : 'A small button over the picture. The picture itself is the link either way.')
     : '';
 
   const wantsLabel = hasDest && (!lead || cta.show_cta !== false);
@@ -6989,8 +7009,8 @@ function _homeCtaBlock(cta, prefix, opts = {}) {
     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">${
       lead
         ? (hasDest
-            ? `Tapping the artwork opens ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
-            : 'The artwork is shown but leads nowhere — nothing happens when it is tapped.')
+            ? `Tapping the campaign opens ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
+            : 'The campaign is shown but leads nowhere — nothing happens when it is tapped.')
         : `Goes to ${_esc(describeCtaDestination(cta))}. The website builds the link itself, so renaming things later cannot break it.`
     }</div>`;
 }
@@ -7037,13 +7057,14 @@ function renderCampaignEditor() {
     `<div class="field-label">Campaign name</div>
      <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Roselle"
        oninput="campaignSet('heading', this.value)" style="margin-bottom:6px">
-     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">What you call this campaign in here — Roselle, Royal Muse, Eid 2027. The website may not print it anywhere, so put the name you want customers to read into the artwork itself.</div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Used to identify the campaign here, and as the campaign heading on the website.</div>
 
      <div class="field-label">Subheading <span style="font-weight:400;color:var(--muted)">— optional</span></div>
      <input type="text" class="field-input" value="${_esc(d.subheading || '')}" placeholder="e.g. Hand-finished pieces for the season"
-       oninput="campaignSet('subheading', this.value)" style="margin-bottom:14px">
+       oninput="campaignSet('subheading', this.value)" style="margin-bottom:6px">
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Supporting text shown with the campaign on the website.</div>
 
-     <div class="field-label">Campaign artwork</div>
+     <div class="field-label">Campaign image or video</div>
      ${media}
      <div id="homeCampaignUploadStatus" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
      <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -7051,7 +7072,8 @@ function renderCampaignEditor() {
        <button class="btn" style="flex:1;background:#fff;border:1px solid var(--border);font-size:12px" onclick="document.getElementById('homeCampaignVideoInput').click()"><i class="ti ti-video"></i> Video</button>
      </div>
      ${posterBtn}
-     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">The artwork is the homepage hero. Put the campaign or collection name into the picture itself if you want it read.<br>Use 16:9 — 1920×1080 or 1600×900. Other shapes are accepted and cropped to fit.<br>Videos should be short and silent — the website plays them without sound.</div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Shown in the homepage campaign carousel. Use your existing campaign photography — the website adapts the framing for mobile and desktop.<br>Videos should be short and silent — the website plays them without sound.</div>
+     ${_campaignFramingBlock(d)}
 
      <div class="field-label">Look</div>
      ${_homePills([
@@ -7179,6 +7201,78 @@ function _homeBlockedBySection(section, draft, enabled) {
   return err ? err.message : null;
 }
 
+// ── Framing ─────────────────────────────────────────────────────────────────
+// One marker on a preview of the picture, and nothing else. The uploaded file
+// is never read, re-encoded or re-uploaded: what is chosen here is two numbers
+// the website uses as object-position, so the same photograph can be framed
+// differently on a phone and on a desktop without a second upload.
+//
+// Pictures only. A video is positioned by the website itself and a poster is a
+// still the operator already chose, so there is nothing here to aim.
+function _campaignFramingBlock(d) {
+  if (d.media_type !== 'image' || !d.media_url) return '';
+  const x = _homeFocal(d.media_focal_x), y = _homeFocal(d.media_focal_y);
+  const centred = x === CAMPAIGN_FOCAL_DEFAULT && y === CAMPAIGN_FOCAL_DEFAULT;
+  return `
+    <div class="field-label">Adjust image framing</div>
+    <div id="homeCampaignFocal" onclick="campaignSetFocalFromEvent(event)" onpointerdown="campaignFocalDragStart(event)"
+      style="position:relative;width:100%;aspect-ratio:3/2;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--sand-light);cursor:crosshair;touch-action:none;margin-bottom:8px">
+      <img src="${_esc(d.media_url)}" alt="" draggable="false" style="width:100%;height:100%;object-fit:contain;pointer-events:none;user-select:none">
+      <div id="homeCampaignFocalDot" style="position:absolute;left:${x}%;top:${y}%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgba(122,26,44,.55);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 1px 4px rgba(0,0,0,.4);pointer-events:none"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="flex:1;font-size:11px;color:var(--muted);line-height:1.5">Keeping <b id="homeCampaignFocalRead" style="color:var(--ink);font-weight:600">${centred ? 'the middle' : `${x}% across, ${y}% down`}</b> in view.</div>
+      <button id="homeCampaignFocalReset" onclick="campaignResetFocal()" ${centred ? 'disabled' : ''} style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:6px 12px;min-height:30px;opacity:${centred ? '.4' : '1'}">Reset to centre</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Choose the part of the photo the website should keep in view when it adapts the image to different screen sizes. This does not change the original image.</div>`;
+}
+
+// Written straight to the DOM rather than through a re-render: dragging a
+// marker that re-renders its own container under the pointer loses the drag.
+function _campaignPaintFocal() {
+  const dot = document.getElementById('homeCampaignFocalDot');
+  if (!dot) return;
+  const x = _homeDraft.media_focal_x, y = _homeDraft.media_focal_y;
+  dot.style.left = x + '%';
+  dot.style.top  = y + '%';
+  const centred = x === CAMPAIGN_FOCAL_DEFAULT && y === CAMPAIGN_FOCAL_DEFAULT;
+  const read = document.getElementById('homeCampaignFocalRead');
+  if (read) read.textContent = centred ? 'the middle' : `${x}% across, ${y}% down`;
+  const reset = document.getElementById('homeCampaignFocalReset');
+  if (reset) { reset.disabled = centred; reset.style.opacity = centred ? '.4' : '1'; }
+}
+
+function campaignSetFocalFromEvent(e) {
+  const box = document.getElementById('homeCampaignFocal');
+  if (!box || !_homeDraft) return;
+  const r = box.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  _homeDraft.media_focal_x = _homeFocal(((e.clientX - r.left) / r.width) * 100);
+  _homeDraft.media_focal_y = _homeFocal(((e.clientY - r.top) / r.height) * 100);
+  _campaignPaintFocal();
+}
+
+function campaignFocalDragStart(e) {
+  const box = document.getElementById('homeCampaignFocal');
+  if (!box) return;
+  campaignSetFocalFromEvent(e);
+  const move = ev => { ev.preventDefault(); campaignSetFocalFromEvent(ev); };
+  const up = () => {
+    box.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  box.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+function campaignResetFocal() {
+  _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
+  _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
+  // Painted, not re-rendered: re-rendering the editor scrolls the sheet back to
+  // the top, and aiming a picture should not move the page under the operator.
+  _campaignPaintFocal();
+}
+
 function campaignSet(field, value) { _homeDraft[field] = value; }
 function campaignSetTheme(v) { _homeDraft.theme = v; renderCampaignEditor(); }
 function campaignSetCtaType(v) {
@@ -7187,12 +7281,14 @@ function campaignSetCtaType(v) {
   renderCampaignEditor();
 }
 function campaignSetCtaLabel(v) { _homeDraft.cta_label = v; }
-// Switching the button off keeps the destination and the label: the artwork
+// Switching the button off keeps the destination and the label: the campaign
 // still goes there, and turning the button back on restores its words.
 function campaignSetShowCta(v) { _homeDraft.show_cta = !!v; renderCampaignEditor(); }
 function campaignOpenCtaRef() { openHomeCtaRefPicker(_homeDraft.cta_destination_type, 'campaign'); }
 function campaignClearMedia() {
   _homeDraft.media_url = null; _homeDraft.media_type = null; _homeDraft.media_poster_url = null;
+  _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
+  _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
   renderCampaignEditor();
 }
 
@@ -7253,6 +7349,10 @@ async function handleCampaignImage(input, role = 'media') {
       _homeDraft.media_url = publicUrl;
       _homeDraft.media_type = 'image';
       _homeDraft.media_poster_url = null;
+      // A new picture, so the old framing is aimed at something that is no
+      // longer there.
+      _homeDraft.media_focal_x = CAMPAIGN_FOCAL_DEFAULT;
+      _homeDraft.media_focal_y = CAMPAIGN_FOCAL_DEFAULT;
     }
     _homeUploadStatus('');
     renderCampaignEditor();
