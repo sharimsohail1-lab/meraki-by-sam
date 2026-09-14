@@ -13773,11 +13773,21 @@ function _catalogRenderSig() {
   const selected = catalogItems.filter(p => catalogSelected.has(p.id));
   return JSON.stringify({
     coll: catalogCollection,
+    // The cover carries these, so a changed handle or a cleared setting must
+    // invalidate a rendered cover as surely as a renamed collection does.
+    site: MERAKI_SITE_URL,
+    social: catalogCoverLinks().map(l => l.label + '|' + l.url).join(','),
+    leadTime: (websiteSettings?.made_to_order_lead_time || ''),
     sel: selected.map(p => {
       const ch = catalogImageChoices[p.id] || {};
       const blurb = (p.description_en || p.catalog_blurb || p.share_blurb || '').slice(0, 60);
-      const hasInsets = _parseDetailPhotosForInsets(p).length > 0;
-      return [p.id, p.name, p.price, p.status, p.size_inventory, blurb, hasInsets, ch.source || '', ch.blurFace || false, ch.blurredDataUrl ? ch.blurredDataUrl.length : 0];
+      return [p.id, p.name, p.price, p.status, p.size_inventory, blurb,
+              // Everything the page now prints or links to. A piece that gets
+              // published, archived, re-slugged or re-stocked changes the
+              // catalog, so a cached render of it must not be served on.
+              p.slug || '', p.website_status || '', p.website_availability || '', p.fulfillment_note || '',
+              catalogProductUrl(p) || '',
+              ch.source || '', ch.blurFace || false, ch.blurredDataUrl ? ch.blurredDataUrl.length : 0];
     })
   });
 }
@@ -13812,8 +13822,14 @@ function _initCatalogImageChoices() {
   // Set defaults for any item not yet in catalogImageChoices
   catalogItems.forEach(p => {
     if (catalogImageChoices[p.id]) return; // already set (e.g. user toggled before hydration finished)
+    // The catalog leads with the same hero the website's product page leads
+    // with. It used to default to the AI model image whenever one existed,
+    // which meant a customer tapping through from the PDF landed on a
+    // different photograph than the one that made them tap. AI and Original
+    // remain as deliberate per-catalog overrides — they are how Saima reaches
+    // the face-blur workflow — but neither is the default any more.
     catalogImageChoices[p.id] = {
-      source: getModelProductImage(p) ? 'model' : (getOriginalProductImage(p) ? 'original' : 'none'),
+      source: getPrimaryProductImage(p) ? 'canonical' : 'none',
       blurFace: false,
       blurredDataUrl: null
     };
@@ -13921,9 +13937,13 @@ function _catalogImgCtrlHTML(p) {
     return '<div class="cat-no-image"><i class="ti ti-photo-off"></i> No image — exclude to preview</div>';
   }
   if (!ch) return ''; // still loading
+  const canonActive = ch.source === 'canonical';
   const aiActive = ch.source === 'model';
   const origActive = ch.source === 'original';
   let html = '<div class="cat-img-ctrl">';
+  if (getPrimaryProductImage(p)) {
+    html += `<button class="cat-img-btn${canonActive ? ' active' : ''}" title="The photo the website leads with" onclick="event.stopPropagation();_setCatalogImgSource('${p.id}','canonical')">Website</button>`;
+  }
   if (hasModel) {
     html += `<button class="cat-img-btn${aiActive ? ' active' : ''}" onclick="event.stopPropagation();_setCatalogImgSource('${p.id}','model')">AI</button>`;
   }
@@ -13950,6 +13970,7 @@ function _catalogImgCtrlHTML(p) {
 // usually to reach the face-blur workflow — but they no longer decide the
 // default, and nothing here infers a main image from the 'model' role.
 function _catalogDisplaySrc(p, ch) {
+  if (ch?.source === 'canonical') return getPrimaryProductImage(p)?.src || null;
   if (ch?.source === 'original') {
     if (ch.blurFace && ch.blurredDataUrl) return ch.blurredDataUrl;
     return getOriginalProductImage(p)?.src || null;
@@ -14087,6 +14108,88 @@ function _catalogWhatsAppMessage() {
   return `*${collName}*\nMeraki by Saima\n\n${lines}\n\nDM to inquire about any piece ✨`;
 }
 
+// ─── CATALOG LINKS ─────────────────────────────────────────────────────────
+// The catalog used to be the shopfront. It is now a doorway: every page that
+// can point at the live site does, as a real PDF link annotation rather than
+// printed text nobody can tap.
+//
+// A link is only ever drawn for a piece the public can actually reach. The
+// storefront's own rule, mirrored from api/products.js: published, not
+// archived, and carrying a slug — the public product contract has no id
+// fallback, so a slug-less piece has no address at all. Anything short of that
+// gets a clean page with no button and no annotation, because a dead link in a
+// catalog already sitting in someone's WhatsApp is worse than no link.
+
+const MERAKI_SITE_URL = 'https://www.merakibysaima.com';
+
+// The route comes from websiteProductPath(), which already owns
+// WEBSITE_ROUTE_PREFIX for the in-app product screen. One authority: if the
+// storefront ever moves its product route, it moves in one place and the
+// catalog follows.
+function catalogProductUrl(p) {
+  if (!p || p.website_status !== 'published' || p.is_archived === true) return null;
+  const path = websiteProductPath(p);
+  return path ? MERAKI_SITE_URL + '/' + path : null;
+}
+
+// Small caps with tracking, drawn a character at a time. ctx.letterSpacing is
+// not available on every browser Saima might open this in, and a catalog that
+// renders differently on her phone than on a desktop is not worth the shortcut.
+function _ctxTrackedText(ctx, text, x, y, spacing) {
+  let cx = x;
+  for (const ch of String(text)) {
+    ctx.fillText(ch, cx, y);
+    cx += ctx.measureText(ch).width + spacing;
+  }
+  return cx - spacing - x;
+}
+
+function _ctxTrackedWidth(ctx, text, spacing) {
+  const str = String(text);
+  if (!str.length) return 0;
+  let w = 0;
+  for (const ch of str) w += ctx.measureText(ch).width + spacing;
+  return w - spacing;
+}
+
+// What the availability line says, or null when it should say nothing.
+//
+// Sold and reserved win outright: the page already carries a stamp and a SOLD
+// OUT line, and "READY NOW" beside either of those would be a contradiction the
+// customer has to resolve. A piece that predates the website workflow has no
+// availability at all, and nothing is invented for it.
+function catalogAvailabilityLine(p, isSoldOut) {
+  if (isSoldOut || p.status === 'sold' || p.status === 'reserved') return null;
+  switch (p.website_availability) {
+    case 'ready_now':     return 'READY NOW';
+    case 'made_to_order': return 'MADE TO ORDER';
+    case 'both':          return 'READY NOW · MADE TO ORDER';
+    default:              return null;
+  }
+}
+
+// Timing, and only where timing means something. effectiveFulfillment() is the
+// storefront's own ladder — product note, else the global lead time — but it
+// answers for ready_now pieces too, and a ready piece has no lead time to
+// quote. Made to order only.
+function catalogFulfillmentLine(p) {
+  const a = p?.website_availability;
+  if (a !== 'made_to_order' && a !== 'both') return null;
+  return (effectiveFulfillment(p).text || '').trim() || null;
+}
+
+// The links the cover carries. Instagram comes from the setting Saima edits, so
+// an unset handle omits the link entirely rather than guessing one.
+function catalogCoverLinks() {
+  const out = [{ label: 'merakibysaima.com', url: MERAKI_SITE_URL }];
+  const ig = (websiteSettings?.instagram_url || '').trim();
+  // Labelled 'Instagram' rather than the handle: a handle sets the line long
+  // and reads as a citation, where the word reads as somewhere to go. The
+  // annotation carries the real URL either way.
+  if (ig && /instagram\.com\/[^/?#\s]+/i.test(ig)) out.push({ label: 'Instagram', url: ig });
+  return out;
+}
+
 // ─── CATALOG ENGINE ────────────────────────────────────────────────────────────
 // Returns { pages: [{dataUrl, W, H}], collName, W, H }
 // pages[0] = cover, pages[1..] = product pages (all same W × H)
@@ -14107,6 +14210,10 @@ async function _buildCatalogPages() {
   const NAME_LH = 58, NAME_SIZE = 48;
   const BIO_LH = 36, BIO_SIZE = 26;
   const INFO_PAD_TOP = 36, INFO_PAD_BOT = 56;
+  // The two rows the website earned this catalog: what the piece's timing is,
+  // and a way to go and see it.
+  const AVAIL_GAP = 22, AVAIL_LH = 26, FULFIL_LH = 30;
+  const CTA_GAP = 26, CTA_H = 56;
 
   // Phase 1: measure text for each product
   const mc = document.createElement('canvas');
@@ -14126,26 +14233,47 @@ async function _buildCatalogPages() {
     if (!p.price) anyMissingData = true;
     const isSoldOut = !isProductAvailable(p);
     const priceBlockH = isSoldOut ? 36 : 42 + 32;
-    const INFO_H = INFO_PAD_TOP + nameLines.length * NAME_LH + 10 + bioLines.length * BIO_LH + 10 + priceBlockH + INFO_PAD_BOT;
-    return { p, safeName, nameLines, bioLines, isSoldOut, INFO_H };
+
+    // Everything added below is measured here, not at draw time. INFO_H feeds
+    // MAX_INFO_H which feeds PAGE_H, so a row that appears only in the drawing
+    // pass would run off the bottom of the canvas with nothing to report it.
+    const availLine = catalogAvailabilityLine(p, isSoldOut);
+    const fulfilLine = availLine ? catalogFulfillmentLine(p) : null;
+    const availH = availLine ? AVAIL_GAP + AVAIL_LH + (fulfilLine ? FULFIL_LH : 0) : 0;
+
+    const url = catalogProductUrl(p);
+
+    // Everything below the bio flows on from it: the button follows the last
+    // row of information at a fixed gap rather than being pinned to the foot of
+    // the panel. Pinning made every button land on the same line, which sounded
+    // tidy and looked like a gulf on a short description. Consistency comes
+    // from the gaps, not from a shared coordinate.
+    const ctaH = url ? CTA_GAP + CTA_H : 0;
+
+    const INFO_H = INFO_PAD_TOP + nameLines.length * NAME_LH + 10 + bioLines.length * BIO_LH + 10
+                 + priceBlockH + availH + ctaH + INFO_PAD_BOT;
+    return { p, safeName, nameLines, bioLines, isSoldOut, availLine, fulfilLine, url, INFO_H };
   });
 
   // Phase 2: all pages use the same height (longest bio wins)
   const MAX_INFO_H = Math.max(...cardLayouts.map(c => c.INFO_H));
   cardLayouts.forEach(c => { c.INFO_H = MAX_INFO_H; });
+  const M = { AVAIL_GAP, AVAIL_LH, FULFIL_LH, CTA_GAP, CTA_H };
   const PAGE_H = IMG_H + MAX_INFO_H; // every page — cover and product — is this tall
 
   // Phase 3: cover page canvas
   const collName = catalogCollection || 'Collection';
   const year = new Date().getFullYear();
   const theme = getCatalogCoverTheme(collName);
-  const coverDataUrl = await _buildCatalogCoverCanvas(W, PAGE_H, theme, collName, year);
-  const pages = [{ dataUrl: coverDataUrl, W, H: PAGE_H }];
+  const cover = await _buildCatalogCoverCanvas(W, PAGE_H, theme, collName, year);
+  const pages = [{ dataUrl: cover.dataUrl, W, H: PAGE_H, links: cover.links }];
 
   // Phase 4: product page canvases
   for (const layout of cardLayouts) {
-    const dataUrl = await _drawCatalogProductPage(W, PAGE_H, IMG_H, MAX_INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, layout);
-    pages.push({ dataUrl, W, H: PAGE_H });
+    const { dataUrl, links } = await _drawCatalogProductPage(
+      W, PAGE_H, IMG_H, MAX_INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP,
+      M, layout);
+    pages.push({ dataUrl, W, H: PAGE_H, links });
   }
 
   if (anyMissingData) showToast('Some pieces are missing photos or prices — placeholders were used.');
@@ -14264,121 +14392,61 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText(tagline, W / 2, cy);
 
-  // Bottom attribution
+  // The bottom zone, in two lines rather than one. The attribution keeps its
+  // words, its font and its alpha and moves up by the height of a second line;
+  // under it sit the two places a customer can go. They were on the attribution
+  // line before and read as footer text there — quiet, and quiet is the one
+  // thing a link must not be. So they get their own line, a darker ink, and a
+  // hairline under each label: enough that the eye knows they are live, without
+  // an icon, a bar or a button anywhere near this cover.
+  //
+  // Nothing above is touched — theme, logo treatment, centre rule, title,
+  // tagline, inset border and corner marks are all exactly as they were.
+  const links = [];
+  const social = catalogCoverLinks();
+  const attribBaseline = social.length ? H - M - 54 : H - M - 20;
+
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = isLight ? 'rgba(60,40,20,0.35)' : 'rgba(255,255,255,0.28)';
   ctx.font = `300 22px Inter, sans-serif`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-  ctx.fillText(`MERAKI BY SAIMA  ·  ${year}`, W / 2, H - M - 20);
+  const attrib = `MERAKI BY SAIMA  ·  ${year}`;
+  ctx.fillText(attrib, (W - ctx.measureText(attrib).width) / 2, attribBaseline);
 
-  return canvas.toDataURL('image/jpeg', 0.93);
-}
+  if (social.length) {
+    const linkBaseline = H - M - 18;
+    // Nearer to full ink than the attribution above it, which is what separates
+    // "you may tap this" from "this is a credit line".
+    ctx.fillStyle = isLight ? 'rgba(40,26,12,0.72)' : 'rgba(255,255,255,0.72)';
+    ctx.font = `400 23px Inter, sans-serif`;
 
-// Single product page canvas — full bio, no truncation, same dimensions as cover
-// Returns up to 2 inset photos ready to draw. If none are explicitly marked,
-// auto-picks the best 1 by label match (read-only, does not save changes).
-// Catalog insets now come from product_images: the gallery images that follow the
-// hero, excluding the AI model image. Saima controls which ones appear by
-// reordering photos, so there is no separate "use as inset" flag to maintain.
-// products.detail_photos is never read.
-function _parseDetailPhotosForInsets(p) {
-  const hero = getPrimaryProductImage(p);
-  return getProductImagesSync(p)
-    .filter(i => i.role !== 'model' && i.id !== hero?.id && i.src)
-    .slice(0, 2)
-    .map(i => ({ image: i.src, label: i.alt || _roleLabel(i.role), slot: i.role }));
-}
+    const SEP = '   ·   ';
+    const sepW = ctx.measureText(SEP).width;
+    const widths = social.map(l => ctx.measureText(l.label).width);
+    const totalW = widths.reduce((a, b) => a + b, 0) + sepW * (social.length - 1);
 
-// Draws up to 2 detail insets into the image area of a catalog or share card canvas.
-// prepareInsetImage: local framing only (no AI background removal).
-// Center-crops to 82% of shorter dimension to reduce edge clutter, then applies
-// subtle brightness/contrast/saturation polish. Returns a 400×400 canvas.
-async function prepareInsetImage(img) {
-  if (!img || img.naturalWidth === 0 || img.naturalHeight === 0) {
-    throw new Error('image has zero dimensions');
+    let x = (W - totalW) / 2;
+    social.forEach((l, i) => {
+      if (i) { ctx.fillText(SEP, x, linkBaseline); x += sepW; }
+      ctx.fillText(l.label, x, linkBaseline);
+      // A hairline, set a little below the baseline so descenders clear it.
+      ctx.fillRect(x, linkBaseline + 7, widths[i], 1);
+      // A generous tap target around a 23px line. The label stays elegant; the
+      // annotation carries the full URL.
+      links.push({ x: x - 8, y: linkBaseline - 24, w: widths[i] + 16, h: 38, url: l.url });
+      x += widths[i];
+    });
   }
-  const SIZE = 400;
-  const oc = document.createElement('canvas');
-  oc.width = SIZE; oc.height = SIZE;
-  const octx = oc.getContext('2d');
-  if (!octx) throw new Error('could not get 2d context');
-  const srcSize = Math.min(img.naturalWidth, img.naturalHeight) * 0.82;
-  const srcX = (img.naturalWidth - srcSize) / 2;
-  const srcY = (img.naturalHeight - srcSize) / 2;
-  octx.filter = 'brightness(1.07) contrast(1.05) saturate(1.04)';
-  octx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, SIZE, SIZE);
-  octx.filter = 'none';
-  return oc;
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.93), links };
 }
 
-async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
-  if (!insetPhotos.length) return;
-  const SIZE = 210;
-  const MARGIN = 28;
-  const GAP = 14;
-  const BORDER = 5;
-  const RADIUS = 12;
-
-  for (let i = 0; i < insetPhotos.length; i++) {
-    const x = MARGIN;
-    const y = IMG_H - SIZE - MARGIN - i * (SIZE + GAP);
-
-    const d = insetPhotos[i];
-    let img = null;
-    // Priority: croppedImage (Sam's manual frame) → cleanedImage → original
-    const insetSrc = d.croppedImage || d.cleanedImage || d.image;
-    const fallbackSrc = !d.croppedImage && d.cleanedImage ? d.image : null;
-    try { img = await _loadImgWithTimeout(insetSrc, 8000); } catch(_) {
-      if (fallbackSrc) {
-        try { img = await _loadImgWithTimeout(fallbackSrc, 8000); } catch(__) { continue; }
-      } else { continue; }
-    }
-    if (!img || img.naturalWidth === 0) continue;
-
-    let source = img;
-    // Only apply auto-framing (prepareInsetImage) if Sam hasn't set a manual crop.
-    // When croppedImage exists it is already framed to the correct square.
-    if (!d.croppedImage) {
-      try {
-        source = await prepareInsetImage(img);
-        console.log('[INSET] auto-framed', { label: d.label, usedCleaned: !!d.cleanedImage });
-      } catch(err) {
-        console.warn('[INSET] auto-frame failed, using original', { label: d.label, reason: err?.message || String(err) });
-      }
-    } else {
-      console.log('[INSET] using manual crop', { label: d.label });
-    }
-
-    // Shadow beneath the frame
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.32)';
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 5;
-    ctx.fillStyle = '#f5f0ea';
-    ctx.beginPath(); ctx.roundRect(x, y, SIZE, SIZE, RADIUS); ctx.fill();
-    ctx.restore();
-
-    // Clip and draw prepared image
-    ctx.save();
-    const inner = SIZE - BORDER * 2;
-    ctx.beginPath(); ctx.roundRect(x + BORDER, y + BORDER, inner, inner, Math.max(2, RADIUS - BORDER)); ctx.clip();
-    const sw = source.naturalWidth || source.width, sh = source.naturalHeight || source.height;
-    const scale = Math.max(inner / sw, inner / sh);
-    const dw = sw * scale, dh = sh * scale;
-    ctx.drawImage(source, x + BORDER + (inner - dw) / 2, y + BORDER + (inner - dh) / 2, dw, dh);
-    ctx.restore();
-
-    // Cream border stroke on top
-    ctx.save();
-    ctx.strokeStyle = '#f5f0ea';
-    ctx.lineWidth = BORDER;
-    ctx.beginPath(); ctx.roundRect(x + BORDER / 2, y + BORDER / 2, SIZE - BORDER, SIZE - BORDER, RADIUS); ctx.stroke();
-    ctx.restore();
-  }
-}
-
-async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, layout) {
-  const { p, safeName, nameLines, bioLines, isSoldOut } = layout;
+// Single product page canvas — full bio, no truncation, same dimensions as cover.
+async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP, M, layout) {
+  const { p, safeName, nameLines, bioLines, isSoldOut, availLine, fulfilLine, url } = layout;
+  // Rectangles handed to jsPDF as real link annotations. Canvas coordinates are
+  // PDF coordinates here: the document is created at [W, PAGE_H] in px with the
+  // px_scaling hotfix, so nothing has to be converted.
+  const links = [];
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = PAGE_H;
   const ctx = canvas.getContext('2d');
@@ -14425,8 +14493,10 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
     ctx.restore();
   }
 
-  // Detail photo insets — bottom-left of image area, clear of stamp and watermark
-  await _drawDetailInsets(ctx, _parseDetailPhotosForInsets(p), W, IMG_H);
+  // The photograph is the link. Invisible on its own, which is why the button
+  // below exists as well — but it catches the tap a customer makes at the thing
+  // they are actually looking at.
+  if (url) links.push({ x: 0, y: 0, w: W, h: IMG_H, url });
 
   // Info panel
   const infoTop = IMG_H;
@@ -14457,9 +14527,67 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
     const sizes = getAvailableSizes(p);
     ctx.fillStyle = '#999'; ctx.font = `24px Inter, sans-serif`;
     ctx.fillText(sizes.length ? 'Sizes: ' + sizes.join(' · ') : 'Sizes available on request', PAD, ty);
+    ty += 32;
+  }
+  if (isSoldOut) ty += 36;
+
+  // Availability — small tracked caps in the brand gold, deliberately quieter
+  // than the price. Absent entirely for a sold or reserved piece, and for
+  // anything that predates the website workflow.
+  if (availLine) {
+    ty += M.AVAIL_GAP;
+    ctx.fillStyle = '#8a6d2f';
+    ctx.font = `600 19px Inter, sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    _ctxTrackedText(ctx, availLine, PAD, ty, 2.2);
+    ty += M.AVAIL_LH;
+    if (fulfilLine) {
+      ctx.fillStyle = '#8b8178';
+      ctx.font = `22px Inter, sans-serif`;
+      ctx.fillText(fulfilLine, PAD, ty);
+      ty += M.FULFIL_LH;
+    }
   }
 
-  return canvas.toDataURL('image/jpeg', 0.91);
+  // The button. A hairline outline and tracked caps — the catalog's own
+  // language rather than a shop button, and sized to its words so a longer
+  // label could never collide with the page edge.
+  if (url) {
+    ty += M.CTA_GAP;
+    const label = 'VIEW & INQUIRE';
+    ctx.font = `500 21px Inter, sans-serif`;
+    const tw = _ctxTrackedWidth(ctx, label, 2.6);
+    const bw = Math.min(W - PAD * 2, tw + 72);
+    ctx.save();
+    ctx.strokeStyle = '#c3b9ae';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(PAD + 0.75, ty + 0.75, bw - 1.5, M.CTA_H - 1.5, M.CTA_H / 2); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    _ctxTrackedText(ctx, label, PAD + (bw - tw) / 2, ty + M.CTA_H / 2 + 1, 2.6);
+    links.push({ x: PAD, y: ty, w: bw, h: M.CTA_H, url });
+  }
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.91), links };
+}
+
+// The one place a catalog becomes a PDF. Download and Share both call it, so a
+// link that exists in one file cannot be missing from the other — they used to
+// carry two copies of this loop, which is exactly the kind of duplication that
+// ships a working download and a broken share.
+function _catalogToPdf(pages, W, H) {
+  if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
+  pages.forEach((page, i) => {
+    if (i > 0) pdf.addPage([W, H]);
+    pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
+    // Real annotations over the raster, not painted-on text. Page coordinates
+    // are the canvas coordinates the page was drawn with.
+    (page.links || []).forEach(l => pdf.link(l.x, l.y, l.w, l.h, { url: l.url }));
+  });
+  return pdf;
 }
 
 // Download catalog as PDF — cover page + one page per product
@@ -14469,13 +14597,7 @@ async function downloadCatalogPDF() {
   _btnState(btn, 'preparing', def);
   try {
     const { pages, collName, W, H } = await _buildCatalogPages();
-    if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
-    pages.forEach((page, i) => {
-      if (i > 0) pdf.addPage([W, H]);
-      pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
-    });
+    const pdf = _catalogToPdf(pages, W, H);
     const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
     await _downloadPdf(pdf, `Meraki-${safeName}-Catalog.pdf`);
     _btnState(btn, 'downloaded', def);
@@ -14502,12 +14624,7 @@ async function shareCatalogWithAsset() {
     const filename = `Meraki-${safeName}-Catalog.pdf`;
 
     if (window.jspdf) {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [W, H], hotfixes: ['px_scaling'] });
-      pages.forEach((page, i) => {
-        if (i > 0) pdf.addPage([W, H]);
-        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, W, H);
-      });
+      const pdf = _catalogToPdf(pages, W, H);
 
       if (typeof navigator.share === 'function') {
         const pdfBlob = pdf.output('blob');
@@ -14618,6 +14735,91 @@ function _ctxWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
     }
   });
   return lines.length;
+}
+
+// ── Share-card detail insets ────────────────────────────────────────────────
+// These belong to the single-product share card, not to the catalog. The
+// catalog dropped its insets: it is a doorway to the website now, and two
+// squares over the bottom-left of the photograph bought occlusion and two
+// full-size master downloads per piece for detail the product page already
+// carries in full. The share card is a different object — one image, sent on
+// its own, with no page behind it — so it keeps them.
+//
+// Customer photos are excluded here as well as by role, which the catalog's
+// version never did.
+function _parseDetailPhotosForInsets(p) {
+  const hero = getPrimaryProductImage(p);
+  return getProductImagesSync(p)
+    .filter(i => i.role !== 'model' && !isCustomerPhoto(i) && i.id !== hero?.id && i.src)
+    .slice(0, 2)
+    .map(i => ({ image: i.src, label: i.alt || _roleLabel(i.role), slot: i.role }));
+}
+
+// Center-crops to 82% of the shorter dimension to reduce edge clutter, then
+// applies subtle brightness/contrast/saturation polish. Returns a 400×400 canvas.
+async function prepareInsetImage(img) {
+  if (!img || img.naturalWidth === 0 || img.naturalHeight === 0) {
+    throw new Error('image has zero dimensions');
+  }
+  const SIZE = 400;
+  const oc = document.createElement('canvas');
+  oc.width = SIZE; oc.height = SIZE;
+  const octx = oc.getContext('2d');
+  if (!octx) throw new Error('could not get 2d context');
+  const srcSize = Math.min(img.naturalWidth, img.naturalHeight) * 0.82;
+  const srcX = (img.naturalWidth - srcSize) / 2;
+  const srcY = (img.naturalHeight - srcSize) / 2;
+  octx.filter = 'brightness(1.07) contrast(1.05) saturate(1.04)';
+  octx.drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, SIZE, SIZE);
+  octx.filter = 'none';
+  return oc;
+}
+
+async function _drawDetailInsets(ctx, insetPhotos, W, IMG_H) {
+  if (!insetPhotos.length) return;
+  const SIZE = 210, MARGIN = 28, GAP = 14, BORDER = 5, RADIUS = 12;
+
+  for (let i = 0; i < insetPhotos.length; i++) {
+    const x = MARGIN;
+    const y = IMG_H - SIZE - MARGIN - i * (SIZE + GAP);
+    const d = insetPhotos[i];
+    let img = null;
+    const insetSrc = d.croppedImage || d.cleanedImage || d.image;
+    const fallbackSrc = !d.croppedImage && d.cleanedImage ? d.image : null;
+    try { img = await _loadImgWithTimeout(insetSrc, 8000); } catch(_) {
+      if (fallbackSrc) {
+        try { img = await _loadImgWithTimeout(fallbackSrc, 8000); } catch(__) { continue; }
+      } else { continue; }
+    }
+    if (!img || img.naturalWidth === 0) continue;
+
+    let source = img;
+    if (!d.croppedImage) {
+      try { source = await prepareInsetImage(img); } catch(_) {}
+    }
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.32)';
+    ctx.shadowBlur = 20; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 5;
+    ctx.fillStyle = '#f5f0ea';
+    ctx.beginPath(); ctx.roundRect(x, y, SIZE, SIZE, RADIUS); ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    const inner = SIZE - BORDER * 2;
+    ctx.beginPath(); ctx.roundRect(x + BORDER, y + BORDER, inner, inner, Math.max(2, RADIUS - BORDER)); ctx.clip();
+    const sw = source.naturalWidth || source.width, sh = source.naturalHeight || source.height;
+    const scale = Math.max(inner / sw, inner / sh);
+    const dw = sw * scale, dh = sh * scale;
+    ctx.drawImage(source, x + BORDER + (inner - dw) / 2, y + BORDER + (inner - dh) / 2, dw, dh);
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = '#f5f0ea';
+    ctx.lineWidth = BORDER;
+    ctx.beginPath(); ctx.roundRect(x + BORDER / 2, y + BORDER / 2, SIZE - BORDER, SIZE - BORDER, RADIUS); ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /// opts: { imageSrc (required), sourceType, blurRevision }. No DOM hero fallback.
