@@ -14183,10 +14183,10 @@ function catalogFulfillmentLine(p) {
 function catalogCoverLinks() {
   const out = [{ label: 'merakibysaima.com', url: MERAKI_SITE_URL }];
   const ig = (websiteSettings?.instagram_url || '').trim();
-  if (ig) {
-    const m = ig.match(/instagram\.com\/([^/?#\s]+)/i);
-    if (m) out.push({ label: '@' + m[1], url: ig });
-  }
+  // Labelled 'Instagram' rather than the handle: a handle sets the line long
+  // and reads as a citation, where the word reads as somewhere to go. The
+  // annotation carries the real URL either way.
+  if (ig && /instagram\.com\/[^/?#\s]+/i.test(ig)) out.push({ label: 'Instagram', url: ig });
   return out;
 }
 
@@ -14243,28 +14243,22 @@ async function _buildCatalogPages() {
 
     const url = catalogProductUrl(p);
 
-    // The flowing part: everything that grows with the words.
-    const flowH = INFO_PAD_TOP + nameLines.length * NAME_LH + 10 + bioLines.length * BIO_LH + 10
-                + priceBlockH;
-    return { p, safeName, nameLines, bioLines, isSoldOut, availLine, fulfilLine, url, availH, flowH };
-  });
+    // Everything below the bio flows on from it: the button follows the last
+    // row of information at a fixed gap rather than being pinned to the foot of
+    // the panel. Pinning made every button land on the same line, which sounded
+    // tidy and looked like a gulf on a short description. Consistency comes
+    // from the gaps, not from a shared coordinate.
+    const ctaH = url ? CTA_GAP + CTA_H : 0;
 
-  // The button is anchored to the foot of the panel rather than to the end of
-  // the words, so it lands on the same line of every page and the eye stops
-  // looking for it while flipping. A short description simply leaves more air
-  // above it. The slot is reserved on every page as soon as any page has a
-  // button — otherwise the tallest page could set MAX_INFO_H without room for
-  // one, and a later page's button would land on top of its own text.
-  const anyCta = cardLayouts.some(c => c.url);
-  const ctaSlotH = anyCta ? CTA_GAP + CTA_H : 0;
-  cardLayouts.forEach(c => {
-    c.INFO_H = c.flowH + c.availH + ctaSlotH + INFO_PAD_BOT;
+    const INFO_H = INFO_PAD_TOP + nameLines.length * NAME_LH + 10 + bioLines.length * BIO_LH + 10
+                 + priceBlockH + availH + ctaH + INFO_PAD_BOT;
+    return { p, safeName, nameLines, bioLines, isSoldOut, availLine, fulfilLine, url, INFO_H };
   });
 
   // Phase 2: all pages use the same height (longest bio wins)
   const MAX_INFO_H = Math.max(...cardLayouts.map(c => c.INFO_H));
   cardLayouts.forEach(c => { c.INFO_H = MAX_INFO_H; });
-  const M = { AVAIL_GAP, AVAIL_LH, FULFIL_LH, CTA_GAP, CTA_H, INFO_PAD_BOT, ctaSlotH };
+  const M = { AVAIL_GAP, AVAIL_LH, FULFIL_LH, CTA_GAP, CTA_H };
   const PAGE_H = IMG_H + MAX_INFO_H; // every page — cover and product — is this tall
 
   // Phase 3: cover page canvas
@@ -14398,41 +14392,50 @@ async function _buildCatalogCoverCanvas(W, H, theme, collName, year) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText(tagline, W / 2, cy);
 
-  // Bottom attribution, now carrying the way in. The line that was already
-  // here keeps its place, its font, its alpha and its baseline; the website and
-  // the Instagram handle join it on that same baseline as separated segments,
-  // so the cover gains two links and not a single pixel of height. Nothing
-  // above this line is touched — the theme, the logo treatment, the centre
-  // rule, the title and the tagline are all exactly as they were.
+  // The bottom zone, in two lines rather than one. The attribution keeps its
+  // words, its font and its alpha and moves up by the height of a second line;
+  // under it sit the two places a customer can go. They were on the attribution
+  // line before and read as footer text there — quiet, and quiet is the one
+  // thing a link must not be. So they get their own line, a darker ink, and a
+  // hairline under each label: enough that the eye knows they are live, without
+  // an icon, a bar or a button anywhere near this cover.
+  //
+  // Nothing above is touched — theme, logo treatment, centre rule, title,
+  // tagline, inset border and corner marks are all exactly as they were.
   const links = [];
-  const baseline = H - M - 20;
+  const social = catalogCoverLinks();
+  const attribBaseline = social.length ? H - M - 54 : H - M - 20;
+
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = isLight ? 'rgba(60,40,20,0.35)' : 'rgba(255,255,255,0.28)';
   ctx.font = `300 22px Inter, sans-serif`;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  const attrib = `MERAKI BY SAIMA  ·  ${year}`;
+  ctx.fillText(attrib, (W - ctx.measureText(attrib).width) / 2, attribBaseline);
 
-  const SEP = '  ·  ';
-  const social = catalogCoverLinks();
-  const segments = [{ text: `MERAKI BY SAIMA  ·  ${year}`, url: null }]
-    .concat(social.map(l => ({ text: l.label, url: l.url })));
+  if (social.length) {
+    const linkBaseline = H - M - 18;
+    // Nearer to full ink than the attribution above it, which is what separates
+    // "you may tap this" from "this is a credit line".
+    ctx.fillStyle = isLight ? 'rgba(40,26,12,0.72)' : 'rgba(255,255,255,0.72)';
+    ctx.font = `400 23px Inter, sans-serif`;
 
-  const sepW = ctx.measureText(SEP).width;
-  const widths = segments.map(seg => ctx.measureText(seg.text).width);
-  const totalW = widths.reduce((a, b) => a + b, 0) + sepW * (segments.length - 1);
+    const SEP = '   ·   ';
+    const sepW = ctx.measureText(SEP).width;
+    const widths = social.map(l => ctx.measureText(l.label).width);
+    const totalW = widths.reduce((a, b) => a + b, 0) + sepW * (social.length - 1);
 
-  let x = (W - totalW) / 2;
-  segments.forEach((seg, i) => {
-    if (i) {
-      ctx.fillText(SEP, x, baseline);
-      x += sepW;
-    }
-    ctx.fillText(seg.text, x, baseline);
-    if (seg.url) {
-      // A generous tap target around a 22px line, and the annotation carries
-      // the full URL while the cover shows only the elegant label.
-      links.push({ x: x - 6, y: baseline - 26, w: widths[i] + 12, h: 34, url: seg.url });
-    }
-    x += widths[i];
-  });
+    let x = (W - totalW) / 2;
+    social.forEach((l, i) => {
+      if (i) { ctx.fillText(SEP, x, linkBaseline); x += sepW; }
+      ctx.fillText(l.label, x, linkBaseline);
+      // A hairline, set a little below the baseline so descenders clear it.
+      ctx.fillRect(x, linkBaseline + 7, widths[i], 1);
+      // A generous tap target around a 23px line. The label stays elegant; the
+      // annotation carries the full URL.
+      links.push({ x: x - 8, y: linkBaseline - 24, w: widths[i] + 16, h: 38, url: l.url });
+      x += widths[i];
+    });
+  }
 
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.93), links };
 }
@@ -14528,22 +14531,11 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
   }
   if (isSoldOut) ty += 36;
 
-  // Everything from here down is measured from the foot of the panel, not from
-  // where the words happened to end. INFO_H is MAX_INFO_H — every page is the
-  // same height — so these two land on the same line of every page in the
-  // catalog, and a short description leaves air above them rather than pulling
-  // them up.
-  const panelBottom = infoTop + INFO_H;
-  const ctaTop = panelBottom - M.INFO_PAD_BOT - M.CTA_H;
-  // Availability sits directly above the button's slot, whether or not this
-  // page has a button, so it aligns across pages too.
-  const availBottom = M.ctaSlotH ? ctaTop - M.CTA_GAP : panelBottom - M.INFO_PAD_BOT;
-
   // Availability — small tracked caps in the brand gold, deliberately quieter
   // than the price. Absent entirely for a sold or reserved piece, and for
   // anything that predates the website workflow.
   if (availLine) {
-    ty = availBottom - M.AVAIL_LH - (fulfilLine ? M.FULFIL_LH : 0);
+    ty += M.AVAIL_GAP;
     ctx.fillStyle = '#8a6d2f';
     ctx.font = `600 19px Inter, sans-serif`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -14561,7 +14553,7 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
   // language rather than a shop button, and sized to its words so a longer
   // label could never collide with the page edge.
   if (url) {
-    ty = ctaTop;
+    ty += M.CTA_GAP;
     const label = 'VIEW & INQUIRE';
     ctx.font = `500 21px Inter, sans-serif`;
     const tw = _ctxTrackedWidth(ctx, label, 2.6);
