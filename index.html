@@ -558,7 +558,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button class="lang-btn" id="langToggle" onclick="toggleLang()">اردو</button>
     </div>
     <!-- src is re-set from MERAKI_LOGO_SRC on boot; keep the ?v= here in sync with it -->
-    <img class="header-logo" id="headerLogo" src="/assets/meraki-logo.png?v=2" alt="Meraki by Saima">
+    <img class="header-logo" id="headerLogo" src="/assets/meraki-logo.png?v=3" alt="Meraki by Saima">
     <button class="settings-btn" onclick="openModal('settingsModal')"><i class="ti ti-settings"></i></button>
   </div>
 
@@ -2500,8 +2500,14 @@ let activeImageGenProvider = localStorage.getItem('imageGenProvider') || 'fashn'
 let productTryOnProvider = 'fashn'; // local to Add/Detail — separate from Settings provider
 // ?v= is a cache-buster. Bump it whenever assets/meraki-logo.png is replaced so
 // browsers and any CDN edge pick up the new artwork immediately rather than
-// serving a stale copy. v2 = "Meraki by Saima" branding.
-const MERAKI_LOGO_SRC = '/assets/meraki-logo.png?v=2';
+// serving a stale copy.
+//
+// v2 claimed to be the "Meraki by Saima" artwork and was not: the rebrand
+// commit bumped this string and every alt text but never swapped the PNG, so
+// the app kept drawing "Meraki by Sam" on its header, its collection covers,
+// its watermarks and its catalogue cover. v3 is the real thing — the same file
+// the live website serves from img/logo.png.
+const MERAKI_LOGO_SRC = '/assets/meraki-logo.png?v=3';
 
 // ─── TRANSLATIONS ─────────────────────────────────────────────────────────────
 const T = {
@@ -14014,6 +14020,10 @@ function _catalogRenderSig() {
     // The cover carries these, so a changed handle or a cleared setting must
     // invalidate a rendered cover as surely as a renamed collection does.
     site: MERAKI_SITE_URL,
+    // The cover draws the logo, so replacing the artwork has to invalidate a
+    // rendered one. The ?v= in here is what makes that automatic: bumping it
+    // for the browser cache bumps this signature at the same time.
+    logo: MERAKI_LOGO_SRC,
     social: catalogCoverLinks().map(l => l.label + '|' + l.url).join(','),
     leadTime: (websiteSettings?.made_to_order_lead_time || ''),
     sel: selected.map(p => {
