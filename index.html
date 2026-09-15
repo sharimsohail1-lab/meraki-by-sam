@@ -2237,6 +2237,7 @@ const PRODUCT_SUMMARY_COLS = [
   'reserved_for','customer_id','exhibition_id','notes',
   'is_archived','created_at','updated_at',
   'website_status','website_availability','website_published_at','slug',
+  'slug_aliases','slug_is_custom',
   'fulfillment_note'
 ].join(',');
 
@@ -7979,10 +7980,50 @@ function slugifyName(name) {
     .replace(/^-+|-+$/g, '');
 }
 
-// Every slug currently spoken for, optionally ignoring one product (so editing a
-// product's own slug does not collide with itself).
+// ── The route ledger ────────────────────────────────────────────────────────
+// product_slug_aliases holds every route string any piece has ever owned, the
+// live one included, one row per route keyed by the route itself. It is the
+// authority for who owns what: see migration 032 for why the current slug is in
+// there too, and why a table of retired slugs beside products.slug could not
+// enforce the namespace.
+//
+// Held in memory as route -> product_id so allocation stays synchronous, which
+// is what lets validateSlugInput() answer while Saima is still typing. The
+// database is still the authority: every claim is an INSERT that Postgres
+// accepts or rejects, and a rejection is recovered from rather than argued with.
+let _slugLedger = new Map();
+
+async function loadSlugLedger() {
+  const rows = await db('select', 'product_slug_aliases', {});
+  _slugLedger = new Map((rows || []).map(r => [String(r.slug || '').trim(), r.product_id])
+                                    .filter(([slug]) => slug));
+  return _slugLedger.size;
+}
+
+// Who owns this route, or null. Ownership is by product_id and nothing else.
+function slugOwner(slug) {
+  return _slugLedger.get(String(slug || '').trim()) || null;
+}
+
+// Every route this piece owns, canonical first. The mirror is built from this.
+function productRoutes(productId) {
+  const out = [];
+  _slugLedger.forEach((owner, slug) => { if (owner === productId) out.push(slug); });
+  return out;
+}
+
+// Every route spoken for, optionally ignoring one product — so a piece editing
+// its own address does not collide with itself, and so promoting one of its own
+// retired routes back to canonical is allowed.
+//
+// This reads the ledger, not the product list. A route retired years ago is
+// still taken: it belongs to the piece that owned it, and handing it to another
+// piece would silently point an old catalogue link at the wrong garment.
 function _takenSlugs(excludeId) {
   const taken = new Set();
+  _slugLedger.forEach((owner, slug) => { if (owner !== excludeId) taken.add(slug); });
+  // Belt and braces for the window between a product insert and its ledger row,
+  // and for any environment where migration 032 has not run yet.
   inventory.forEach(p => {
     if (p.id === excludeId) return;
     const s = (p.slug || '').trim();
@@ -8012,6 +8053,155 @@ function allocateProductSlug(name, { excludeId = null, sku = null } = {}) {
   return _uniqueSlug(base, excludeId);
 }
 
+// ── Claiming and changing a route ───────────────────────────────────────────
+
+// Claim a route for a piece. One INSERT: Postgres either gives it to this piece
+// or tells us it is taken. That single statement is the whole of the uniqueness
+// guarantee — there is no check-then-write and so no window between them.
+//
+// Returns true when claimed, false when another piece already owns it. Claiming
+// a route this piece already owns is a no-op success, which is what makes a
+// retried save safe.
+async function claimSlugRoute(productId, slug) {
+  const route = String(slug || '').trim();
+  if (!route) return false;
+  const owner = slugOwner(route);
+  if (owner === productId) return true;
+  try {
+    await db('insert', 'product_slug_aliases', { data: { slug: route, product_id: productId } });
+    _slugLedger.set(route, productId);
+    return true;
+  } catch (e) {
+    if (e?.code === '23505') {
+      // Somebody else took it between our read and our write. The database is
+      // right and we are stale.
+      console.warn('[slug] route already claimed:', route);
+      _slugLedger.set(route, _slugLedger.get(route) || '__unknown__');
+      return false;
+    }
+    throw e;
+  }
+}
+
+// What products.slug_aliases should say for a piece: every route it owns except
+// the one it is currently published at.
+function _mirrorFor(productId, canonical) {
+  const live = String(canonical || '').trim();
+  return productRoutes(productId).filter(r => r !== live).sort();
+}
+
+// Change which of a piece's routes is canonical, keeping every route it has
+// ever owned pointed at it.
+//
+// ORDER MATTERS, and this order is deliberate:
+//
+//   1. claim the new route   — if this fails nothing has changed at all
+//   2. move products.slug    — the new route goes live
+//   3. rebuild the mirror    — the storefront learns the old route
+//
+// The old route is never released. It is already in the ledger from when it was
+// claimed, so there is no moment where it belongs to nobody: it simply stops
+// being the canonical one and becomes an alias, which is a change of role and
+// not of ownership.
+//
+// If step 2 fails after step 1, the piece keeps its old canonical and owns one
+// extra route that resolves to it — redundant, harmless, and the next attempt
+// completes it. Nothing is deleted on failure, because deleting a route is the
+// only way to create a dead link.
+async function changeCanonicalSlug(product, desired, { custom = false } = {}) {
+  const p = product;
+  const next = slugifyName(desired);
+  if (!p || !next) throw new Error('Enter a website address using letters and numbers.');
+
+  const current = (p.slug || '').trim();
+  const owner = slugOwner(next);
+  if (owner && owner !== p.id) throw new Error('That website address is already used by another piece.');
+
+  if (next === current) {
+    // Nothing moves, but the intent might: this is how a hand-typed address
+    // that happens to match the derived one is still recorded as chosen.
+    if (custom && p.slug_is_custom !== true) {
+      await db('update', 'products', { id: p.id, data: { slug_is_custom: true } });
+      _patchProductLocally(p.id, { slug_is_custom: true });
+    }
+    return { changed: false, slug: current };
+  }
+
+  // 1. The new route must be ours before anything else happens. A piece
+  //    promoting one of its own retired routes already owns it, and claimSlug
+  //    returns true without writing.
+  const claimed = await claimSlugRoute(p.id, next);
+  if (!claimed) throw new Error('That website address is already used by another piece.');
+
+  // Make sure the outgoing route is in the ledger before it stops being
+  // canonical. Products created before migration 032 have no ledger row, and a
+  // route that is in neither products.slug nor the ledger is a route anybody
+  // could take.
+  if (current) await claimSlugRoute(p.id, current);
+
+  // 2 and 3 together: the canonical move and the mirror it implies are one
+  //    write, so the row can never say it is at one address while claiming a
+  //    history that does not include the one it just left.
+  const patch = { slug: next, slug_aliases: _mirrorFor(p.id, next) };
+  if (custom) patch.slug_is_custom = true;
+  await db('update', 'products', { id: p.id, data: patch });
+  _patchProductLocally(p.id, patch);
+
+  return { changed: true, slug: next, previous: current };
+}
+
+function _patchProductLocally(id, patch) {
+  const i = inventory.findIndex(x => x.id === id);
+  if (i >= 0) {
+    inventory[i] = { ...inventory[i], ...patch };
+    if (currentProduct && currentProduct.id === id) currentProduct = inventory[i];
+  }
+}
+
+// Every route this piece owns is already the piece's own, so re-deriving the
+// mirror can never change who owns what. Used to heal a row whose mirror drifted
+// — a save that failed between the ledger write and the product write.
+async function reconcileSlugMirror(p) {
+  const want = _mirrorFor(p.id, p.slug);
+  const have = Array.isArray(p.slug_aliases) ? p.slug_aliases.slice().sort() : [];
+  if (JSON.stringify(want) === JSON.stringify(have)) return false;
+  await db('update', 'products', { id: p.id, data: { slug_aliases: want } });
+  _patchProductLocally(p.id, { slug_aliases: want });
+  return true;
+}
+
+// Should a rename move the public address, and to what.
+//
+// Two gates, and both must pass:
+//
+//   slug_is_custom      false. An address typed by hand is never re-derived.
+//   the address still   the base of the current address, with any -2 suffix
+//   reads as the old    removed, equals what the old name would have produced.
+//   name
+//
+// The flag alone would be enough for anything created after migration 032. The
+// second gate is for the rows that predate it: they all default to false, and a
+// slug Saima hand-picked before the column existed would otherwise look
+// derived. Comparing against the OLD name rather than the new one is what makes
+// this answerable — the audit's objection to string comparison was that it
+// becomes ambiguous after a rename, and it does, which is why the comparison
+// happens at the one moment the old name is still known.
+function shouldReslugAfterRename(p, previousName) {
+  if (!p || p.slug_is_custom === true) return false;
+  const current = (p.slug || '').trim();
+  if (!current) return false;
+  const base = current.replace(/-\d+$/, '');
+  const fromOldName = slugifyName(previousName);
+  return !!fromOldName && (base === fromOldName || current === fromOldName);
+}
+
+async function _reslugAfterRename(p, previousName, nextName) {
+  if (!shouldReslugAfterRename(p, previousName)) return null;
+  const desired = allocateProductSlug(nextName, { excludeId: p.id, sku: p.sku });
+  if (!desired || desired === (p.slug || '').trim()) return null;
+  return changeCanonicalSlug(p, desired);
+}
+
 // One-time backfill for products that predate the slug column. Runs after boot.
 //
 // Slugs are generated from each product's CURRENT APP NAME, in creation order so
@@ -8031,6 +8221,10 @@ async function backfillProductSlugs() {
     const slug = allocateProductSlug(p.name, { excludeId: p.id, sku: p.sku });
     if (!slug) continue;
     try {
+      // The ledger first, so the route is owned before it is published. If the
+      // update below fails, the piece has a reservation and no address, which
+      // the next boot completes.
+      if (!(await claimSlugRoute(p.id, slug))) continue;
       await db('update', 'products', { id: p.id, data: { slug } });
       const idx = inventory.findIndex(x => x.id === p.id);
       if (idx >= 0) inventory[idx].slug = slug;
@@ -8314,7 +8508,9 @@ function renderWebsiteSection(p) {
            <code style="flex:1;min-width:0;font-size:12px;color:var(--ink);background:var(--sand-light);border-radius:6px;padding:7px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(path)}</code>
            <button onclick="startWebsiteSlugEdit()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:5px 13px">Edit</button>
          </div>
-         <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5">This stays the same if you rename the piece, so shared links keep working.</div>`
+         <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5">${p.slug_is_custom === true
+             ? 'You chose this address, so renaming the piece will not change it.'
+             : 'This follows the name of the piece.'} Old shared links will continue to work if this address changes.</div>`
       : `<div style="display:flex;align-items:center;gap:8px">
            <span style="flex:1;font-size:12px;color:var(--muted)">Not set yet</span>
            <button onclick="startWebsiteSlugEdit()" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:16px;font-size:11px;color:var(--ink);cursor:pointer;padding:5px 13px">Set</button>
@@ -8561,7 +8757,9 @@ async function saveWebsiteSlug(btn) {
   if (btn) btn.disabled = true;
 
   _websiteSlugEditing = false;
-  const okSave = await _saveWebsiteFields({ slug }, { busyMsg: 'Saving…', doneMsg: 'Website address saved ✓' });
+  // Typed by hand, so it is a decision: recorded, and never re-derived by a
+  // later rename. The old address stays pointed at this piece.
+  const okSave = await _saveWebsiteSlugChange(slug);
   if (!okSave) {
     // Keep what was typed so it can be corrected rather than retyped.
     _websiteSlugEditing = true;
@@ -8570,6 +8768,26 @@ async function saveWebsiteSlug(btn) {
     if (again) again.value = slug;
     _previewWebsiteSlug();
   }
+}
+
+// Changing the public address by hand. Goes through changeCanonicalSlug so the
+// outgoing address keeps pointing at this piece, and records that the address
+// was chosen rather than derived.
+async function _saveWebsiteSlugChange(slug) {
+  if (!currentProduct || _websiteBusy) return false;
+  _websiteBusy = true;
+  _websiteMsg('Saving…');
+  try {
+    await changeCanonicalSlug(currentProduct, slug, { custom: true });
+    if (currentProduct) renderWebsiteSection(currentProduct);
+    _websiteMsg('');
+    showToast('Website address saved ✓');
+    return true;
+  } catch (e) {
+    _websiteMsg('');
+    showToast(e.message || 'Could not save that address.');
+    return false;
+  } finally { _websiteBusy = false; }
 }
 
 // One write path for every website field, so local state and the database can
@@ -9818,6 +10036,14 @@ async function _doSaveProduct() {
         _sku = await allocateNextSku(_rejectedSkus);
       } catch (allocErr) { lastErr = allocErr; break; }
     }
+  }
+
+  if (rows && rows[0] && _slug) {
+    // The route ledger, now that there is a product_id to own it. Best effort:
+    // the piece is already saved and published-ready, and boot reconciles any
+    // row that missed this.
+    try { await claimSlugRoute(rows[0].id, _slug); }
+    catch (e) { console.warn('[slug] could not register route for new piece', e?.message || e); }
   }
 
   if (!rows) {
@@ -11133,6 +11359,18 @@ async function _bootLoadData() {
   } catch(e) {
     // Non-fatal: New Arrivals is simply empty until a boot manages it.
     console.warn('[BOOT] New Arrivals seed failed', e?.message || e);
+  }
+
+  try {
+    // Before the backfill: allocation consults the ledger, so an empty ledger
+    // would let a backfill hand out a route another piece already owns.
+    const n = await loadSlugLedger();
+    console.log('[BOOT] slug routes loaded', n);
+  } catch(e) {
+    // Non-fatal, and it degrades to the old behaviour rather than a wrong one:
+    // _takenSlugs still reads live product slugs, so allocation stays correct
+    // for canonical collisions and only loses protection for retired routes.
+    console.warn('[BOOT] slug ledger failed', e?.message || e);
   }
 
   try {
@@ -16066,9 +16304,18 @@ async function _saveChangedName() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="loading" style="scale:0.7"><span></span><span></span><span></span></div> Saving…'; }
 
   try {
+    const previousName = p.name || '';
     await db('update', 'products', { id: p.id, data: { name } });
     const idx = inventory.findIndex(x => x.id === p.id);
     if (idx >= 0) { inventory[idx] = { ...inventory[idx], name }; currentProduct = inventory[idx]; }
+
+    // The address follows the name only when the app made it up in the first
+    // place. An address Saima typed is a decision and is left alone.
+    //
+    // Nothing is lost either way: the old address keeps pointing at this piece,
+    // which is exactly what the storefront's alias resolution is for.
+    try { await _reslugAfterRename(currentProduct || inventory[idx], previousName, name); }
+    catch (e) { console.warn('[slug] rename kept the old address', e?.message || e); }
     // Update all visible name elements without full re-render
     const detailNameEl = document.getElementById('detailName');
     if (detailNameEl) detailNameEl.textContent = name;

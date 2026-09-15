@@ -18,7 +18,14 @@ const ALLOWED_COLUMNS_BY_TABLE = {
     'description_source',
     'fabric','pieces','color','made','care',
     'website_status','website_availability','website_published_at','slug',
+    'slug_aliases','slug_is_custom',
     'fulfillment_note','garment_details'
+  ]),
+  // Every route string any piece has ever owned, keyed by the route. See
+  // migration 032: this table is the authority for route ownership, and
+  // products.slug_aliases is the mirror the storefront reads.
+  product_slug_aliases: new Set([
+    'slug','product_id','created_at'
   ]),
   website_settings: new Set([
     'id','featured_product_id','whatsapp','contact_email','instagram_url',
