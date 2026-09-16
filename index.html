@@ -3326,6 +3326,51 @@ function garmentSpecShown(specs, key) {
   return !!(specs[key] && specs[key].values.length && specs[key].show);
 }
 
+// ── Capitalisation on the way in ────────────────────────────────────────────
+// Saima types quickly, so "silk" and "Silk" both arrive, and the storefront
+// prints whichever it is handed. One rule, applied once, at the only moment
+// that matters — the moment it is persisted.
+//
+// Sentence case and nothing more: the first letter, and the rest of the value
+// exactly as typed. Not title case, because "navy blue" is a colour and "Navy
+// Blue" is a brand name, and "made in Lahore" must not become "Made In
+// Lahore". A value already in caps is left in caps — LAHORE is a decision.
+//
+// A value that does not begin with a letter is left alone, so "100% cotton"
+// stays as typed rather than becoming "100% Cotton".
+function normalizeGarmentValue(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  // Only the first character, and only when it is a letter.
+  return /[A-Za-z]/.test(s[0]) ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+// The same specs with every value capitalised. Order is preserved and nothing
+// is merged: values reach here already de-duplicated case-insensitively by
+// _specValues() on read, and changing only the first letter's case cannot make
+// two distinct values collide, so there is nothing to merge.
+function _capitalizedSpecs(specs) {
+  const out = {};
+  Object.keys(specs || {}).forEach(key => {
+    const s = specs[key];
+    if (!s) return;
+    out[key] = {
+      ...s,
+      values: (s.values || []).map(normalizeGarmentValue).filter(Boolean),
+    };
+  });
+  return out;
+}
+
+// Everything a garment-details save writes: the canonical column and the legacy
+// mirrors derived from it. One function so the two can never be built from
+// differently-normalised values, and so capitalisation cannot be applied in one
+// write path and forgotten in the other.
+function buildGarmentPayload(specs) {
+  const clean = _capitalizedSpecs(specs);
+  return { garment_details: _buildGarmentDetails(clean), ..._buildLegacyMirrors(clean) };
+}
+
 // What gets written. Descriptors with no values are dropped entirely rather than
 // stored as empty rows.
 function _buildGarmentDetails(specs) {
@@ -3839,7 +3884,7 @@ async function prefillAllGarmentDetails(btn) {
   const failed = [];
   for (const entry of plan) {
     if (btn) btn.innerHTML = `Filling ${done + 1} of ${plan.length}…`;
-    const update = { garment_details: _buildGarmentDetails(entry.specs), ..._buildLegacyMirrors(entry.specs) };
+    const update = buildGarmentPayload(entry.specs);
     try {
       await db('update', 'products', { id: entry.product.id, data: update });
       const idx = inventory.findIndex(x => x.id === entry.product.id);
@@ -4031,7 +4076,7 @@ async function saveGarmentDetails(btn) {
   });
 
   const specs = _gdDraft;
-  const update = { garment_details: _buildGarmentDetails(specs), ..._buildLegacyMirrors(specs) };
+  const update = buildGarmentPayload(specs);
 
   const orig = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…'; }
