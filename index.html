@@ -5504,6 +5504,7 @@ async function setProductRegularPrice(productId, price) {
 let _salesTab = 'active';
 let _saleDraft = null;        // the campaign being edited
 let _saleRules = {};          // product_id -> { pricing_mode, discount_percent, sale_price }
+let _saleRegulars = {};       // product_id -> pending products.price, applied on Save
 let _saleSelected = new Set();// bulk-action selection
 let _salePicker = null;       // 'collections' | 'products'
 let _saleBusy = false;
@@ -5516,7 +5517,7 @@ function openSalesScreen(saleId) {
 }
 function closeSalesScreen() {
   document.getElementById('salesOverlay').classList.add('hidden');
-  _saleDraft = null; _saleRules = {}; _saleSelected.clear();
+  _saleDraft = null; _saleRules = {}; _saleRegulars = {}; _saleSelected.clear();
   // A product sheet may be open underneath, still showing the price this
   // campaign just changed.
   if (currentProduct) renderDetailSaleCard(currentProduct);
@@ -5673,6 +5674,7 @@ function openSaleEditor(id) {
         // A finished promotion is a record. Editing its discounts would rewrite
         // what was actually offered, so it opens to be read, and Duplicate is
         // how it gets reused.
+        _savedStartsOn: existing.starts_on,
         _readonly: isSaleEnded(existing) }
     : { id: null, name: '', public_heading: '', public_subheading: '', enabled: true,
         scope_type: 'products', default_discount_percent: 0, priority: 0,
@@ -5680,6 +5682,7 @@ function openSaleEditor(id) {
 
   // The rules are edited as a draft so a failed save loses nothing.
   _saleRules = {};
+  _saleRegulars = {};
   if (existing) {
     saleProducts.filter(r => r.sale_id === existing.id).forEach(r => {
       _saleRules[r.product_id] = { pricing_mode: r.pricing_mode,
@@ -5742,7 +5745,7 @@ function _saleDraftProducts() {
 // but reads the unsaved rules.
 function _saleDraftRow(p) {
   const d = _saleDraft;
-  const regular = Math.trunc(Number(p.price) || 0);
+  const regular = _saleRegularFor(p);
   const rule = _saleRules[p.id] || { pricing_mode: 'default', discount_percent: 0, sale_price: 0 };
   const mode = rule.pricing_mode;
   let percent = 0, salePrice = 0;
@@ -5831,7 +5834,8 @@ function renderSaleEditor() {
     <div style="display:flex;gap:10px;margin-bottom:6px">
       <div style="flex:1">
         <div class="field-label">Starts</div>
-        <input type="date" id="saleStartField" class="field-input" value="${_esc(d.starts_on || '')}" onchange="saleSetStartDate(this.value)">
+        <input type="date" id="saleStartField" class="field-input" value="${_esc(d.starts_on || '')}"
+          min="${_esc(_saleStartMin(d))}" onchange="saleSetStartDate(this.value)">
       </div>
       <div style="flex:1">
         <div class="field-label">Ends</div>
@@ -5880,6 +5884,15 @@ function saleDraftSetEnabled(v) { saleDraftSet('enabled', !!v); }
 // Moving the start past the end leaves an impossible range. Rather than keep it
 // and complain later, the end date is cleared and said so — an end she has to
 // re-pick is better than one that silently cannot happen.
+// Past dates are greyed out in the picker. The floor is today — except for a
+// campaign already running, whose own start is in the past and must stay
+// selectable, or the browser would refuse to show the value the field holds.
+function _saleStartMin(d) {
+  const today = businessToday();
+  const saved = _saleBoundIn(d?._savedStartsOn);
+  return saved && saved < today ? saved : today;
+}
+
 function saleSetStartDate(v) {
   if (!_saleDraft) return;
   const start = (v || '').trim();
@@ -6007,7 +6020,24 @@ function saleDraftProblems(d = _saleDraft) {
   // Dates. Both are whole days and both are inclusive, so equal is fine — a
   // one-day sale is a real thing.
   const a = (d.starts_on || '').trim(), b = (d.ends_on || '').trim();
+
+  // A sale cannot be scheduled to have started before today. Only a date the
+  // operator is actually choosing is judged, though: a campaign that has been
+  // running since last week has a start in the past by definition, and editing
+  // its discounts must not be blocked by its own history.
+  if (a && a < businessToday() && a !== _saleBoundIn(d._savedStartsOn)) {
+    add('saleStartField', 'Start date cannot be before today.');
+  }
   if (a && b && b < a) add('saleEndField', 'End date cannot be before start date.');
+
+  // A piece cannot be discounted from a price it does not have. The regular
+  // price shown here is products.price, so this is caught before anything is
+  // written to the piece itself.
+  products.forEach(p => {
+    if (_saleRegulars[p.id] != null && !(Math.trunc(Number(_saleRegulars[p.id]) || 0) > 0)) {
+      add('saleProductTable', `${p.name || p.sku || 'A piece'}: regular price must be more than $0.`);
+    }
+  });
 
   // Pricing. A campaign default is only required when some piece is actually
   // relying on it, which is what makes "optional" honest.
@@ -6156,6 +6186,14 @@ function _saleProductTable(priced) {
 }
 
 // ── Row edits. The synchronisation rules live here and nowhere else. ────────
+// The regular price this editor is working with: the pending edit if there is
+// one, otherwise the piece's live products.price. Never a sale-owned column.
+function _saleRegularFor(p) {
+  const pending = _saleRegulars[p?.id];
+  if (pending != null) return Math.trunc(Number(pending) || 0);
+  return Math.trunc(Number(p?.price) || 0);
+}
+
 function _saleRule(id) {
   if (!_saleRules[id]) _saleRules[id] = { pricing_mode: 'default', discount_percent: 0, sale_price: 0 };
   return _saleRules[id];
@@ -6164,7 +6202,7 @@ function _saleRule(id) {
 function saleSetMode(id, mode) {
   const rule = _saleRule(id);
   const p = (inventory || []).find(x => x.id === id);
-  const regular = Math.trunc(Number(p?.price) || 0);
+  const regular = _saleRegularFor(p);
   rule.pricing_mode = SALE_MODES.includes(mode) ? mode : 'default';
   // Seed the newly authoritative field from what is on screen, so switching
   // mode never blanks the row.
@@ -6199,25 +6237,24 @@ function saleSetSalePrice(id, value) {
   renderSaleEditor();
 }
 
-// Regular price is the PRODUCT's. Written straight through, then whichever of
-// the two sale values is derived re-derives itself on the next render.
-async function saleSetRegular(id, value, input) {
+// Regular price is the PRODUCT's own price — products.price, the same column
+// the storefront and the catalogue read. There is no sale-owned copy of it and
+// no second canonical price anywhere in this schema.
+//
+// It used to be written the moment the field lost focus. Now it waits for Save
+// with everything else: one validation pass decides whether anything is
+// written at all, so an abandoned edit cannot leave a repriced product behind
+// and a rejected sale cannot half-apply.
+function saleSetRegular(id, value, input) {
   const v = Math.trunc(Number(value) || 0);
-  if (v <= 0) { showToast('Regular price must be more than $0.'); renderSaleEditor(); return; }
-  try {
-    await setProductRegularPrice(id, v);
-    const rule = _saleRule(id);
-    // In percent mode the sale price follows the new regular; in sale-price
-    // mode the percent does. Both are recomputed from the stored authority.
-    if (rule.pricing_mode === 'sale_price') rule.discount_percent = saleFloorPercent(v, rule.sale_price);
-    else rule.sale_price = saleFloorPrice(v, rule.pricing_mode === 'percent'
-      ? rule.discount_percent : Math.trunc(Number(_saleDraft.default_discount_percent) || 0));
-    renderSaleEditor();
-    showToast('Regular price updated ✓');
-  } catch (e) {
-    showToast(e.message || 'Could not update the price.');
-    renderSaleEditor();
-  }
+  _saleRegulars[id] = v;
+  const rule = _saleRule(id);
+  // Whichever of the two sale values is DERIVED follows the new regular; the
+  // authoritative one is left exactly as it was set.
+  if (rule.pricing_mode === 'sale_price') rule.discount_percent = saleFloorPercent(v, rule.sale_price);
+  else rule.sale_price = saleFloorPrice(v, rule.pricing_mode === 'percent'
+    ? rule.discount_percent : Math.trunc(Number(_saleDraft.default_discount_percent) || 0));
+  renderSaleEditor();
 }
 
 // ── Bulk ────────────────────────────────────────────────────────────────────
@@ -6341,6 +6378,25 @@ async function saveSale(btn) {
   const orig = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
   try {
+    // ── Write order ──────────────────────────────────────────────────────
+    // There is no transaction endpoint: /api/db issues one statement per call,
+    // so a save is a sequence of writes that can stop halfway. Everything that
+    // can be decided is therefore decided first, above, by saleDraftProblems()
+    // — nothing below is conditional on data that was not already checked.
+    //
+    // Regular prices go first, because every sale figure is derived from them.
+    // They belong to the PIECE, not the campaign: a repriced piece that is left
+    // behind by a later failure is simply a repriced piece, correct in the
+    // catalogue and on the website, and the sale is retried from a consistent
+    // base. The reverse order would leave sale rows quoting a regular price the
+    // product never had.
+    for (const [productId, price] of Object.entries(_saleRegulars)) {
+      const live = Math.trunc(Number((inventory || []).find(p => p.id === productId)?.price) || 0);
+      const next = Math.trunc(Number(price) || 0);
+      if (next > 0 && next !== live) await setProductRegularPrice(productId, next);
+    }
+    _saleRegulars = {};
+
     const fields = {
       name: d.name.trim(),
       public_heading: (d.public_heading || '').trim(),
@@ -6382,15 +6438,34 @@ async function saveSale(btn) {
     // came back on Active.
     if (saved) _salesTab = saleStatus(saved);
 
-    showToast('Sale saved ✓');
+    showToast('Sale saved.');
     backToSalesList();
   } catch (e) {
     console.error('[sales] save failed', e);
-    showToast('Could not save: ' + (e.message || e));
+    showToast(saleWriteErrorMessage(e));
   } finally {
     _saleBusy = false;
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
   }
+}
+
+// Until migration 034 has run, the three sale tables do not exist and every
+// write fails with the same unhelpful shape. "undefined table" is not something
+// to hand Saima, and it is not something to hand me either at three in the
+// morning — the message says exactly which step is missing.
+//
+// 42P01 is Postgres for an undefined table; PGRST20x are PostgREST's schema
+// cache misses for a table or column it cannot find.
+function saleWriteErrorMessage(e) {
+  const code = String(e?.code || '');
+  const msg  = String(e?.message || '');
+  const missingSchema =
+    code === '42P01' || code === '42703' || /^PGRST(20[0-9])$/.test(code) ||
+    /relation .*(sales|sale_collections|sale_products).* does not exist/i.test(msg) ||
+    /could not find the (table|column)/i.test(msg);
+  return missingSchema
+    ? 'Sales database setup is not available yet. Apply migration 034, then try again.'
+    : 'Sale could not be saved. Please try again.';
 }
 
 // Deleting is not how a sale finishes — a finished sale ends and stays in Past,
@@ -6402,7 +6477,7 @@ async function deleteSaleFromEditor() {
       `It cannot be undone.\n\n` +
       `To simply finish a sale, switch it off or let its end date pass — it stays in Past.`)) return;
   try { await deleteSale(_saleDraft.id); showToast('Sale deleted'); backToSalesList(); }
-  catch (e) { showToast('Could not delete: ' + e.message); }
+  catch (e) { console.error('[sales] delete failed', e); showToast(saleWriteErrorMessage(e)); }
 }
 
 async function duplicateSaleFromEditor(btn) {
@@ -6415,7 +6490,7 @@ async function duplicateSaleFromEditor(btn) {
     showToast('Copied — off until you switch it on');
     openSaleEditor(copy.id);
   } catch (e) {
-    showToast('Could not duplicate: ' + (e.message || e));
+    showToast(saleWriteErrorMessage(e));
   } finally {
     _saleBusy = false;
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
