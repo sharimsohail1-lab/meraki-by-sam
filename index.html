@@ -1644,6 +1644,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
+<!-- DELETE SALE CONFIRMATION -->
+<div class="sheet-overlay over-fullscreen" id="deleteSaleSheet">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px" id="deleteSaleTitle">Delete this sale permanently?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5" id="deleteSaleBody"></div>
+    <button class="btn" id="confirmDeleteSaleBtn" style="width:100%;background:#c0392b;color:#fff;font-weight:600;margin-bottom:8px"><i class="ti ti-trash"></i> Delete Permanently</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('deleteSaleSheet')">Cancel</button>
+  </div>
+</div>
+
 <!-- REPLACE ORIGINAL PHOTO — OPTIONS -->
 <div class="sheet-overlay" id="replaceOrigPhotoOptionsSheet" onclick="closeSheetOutside(event,'replaceOrigPhotoOptionsSheet')">
   <div class="sheet" style="min-height:auto">
@@ -5113,6 +5124,22 @@ function salePricingFor(s, p, opts) {
   const mode = row && SALE_MODES.includes(row.pricing_mode) ? row.pricing_mode : 'default';
   if (mode === 'exclude') return null;
 
+  // A finished sale is read straight off its rows. They were materialised by
+  // the last save before it ended, so they say what was actually offered — no
+  // recomputation from today's campaign settings or today's prices.
+  if (historic || isSaleEnded(s)) {
+    const pct = Math.trunc(Number(row?.discount_percent) || 0);
+    const amt = Math.trunc(Number(row?.sale_price) || 0);
+    if (!(pct > 0 && pct < 100)) return null;
+    if (!(amt >= 1 && amt < regular)) return null;
+    return {
+      regularPrice: regular, salePrice: amt, discountPercent: pct,
+      saleCampaignId: s.id, saleCampaignName: s.name || '',
+      salePublicHeading: s.public_heading || '', salePublicSubheading: s.public_subheading || '',
+      scopeType: s.scope_type, priority: Math.trunc(Number(s.priority) || 0),
+    };
+  }
+
   let percent, salePrice;
   if (mode === 'percent') {
     percent = Math.trunc(Number(row.discount_percent) || 0);
@@ -5374,12 +5401,10 @@ async function setSaleProductRule(saleId, productId, rule) {
   if (existing) {
     // By row id, because /api/db updates on `id` alone.
     //
-    // The snapshot is captured once and never rewritten. Re-saving a rule next
-    // season must not quietly restate what last season's promotion was worth,
-    // so only a row that never had one gets one now.
-    if (!(Math.trunc(Number(existing.regular_price_snapshot) || 0) > 0)) {
-      data.regular_price_snapshot = _saleLivePrice(productId);
-    }
+    // The snapshot moves with a deliberate save. A sale that is still draft,
+    // scheduled or running is a plan, and saving it restates the plan in full;
+    // only an ended sale is fixed, and an ended sale cannot be saved at all.
+    data.regular_price_snapshot = _saleLivePrice(productId);
     await db('update', 'sale_products', {
       id: existing.id, data: { ...data, updated_at: new Date().toISOString() } });
     Object.assign(existing, data);
@@ -5396,42 +5421,192 @@ function _saleLivePrice(productId) {
   return Math.trunc(Number((inventory || []).find(p => p.id === productId)?.price) || 0);
 }
 
-// ── Keeping the historical record complete ──────────────────────────────────
+// ── Inquiries that arrived while a sale was on ──────────────────────────────
 //
-// An explicit rule brings its own row, so its snapshot is free. A piece swept
-// into a sitewide or collection-scoped campaign has no row at all — and when
-// that sale ends there would be nothing left saying it took part, let alone at
-// what price.
+// Period analytics and nothing more. It does not claim these inquiries came
+// FROM the sale — there is no attribution here and the wording must never
+// imply any. It answers "what did the inbox look like during those days".
 //
-// So while a campaign is live, every piece it covers is given a row. The row
-// says 'default', which is exactly what the resolver already assumed, so this
-// changes no price and no membership: in a products-scoped campaign the rows
-// ARE the covered set and there is nothing to add, and in the other two scopes
-// a 'default' row neither adds a piece nor removes one.
+// The honesty problem is the window: /api/inquiries returns the newest 300, so
+// a count taken from a partial window can be confidently wrong in the
+// direction that makes a sale look like a failure. A number is shown only when
+// the loaded window provably reaches back past the sale's first day.
 //
-// It runs when a live campaign is saved or opened, writes only the rows that
-// are missing, and therefore converges to zero writes. A piece that leaves the
-// collection later keeps its row — it did take part — but stops being priced,
-// because scope still decides that while the sale runs.
+// Nothing is stored. Inquiries are the source of truth and stay that way, so a
+// deleted sale leaves them untouched and a recount is always current.
+function saleInquiryPeriod(s) {
+  const status = saleStatus(s);
+  if (status !== SALE_STATUS.ACTIVE && status !== SALE_STATUS.ENDED) return null;
+
+  if (!inquiriesLoaded) return { state: 'unavailable' };
+
+  const today = businessToday();
+  const from = _saleBoundIn(s.starts_on);
+  const rawTo = _saleBoundIn(s.ends_on);
+  // A running sale is counted up to today; a finished one to its last day.
+  const to = status === SALE_STATUS.ACTIVE ? (rawTo && rawTo < today ? rawTo : today) : (rawTo || today);
+
+  // Can the loaded window actually answer the question? Under 300 rows means
+  // the whole history is in hand. At the cap it only answers if the oldest row
+  // loaded is older than the first day being counted — and a sale with no
+  // start date has no first day, so it never can.
+  const oldest = inquiries.reduce((acc, i) =>
+    (!acc || String(i.created_at) < acc) ? String(i.created_at) : acc, null);
+  const complete = inquiries.length < 300 ||
+    (!!from && !!oldest && _inquiryBusinessDate(oldest) <= from);
+  if (!complete) return { state: 'incomplete' };
+
+  const count = inquiries.filter(i => {
+    const d = _inquiryBusinessDate(i.created_at);
+    if (!d) return false;
+    if (from && d < from) return false;
+    return d <= to;                       // the end date is inclusive
+  }).length;
+  return { state: 'ok', count, from, to };
+}
+
+// An inquiry's timestamp read as a New York calendar day, so it is compared
+// against sale dates on the same footing.
+function _inquiryBusinessDate(ts) {
+  if (!ts) return '';
+  const t = new Date(ts);
+  return Number.isFinite(t.getTime()) ? businessToday(t) : '';
+}
+
+function _saleInquiryCard(d) {
+  if (!d?.id) return '';
+  const sale = (sales || []).find(x => x.id === d.id);
+  const r = sale && saleInquiryPeriod(sale);
+  if (!r) return '';
+  const value = r.state === 'ok' ? String(r.count)
+    : r.state === 'incomplete' ? 'Not available for this period'
+    : 'Unavailable';
+  return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:12px">
+    <div style="font-size:12px;color:var(--ink)">Inquiries during sale period: <b>${_esc(value)}</b></div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px">${
+      r.state === 'ok' ? 'Inquiries received on these dates. Not a measure of what the sale caused.'
+      : r.state === 'incomplete' ? 'The inbox only loads the most recent 300 inquiries, which do not reach back to the start of this sale.'
+      : 'Inquiries could not be loaded on this device.'}</div>
+  </div>`;
+}
+
+// ── The participant record ──────────────────────────────────────────────────
 //
-// Nothing is written for a sale that is not currently active. A finished sale
-// is a record, and records do not grow.
-async function ensureSaleParticipants(sale) {
-  if (!sale || !isSaleActive(sale)) return 0;
-  const missing = saleProductsFor(sale).filter(p => !saleProductRow(sale.id, p.id) && _saleLivePrice(p.id) > 0);
-  for (const p of missing) {
-    const data = { sale_id: sale.id, product_id: p.id, pricing_mode: 'default',
-                   discount_percent: 0, sale_price: 0, regular_price_snapshot: _saleLivePrice(p.id) };
-    try {
-      const row = (await db('insert', 'sale_products', { data }))?.[0];
-      saleProducts.push(row || data);
-    } catch (e) {
-      // A row that already exists is the unique index doing its job, not a
-      // failure worth stopping the screen for.
-      console.warn('[sales] participant snapshot skipped:', e.message);
-    }
+// A sale's rows ARE its record. They are written for one reason only: because
+// something was intentionally saved. There is no boot sweep, no open-the-editor
+// sweep, no scheduler and no freeze event — a sale goes live from its dates and
+// its enabled flag, whether or not anyone opens the app, and what was last
+// saved is what it is running.
+//
+// That works because every input to a sale is edited in this app: the pieces,
+// the prices, the membership, the discounts. Nothing can drift while nobody is
+// looking, so nothing needs watching.
+
+// What one covered piece should look like on disk, resolved from the campaign
+// and this piece's rule. Returns null when the piece is not covered at all.
+function saleResolveParticipant(sale, product, rule) {
+  const mode = SALE_MODES.includes(rule?.pricing_mode) ? rule.pricing_mode : 'default';
+  const regular = Math.trunc(Number(product?.price) || 0);
+  let percent = 0, salePrice = 0;
+  if (mode === 'percent') {
+    percent = Math.max(0, Math.trunc(Number(rule.discount_percent) || 0));
+    salePrice = saleFloorPrice(regular, percent);
+  } else if (mode === 'sale_price') {
+    salePrice = Math.max(0, Math.trunc(Number(rule.sale_price) || 0));
+    percent = saleFloorPercent(regular, salePrice);
+  } else if (mode === 'default') {
+    percent = Math.max(0, Math.trunc(Number(sale.default_discount_percent) || 0));
+    salePrice = saleFloorPrice(regular, percent);
   }
-  return missing.length;
+  // 'exclude' keeps both at zero: the row exists to say "not this one".
+  return { pricing_mode: mode, discount_percent: percent, sale_price: salePrice,
+           regular_price_snapshot: regular };
+}
+
+// A row is only worth writing when one of the four values it carries has
+// actually moved. Saving a sitewide campaign after changing one override must
+// cost one write, not one per piece in the shop.
+const _SALE_ROW_FIELDS = ['pricing_mode', 'discount_percent', 'sale_price', 'regular_price_snapshot'];
+function _saleRowDiffers(row, want) {
+  return _SALE_ROW_FIELDS.some(k =>
+    (k === 'pricing_mode' ? String(row?.[k] ?? '') !== String(want[k])
+                          : Math.trunc(Number(row?.[k]) || 0) !== Math.trunc(Number(want[k]) || 0)));
+}
+
+// Bring a sale's stored participation in line with what was just saved.
+//
+// An ended sale is history and is never touched. Everything else — draft,
+// scheduled, active — reflects the most recent deliberate save, snapshots
+// included. That is the whole model: the record is what you last said it was.
+//
+// Returns a count of rows actually written, which is what the tests measure.
+async function syncSaleParticipants(sale, rulesById) {
+  if (!sale || isSaleEnded(sale)) return { written: 0, removed: 0 };
+  const rules = rulesById || {};
+
+  // Who this sale covers. For sitewide and collections that is a question about
+  // scope, answered live. For a chosen-pieces sale the answer IS the rule set
+  // being saved — reading it back off the stored rows would be circular, and on
+  // a first save there are no rows yet to read.
+  const eligible = (inventory || []).filter(isSaleEligible);
+  const covered = sale.scope_type === 'products'
+    ? eligible.filter(p => rules[p.id])
+    : saleProductsFor(sale);
+  const coveredIds = new Set(covered.map(p => p.id));
+  let written = 0, removed = 0;
+
+  for (const p of covered) {
+    const want = saleResolveParticipant(sale, p, rules[p.id]);
+    const row = saleProductRow(sale.id, p.id);
+    if (row && !_saleRowDiffers(row, want)) continue;          // nothing moved
+    if (row) {
+      await db('update', 'sale_products', { id: row.id, data: { ...want, updated_at: new Date().toISOString() } });
+      Object.assign(row, want);
+    } else {
+      const created = (await db('insert', 'sale_products',
+        { data: { sale_id: sale.id, product_id: p.id, ...want } }))?.[0];
+      saleProducts.push(created || { sale_id: sale.id, product_id: p.id, ...want });
+    }
+    written++;
+  }
+
+  // Rows for pieces the sale no longer covers.
+  //
+  // An auto-materialised 'default' row carries no decision, so it goes. An
+  // explicit one — a percent, a set price, an exclusion — is something the
+  // operator chose, and it stays, dormant. Scope decides participation, so a
+  // dormant row prices nothing; but if the piece comes back into the
+  // collection, the choice made about it is still there.
+  for (const row of saleProducts.filter(r => r.sale_id === sale.id && !coveredIds.has(r.product_id))) {
+    if (row.pricing_mode !== 'default') continue;
+    await db('delete', 'sale_products', { id: row.id });
+    saleProducts = saleProducts.filter(r => r.id !== row.id);
+    removed++;
+  }
+  return { written, removed };
+}
+
+// Collection membership is edited on other screens, and a scoped sale's record
+// has to keep up. saveProductCollections() is the single place membership
+// changes, so this hangs off that one call rather than off a sweep.
+async function reconcileSalesForCollections(names) {
+  if (!salesLoaded || !(sales || []).length) return 0;
+  const touched = new Set((names || []).map(n => String(n || '').trim()).filter(Boolean));
+  let n = 0;
+  for (const sale of sales) {
+    if (sale.scope_type !== 'collections') continue;
+    if (isSaleEnded(sale)) continue;                    // history does not move
+    const mine = saleCollectionIds(sale.id)
+      .map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean);
+    // Only sales that actually watch one of the collections that just changed.
+    if (touched.size && !mine.some(name => touched.has(name))) continue;
+    const rules = {};
+    saleProducts.filter(r => r.sale_id === sale.id)
+      .forEach(r => { rules[r.product_id] = r; });
+    const res = await syncSaleParticipants(sale, rules);
+    n += res.written + res.removed;
+  }
+  return n;
 }
 
 // ── Duplicate ───────────────────────────────────────────────────────────────
@@ -5696,22 +5871,6 @@ function openSaleEditor(id) {
     !existing ? 'New sale' : (_saleDraft._readonly ? 'Past sale' : 'Edit sale');
   renderSaleEditor();
 
-  // Give every covered piece a row while the sale is live, so the record is
-  // complete by the time it ends. Silent, idempotent, and never blocks the UI.
-  if (existing && isSaleActive(existing)) {
-    ensureSaleParticipants(existing)
-      .then(n => {
-        if (!n || _saleDraft?.id !== existing.id) return;
-        // The draft is what Save writes, and anything missing from it is
-        // deleted. Rows created behind its back have to join it.
-        saleProducts.filter(r => r.sale_id === existing.id).forEach(r => {
-          if (!_saleRules[r.product_id]) _saleRules[r.product_id] = { pricing_mode: r.pricing_mode,
-            discount_percent: r.discount_percent, sale_price: r.sale_price };
-        });
-        renderSaleEditor();
-      })
-      .catch(e => console.warn('[sales] participants:', e.message));
-  }
 }
 
 function saleDraftSet(field, value) {
@@ -5851,7 +6010,14 @@ function renderSaleEditor() {
     ${_saleSummaryCard(priced.length, live.length, rangeLabel, problems)}
     ${_saleAdvancedBlock(d)}
     <div id="saleProductTable">${_saleProductTable(priced)}</div>
-    <div id="saleProblemSummary" style="margin-top:14px"></div>`;
+    ${_saleInquiryCard(d)}
+    <div id="saleProblemSummary" style="margin-top:14px"></div>
+    ${d.id ? `<div style="margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--border)">
+      <button onclick="deleteSaleFromEditor()" style="width:100%;background:#fff;border:1.5px solid #c9564c;border-radius:8px;color:#b3261e;font-size:13px;font-weight:600;cursor:pointer;padding:11px 14px;min-height:44px">
+        <i class="ti ti-trash"></i> Delete Sale
+      </button>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px">Permanent. To simply finish a sale, switch it off or let its end date pass — it stays in Past.</div>
+    </div>` : ''}`;
 
   _applySaleEditorMode(d);
 }
@@ -5868,11 +6034,16 @@ function _applySaleEditorMode(d) {
   if (!d._readonly) return;
   const body = document.getElementById('saleEditorBody');
   if (!body) return;
-  body.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; });
+  body.querySelectorAll('input, select, textarea, button').forEach(el => {
+    // Delete is the one action a finished sale still allows.
+    if (/deleteSaleFromEditor/.test(el.getAttribute('onclick') || '')) return;
+    el.disabled = true;
+  });
   // The scope pills and picker rows are plain divs carrying onclick, so
   // disabling form controls does not reach them.
   body.querySelectorAll('[onclick]').forEach(el => {
     if (el.tagName === 'BUTTON' || el.tagName === 'INPUT') return;
+    if (/deleteSaleFromEditor/.test(el.getAttribute('onclick') || '')) return;
     el.removeAttribute('onclick');
     el.style.cursor = 'default';
     el.style.opacity = '.75';
@@ -6419,18 +6590,21 @@ async function saveSale(btn) {
     if (d.scope_type === 'collections') await setSaleCollections(saleId, d._collectionIds);
     else await setSaleCollections(saleId, []);
 
-    // Every rule in the draft is written; anything dropped from the draft is
-    // removed, which is how a piece leaves a chosen-pieces sale.
-    const wanted = new Set(Object.keys(_saleRules));
-    for (const row of saleProducts.filter(r => r.sale_id === saleId)) {
-      if (!wanted.has(row.product_id)) await clearSaleProductRule(saleId, row.product_id);
-    }
-    for (const [productId, rule] of Object.entries(_saleRules)) {
-      await setSaleProductRule(saleId, productId, rule);
+    const saved = (sales || []).find(x => x.id === saleId);
+
+    // A chosen-pieces sale's membership IS its rows, so anything dropped from
+    // the draft leaves the sale outright — including a deliberate override,
+    // because removing the piece was itself the deliberate act.
+    if (d.scope_type === 'products') {
+      const wanted = new Set(Object.keys(_saleRules));
+      for (const row of saleProducts.filter(r => r.sale_id === saleId)) {
+        if (!wanted.has(row.product_id)) await clearSaleProductRule(saleId, row.product_id);
+      }
     }
 
-    const saved = (sales || []).find(x => x.id === saleId);
-    if (saved) await ensureSaleParticipants(saved);
+    // Everything the sale now covers, written in one pass, touching only the
+    // rows whose values actually moved.
+    if (saved) await syncSaleParticipants(saved, _saleRules);
 
     // Land on the group this sale is actually in. Status is still derived the
     // same way for everyone — this only decides which tab to show, so a sale
@@ -6468,14 +6642,45 @@ function saleWriteErrorMessage(e) {
     : 'Sale could not be saved. Please try again.';
 }
 
+// The app confirms destructive things in a bottom sheet, not a browser dialog.
+// This returns a promise so the caller reads as a straight line, and it always
+// settles — dismissing the sheet resolves false rather than hanging.
+function confirmDestructive({ title, body, confirmLabel }) {
+  return new Promise(resolve => {
+    const sheet = document.getElementById('deleteSaleSheet');
+    const btn = document.getElementById('confirmDeleteSaleBtn');
+    document.getElementById('deleteSaleTitle').textContent = title;
+    document.getElementById('deleteSaleBody').textContent = body;
+    btn.innerHTML = `<i class="ti ti-trash"></i> ${_esc(confirmLabel || 'Delete Permanently')}`;
+
+    let done = false;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      btn.onclick = null;
+      sheet.onclick = null;
+      closeSheet('deleteSaleSheet');
+      resolve(answer);
+    };
+    btn.onclick = () => finish(true);
+    // Cancel, the backdrop and Escape all mean no.
+    sheet.onclick = (e) => { if (e.target === sheet) finish(false); };
+    const cancel = sheet.querySelector('.btn-secondary');
+    if (cancel) cancel.onclick = () => finish(false);
+    openSheet('deleteSaleSheet');
+  });
+}
+
 // Deleting is not how a sale finishes — a finished sale ends and stays in Past,
 // which is the whole point of keeping the record. This erases it, and says so.
 async function deleteSaleFromEditor() {
   if (!_saleDraft?.id) { backToSalesList(); return; }
-  if (!confirm(`Permanently delete “${_saleDraft.name || 'this sale'}”?\n\n` +
-      `This erases the record of the promotion, including what each piece was offered at. ` +
-      `It cannot be undone.\n\n` +
-      `To simply finish a sale, switch it off or let its end date pass — it stays in Past.`)) return;
+  if (!await confirmDestructive({
+    title: `Delete “${_saleDraft.name || 'this sale'}” permanently?`,
+    body: 'This removes the Sale Campaign and its stored Sale pricing and history. This cannot be undone.\n\n' +
+          'Products and inquiries will not be deleted.',
+    confirmLabel: 'Delete Permanently',
+  })) return;
   try { await deleteSale(_saleDraft.id); showToast('Sale deleted'); backToSalesList(); }
   catch (e) { console.error('[sales] delete failed', e); showToast(saleWriteErrorMessage(e)); }
 }
@@ -7065,6 +7270,20 @@ async function saveProductCollections(product, names, visibility = {}) {
       } catch (e) { console.warn('[collections] could not update membership', e.message); }
     }
   }
+
+  // A collection-scoped sale's participant record follows its collections. This
+  // is the one place membership changes, so it is the one place that has to
+  // tell the sales that are watching. Both the collections just joined and the
+  // ones just left are passed, so a sale notices a piece leaving as well as
+  // arriving.
+  //
+  // Non-fatal by design: a membership edit must not fail because a sale could
+  // not be reconciled, and the next save of that sale puts it right.
+  try {
+    const touched = [...new Set([...wanted, ...current
+      .map(m => (collections.find(c => c.id === m.collection_id) || {}).name).filter(Boolean)])];
+    await reconcileSalesForCollections(touched);
+  } catch (e) { console.warn('[collections] sale reconcile failed', e.message); }
 }
 
 // Renders the per-collection website toggles for one product.
