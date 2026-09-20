@@ -110,6 +110,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .change-name-btn { background:none;border:none;font-size:12px;color:var(--burgundy);cursor:pointer;padding:2px 8px;font-weight:600;text-decoration:underline;flex-shrink:0; }
 .sheet-overlay.open { display: flex; }
 .sheet-overlay.exh-top { z-index: 901; }
+/* A sheet opened from inside a full-screen .catalog-overlay (z-index 2000).
+   Without this the sheet opens correctly and paints underneath the opaque
+   overlay, which looks exactly like a selector that refuses to open. */
+.sheet-overlay.over-fullscreen { z-index: 2100; }
 .sheet { background: white; border-radius: 16px 16px 0 0; width: 100%; max-width: 480px; min-height: 60vh; max-height: 90vh; overflow-y: auto; padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
 .sheet-title { font-family: 'Playfair Display', serif; font-size: 17px; color: var(--burgundy); margin-bottom: 14px; }
@@ -836,14 +840,17 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="catalog-toolbar">
       <button onclick="backToSalesList()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
       <div class="catalog-toolbar-title" id="saleEditorTitle">New sale</div>
-      <button class="btn btn-primary btn-sm" id="saleSaveBtn" onclick="saveSale(this)" style="padding:0 14px">Save</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-secondary btn-sm" id="saleDuplicateBtn" onclick="duplicateSaleFromEditor(this)" style="padding:0 12px;display:none">Duplicate</button>
+        <button class="btn btn-primary btn-sm" id="saleSaveBtn" onclick="saveSale(this)" style="padding:0 14px">Save</button>
+      </div>
     </div>
     <div id="saleEditorBody" style="flex:1;overflow-y:auto;background:#fafaf8;padding:14px 16px 90px"></div>
   </div>
 </div>
 
 <!-- Picking collections or products for a sale. One sheet, one list pattern. -->
-<div class="sheet-overlay" id="salePickerSheet" onclick="closeSheetOutside(event,'salePickerSheet')">
+<div class="sheet-overlay over-fullscreen" id="salePickerSheet" onclick="closeSheetOutside(event,'salePickerSheet')">
   <div class="sheet">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -5002,24 +5009,58 @@ function saleFloorPercent(regular, salePrice) {
   return Math.floor(((r - s) / r) * 100);
 }
 
-// ── Scheduling ──────────────────────────────────────────────────────────────
-// '-infinity' and 'infinity' arrive from Postgres as those literal strings, so
-// they are read as "no bound" rather than parsed as dates.
-function _saleBound(v, fallback) {
-  if (v == null || v === '' || v === '-infinity' || v === 'infinity') return fallback;
-  const t = Date.parse(v);
-  return Number.isFinite(t) ? t : fallback;
-}
-function saleStartsAt(s) { return _saleBound(s?.starts_at, -Infinity); }
-function saleEndsAt(s)   { return _saleBound(s?.ends_at,    Infinity); }
+// ── Scheduling: whole calendar days, never times ────────────────────────────
+//
+// Saima never picks a time, so the app never compares one. A sale's start and
+// end are DATE columns and every comparison here is between 'YYYY-MM-DD'
+// strings. That removes the whole class of bug where a sale set to end on the
+// 30th quietly stops at 8pm Eastern on the 29th because a UTC instant was
+// measured against a locally-chosen day.
+//
+// The business day is New York's, not the device's and not UTC. Saima sells at
+// exhibitions in NJ and NY, so that is the calendar a sale lives on — it stays
+// the same day whether she checks her phone in Lahore or Newark.
+const SALE_TZ = 'America/New_York';
 
-function saleStatus(s, now = Date.now()) {
+// en-CA formats as YYYY-MM-DD, which is what makes these strings comparable
+// with < and > and directly writable to a DATE column.
+function businessToday(now = new Date()) {
+  return new Date(now).toLocaleDateString('en-CA', { timeZone: SALE_TZ });
+}
+
+// The sentinels are Postgres's infinite dates, which arrive as these literal
+// strings. Compared as text '-infinity' happens to sort below any digit and
+// 'infinity' above, but relying on that would be a trick rather than a rule, so
+// they are answered explicitly.
+function saleStartsOnOrBefore(s, today) {
+  const v = s?.starts_on;
+  if (!v || v === '-infinity') return true;    // no start: eligible at once
+  if (v === 'infinity') return false;
+  return String(v).slice(0, 10) <= today;
+}
+function saleEndsOnOrAfter(s, today) {
+  const v = s?.ends_on;
+  if (!v || v === 'infinity') return true;     // no end: until switched off
+  if (v === '-infinity') return false;
+  return String(v).slice(0, 10) >= today;      // the end date is inclusive
+}
+
+function saleStatus(s, today = businessToday()) {
   if (!s || s.enabled !== true) return SALE_STATUS.DRAFT;
-  if (now < saleStartsAt(s)) return SALE_STATUS.SCHEDULED;
-  if (now > saleEndsAt(s))   return SALE_STATUS.ENDED;
+  if (!saleStartsOnOrBefore(s, today)) return SALE_STATUS.SCHEDULED;
+  if (!saleEndsOnOrAfter(s, today))    return SALE_STATUS.ENDED;
   return SALE_STATUS.ACTIVE;
 }
-function isSaleActive(s, now = Date.now()) { return saleStatus(s, now) === SALE_STATUS.ACTIVE; }
+function isSaleActive(s, today = businessToday()) { return saleStatus(s, today) === SALE_STATUS.ACTIVE; }
+function isSaleEnded(s, today = businessToday())  { return saleStatus(s, today) === SALE_STATUS.ENDED; }
+
+// Sorting a list by when a sale starts, sentinels included.
+function _saleStartKey(s) {
+  const v = s?.starts_on;
+  if (!v || v === '-infinity') return '0000-00-00';
+  if (v === 'infinity') return '9999-99-99';
+  return String(v).slice(0, 10);
+}
 
 // ── Membership ──────────────────────────────────────────────────────────────
 // Eligible means the piece exists and is not archived. Deliberately NOT
@@ -5057,12 +5098,18 @@ function saleProductsFor(s) {
 // ── What one campaign says a piece costs ────────────────────────────────────
 // Returns null when this campaign puts the piece on no sale at all — excluded,
 // no usable discount, or a price that is not a discount.
-function salePricingFor(s, p) {
-  if (!s || !p || !saleScopeCovers(s, p)) return null;
-  const regular = Math.trunc(Number(p.price) || 0);
+function salePricingFor(s, p, opts) {
+  if (!s || !p) return null;
+  const row = saleProductRow(s.id, p.id);
+  // A finished sale is read from its own rows, not from today's scope: a piece
+  // that has since left the collection still took part, and one that joined it
+  // afterwards did not.
+  const historic = opts?.historic === true;
+  if (historic ? !row : !saleScopeCovers(s, p)) return null;
+
+  const regular = saleRegularPrice(s, p, opts);
   if (regular <= 0) return null;
 
-  const row = saleProductRow(s.id, p.id);
   const mode = row && SALE_MODES.includes(row.pricing_mode) ? row.pricing_mode : 'default';
   if (mode === 'exclude') return null;
 
@@ -5090,9 +5137,41 @@ function salePricingFor(s, p) {
     discountPercent: percent,
     saleCampaignId: s.id,
     saleCampaignName: s.name || '',
+    salePublicHeading: s.public_heading || '',
+    salePublicSubheading: s.public_subheading || '',
     scopeType: s.scope_type,
     priority: Math.trunc(Number(s.priority) || 0),
   };
+}
+
+// ── The regular price a sale was struck against ─────────────────────────────
+//
+// While a sale is running this is products.price and nothing else: the current
+// regular price is the truth a customer is shown a discount from.
+//
+// Once a sale has ended it is the snapshot taken when the piece joined. This is
+// not a price-history system and answers exactly one question — what offer was
+// actually made. A $500 piece sold at $400 must keep reading "$500 → $400, 20%
+// off" after its regular price moves to $550, or last season's record rewrites
+// itself into a promotion that never happened.
+//
+// 0 means no snapshot was ever captured, and the live price is used rather than
+// a regular price of nothing.
+function saleRegularPrice(s, p, opts) {
+  const live = Math.trunc(Number(p?.price) || 0);
+  const wantHistoric = opts?.historic === true || (opts?.historic !== false && isSaleEnded(s));
+  if (!wantHistoric) return live;
+  const snap = Math.trunc(Number(saleProductRow(s.id, p.id)?.regular_price_snapshot) || 0);
+  return snap > 0 ? snap : live;
+}
+
+// Who actually took part. A live sale answers from its scope, a finished one
+// from the rows it left behind.
+function saleParticipants(s) {
+  if (!s) return [];
+  if (!isSaleEnded(s)) return saleProductsFor(s);
+  const ids = new Set(saleProducts.filter(r => r.sale_id === s.id).map(r => r.product_id));
+  return (inventory || []).filter(p => ids.has(p.id));
 }
 
 // ── Resolution across overlapping campaigns ─────────────────────────────────
@@ -5109,10 +5188,10 @@ function salePricingFor(s, p) {
 // decision rather than by arithmetic, and it stays out of the everyday UI.
 const _SALE_SPECIFICITY = { products: 3, collections: 2, sitewide: 1 };
 
-function resolveProductSale(p, now = Date.now()) {
+function resolveProductSale(p, today = businessToday()) {
   if (!p || !isSaleEligible(p)) return null;
   const offers = (sales || [])
-    .filter(s => isSaleActive(s, now))
+    .filter(s => isSaleActive(s, today))
     .map(s => salePricingFor(s, p))
     .filter(Boolean);
   if (!offers.length) return null;
@@ -5126,9 +5205,9 @@ function resolveProductSale(p, now = Date.now()) {
 
 // The shape the storefront will eventually read. Written now so the app and the
 // website cannot end up with two different ideas of what a price is.
-function productPricing(p, now = Date.now()) {
+function productPricing(p, today = businessToday()) {
   const regular = Math.trunc(Number(p?.price) || 0);
-  const r = resolveProductSale(p, now);
+  const r = resolveProductSale(p, today);
   return r
     ? { regularPrice: regular, salePrice: r.salePrice, discountPercent: r.discountPercent,
         isOnSale: true, saleCampaignId: r.saleCampaignId, saleCampaignName: r.saleCampaignName }
@@ -5141,13 +5220,31 @@ function productPricing(p, now = Date.now()) {
 // advertise a number no piece has. A campaign whose top discount is 30% cannot
 // say "up to 40%".
 function saleDiscountRange(s) {
-  const pct = saleProductsFor(s)
+  const pct = saleParticipants(s)
     .map(p => salePricingFor(s, p))
     .filter(Boolean)
     .map(x => x.discountPercent);
   if (!pct.length) return { count: 0, min: 0, max: 0, label: '' };
   const min = Math.min(...pct), max = Math.max(...pct);
   return { count: pct.length, min, max, label: min === max ? `${max}% off` : `${min}%–${max}%` };
+}
+
+// ── Does the public copy tell the truth? ────────────────────────────────────
+// Saima writes her own subheading, and she should — it is her voice. But
+// "Up to 50% off" over a sale whose best discount is 40% is a promise the
+// pieces cannot keep. The app reads any percentage out of the copy and says so
+// when it overshoots. It never edits her words: a warning she can act on beats
+// a silent rewrite she never sees.
+function saleCopyOverclaim(s) {
+  const text = String(s?.public_subheading || '') + ' ' + String(s?.public_heading || '');
+  const claims = [...text.matchAll(/(\d{1,3})\s*%/g)].map(m => parseInt(m[1], 10))
+    .filter(n => Number.isFinite(n) && n > 0 && n <= 100);
+  if (!claims.length) return null;
+  const { max, count } = saleDiscountRange(s);
+  const claimed = Math.max(...claims);
+  if (!count) return { claimed, actual: 0, reason: 'nothing is on sale yet' };
+  if (claimed > max) return { claimed, actual: max, reason: `the biggest discount is ${max}%` };
+  return null;
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -5182,9 +5279,9 @@ function validateSaleRow({ mode, regular, percent, salePrice, campaignDefault })
 }
 
 // ── Loading and writing ─────────────────────────────────────────────────────
-const SALE_COLS    = 'id,name,enabled,scope_type,default_discount_percent,priority,starts_at,ends_at,created_at,updated_at';
+const SALE_COLS    = 'id,name,public_heading,public_subheading,enabled,scope_type,default_discount_percent,priority,starts_on,ends_on,created_at,updated_at';
 const SALE_COLL_COLS = 'id,sale_id,collection_id,created_at';
-const SALE_PROD_COLS = 'id,sale_id,product_id,pricing_mode,discount_percent,sale_price,created_at,updated_at';
+const SALE_PROD_COLS = 'id,sale_id,product_id,pricing_mode,discount_percent,sale_price,regular_price_snapshot,created_at,updated_at';
 
 let salesLoaded = false;
 
@@ -5200,28 +5297,29 @@ async function loadSales() {
 }
 
 // A date input gives 'YYYY-MM-DD' or ''. Empty means no bound, which is a real
-// value here rather than a null the proxy would strip.
+// value here rather than a null the proxy would strip. The value goes to the
+// DATE column exactly as typed — no time, no zone, nothing to convert.
 function _saleBoundOut(value, kind) {
   const v = (value || '').trim();
   if (!v) return kind === 'start' ? '-infinity' : 'infinity';
-  // End of day for an end date, so "ends 5 June" includes the 5th.
-  return kind === 'start' ? `${v}T00:00:00Z` : `${v}T23:59:59Z`;
+  return v;
 }
 function _saleBoundIn(v) {
   if (!v || v === '-infinity' || v === 'infinity') return '';
-  const d = new Date(v);
-  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
+  return String(v).slice(0, 10);
 }
 
 async function createSale(draft) {
   const row = {
     name: (draft.name || '').trim() || 'Untitled sale',
+    public_heading: (draft.public_heading || '').trim(),
+    public_subheading: (draft.public_subheading || '').trim(),
     enabled: draft.enabled === true,
     scope_type: SALE_SCOPES.includes(draft.scope_type) ? draft.scope_type : 'products',
     default_discount_percent: Math.max(0, Math.trunc(Number(draft.default_discount_percent) || 0)),
     priority: Math.trunc(Number(draft.priority) || 0),
-    starts_at: _saleBoundOut(draft.starts_on, 'start'),
-    ends_at:   _saleBoundOut(draft.ends_on, 'end'),
+    starts_on: _saleBoundOut(draft.starts_on, 'start'),
+    ends_on:   _saleBoundOut(draft.ends_on, 'end'),
   };
   const created = (await db('insert', 'sales', { data: row }))?.[0];
   if (created) sales.push(created);
@@ -5275,15 +5373,94 @@ async function setSaleProductRule(saleId, productId, rule) {
   const existing = saleProductRow(saleId, productId);
   if (existing) {
     // By row id, because /api/db updates on `id` alone.
+    //
+    // The snapshot is captured once and never rewritten. Re-saving a rule next
+    // season must not quietly restate what last season's promotion was worth,
+    // so only a row that never had one gets one now.
+    if (!(Math.trunc(Number(existing.regular_price_snapshot) || 0) > 0)) {
+      data.regular_price_snapshot = _saleLivePrice(productId);
+    }
     await db('update', 'sale_products', {
       id: existing.id, data: { ...data, updated_at: new Date().toISOString() } });
     Object.assign(existing, data);
   } else {
+    data.regular_price_snapshot = _saleLivePrice(productId);
     const row = (await db('insert', 'sale_products',
       { data: { sale_id: saleId, product_id: productId, ...data } }))?.[0];
     saleProducts.push(row || { sale_id: saleId, product_id: productId, ...data });
   }
   return saleProductRow(saleId, productId);
+}
+
+function _saleLivePrice(productId) {
+  return Math.trunc(Number((inventory || []).find(p => p.id === productId)?.price) || 0);
+}
+
+// ── Keeping the historical record complete ──────────────────────────────────
+//
+// An explicit rule brings its own row, so its snapshot is free. A piece swept
+// into a sitewide or collection-scoped campaign has no row at all — and when
+// that sale ends there would be nothing left saying it took part, let alone at
+// what price.
+//
+// So while a campaign is live, every piece it covers is given a row. The row
+// says 'default', which is exactly what the resolver already assumed, so this
+// changes no price and no membership: in a products-scoped campaign the rows
+// ARE the covered set and there is nothing to add, and in the other two scopes
+// a 'default' row neither adds a piece nor removes one.
+//
+// It runs when a live campaign is saved or opened, writes only the rows that
+// are missing, and therefore converges to zero writes. A piece that leaves the
+// collection later keeps its row — it did take part — but stops being priced,
+// because scope still decides that while the sale runs.
+//
+// Nothing is written for a sale that is not currently active. A finished sale
+// is a record, and records do not grow.
+async function ensureSaleParticipants(sale) {
+  if (!sale || !isSaleActive(sale)) return 0;
+  const missing = saleProductsFor(sale).filter(p => !saleProductRow(sale.id, p.id) && _saleLivePrice(p.id) > 0);
+  for (const p of missing) {
+    const data = { sale_id: sale.id, product_id: p.id, pricing_mode: 'default',
+                   discount_percent: 0, sale_price: 0, regular_price_snapshot: _saleLivePrice(p.id) };
+    try {
+      const row = (await db('insert', 'sale_products', { data }))?.[0];
+      saleProducts.push(row || data);
+    } catch (e) {
+      // A row that already exists is the unique index doing its job, not a
+      // failure worth stopping the screen for.
+      console.warn('[sales] participant snapshot skipped:', e.message);
+    }
+  }
+  return missing.length;
+}
+
+// ── Duplicate ───────────────────────────────────────────────────────────────
+// Reusing last season's promotion without disturbing it. The copy is a new
+// record in every respect — new UUID, off by default, no dates — and the
+// original is not read for anything except its shape.
+//
+// Deliberately NOT copied: the snapshots. They belong to the promotion that
+// actually ran. The copy captures its own when it is saved and goes live.
+async function duplicateSale(id) {
+  const src = (sales || []).find(s => s.id === id);
+  if (!src) throw new Error('That sale no longer exists.');
+  const copy = await createSale({
+    name: `${src.name || 'Untitled sale'} (copy)`,
+    public_heading: src.public_heading || '',
+    public_subheading: src.public_subheading || '',
+    enabled: false,
+    scope_type: src.scope_type,
+    default_discount_percent: src.default_discount_percent,
+    priority: src.priority,
+    starts_on: '',
+    ends_on: '',
+  });
+  if (!copy) throw new Error('Could not create the copy.');
+  await setSaleCollections(copy.id, saleCollectionIds(src.id));
+  for (const r of saleProducts.filter(r => r.sale_id === src.id)) {
+    await setSaleProductRule(copy.id, r.product_id, r);
+  }
+  return copy;
 }
 
 // Removing a row means "no override": the piece falls back to the campaign. In
@@ -5355,9 +5532,18 @@ function setSalesTab(t) { _salesTab = t; renderSalesList(); }
 const _SALE_TAB_LABEL = { active: 'Active', scheduled: 'Scheduled', ended: 'Ended', draft: 'Drafts' };
 
 function renderSalesList() {
-  const now = Date.now();
+  const today = businessToday();
   const byStatus = { active: [], scheduled: [], ended: [], draft: [] };
-  (sales || []).forEach(s => byStatus[saleStatus(s, now)].push(s));
+  (sales || []).forEach(s => byStatus[saleStatus(s, today)].push(s));
+  // Newest promotion first in every group, so this season is at the top and
+  // the archive runs backwards beneath it.
+  Object.values(byStatus).forEach(g => g.sort((a, b) => _saleStartKey(b).localeCompare(_saleStartKey(a))));
+
+  // Two sales may legitimately share a name — "Royal Muse Sale" runs every
+  // autumn. The name is not identity, the UUID is, so the list tells them
+  // apart by when they ran rather than forcing a "Royal Muse Sale 2".
+  const nameCount = {};
+  (sales || []).forEach(s => { const k = (s.name || '').trim().toLowerCase(); nameCount[k] = (nameCount[k] || 0) + 1; });
 
   const tabs = document.getElementById('salesTabs');
   if (tabs) tabs.innerHTML = ['active','scheduled','ended','draft'].map(t =>
@@ -5375,19 +5561,25 @@ function renderSalesList() {
 
   list.innerHTML = rows.map(s => {
     const range = saleDiscountRange(s);
+    const shared = nameCount[(s.name || '').trim().toLowerCase()] > 1;
     const scope = s.scope_type === 'sitewide' ? 'Every piece in stock'
       : s.scope_type === 'collections'
         ? (saleCollectionIds(s.id).map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean).join(', ') || 'No collections chosen')
         : `${saleProductsFor(s).length} chosen piece${saleProductsFor(s).length === 1 ? '' : 's'}`;
-    const when = _saleWhenLabel(s);
+    const when = _saleWhenLabel(s) || 'No dates';
     return `<div onclick="openSaleEditor('${s.id}')" style="background:#fff;border-bottom:1px solid var(--border);padding:14px 16px;cursor:pointer">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
         <span style="font-size:14px;font-weight:600;color:var(--ink)">${_esc(s.name || 'Untitled sale')}</span>
-        ${_saleStatusPill(saleStatus(s, now))}
+        ${_saleStatusPill(saleStatus(s, today))}
       </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">${_esc(when)}${shared ? ' · shares a name with another sale' : ''}</div>
       <div style="font-size:11px;color:var(--muted);line-height:1.55">${_esc(scope)}</div>
       <div style="font-size:11px;color:var(--muted);line-height:1.55">
-        ${range.count ? `<b style="color:#8a6d2f">${_esc(range.label)}</b> on ${range.count} piece${range.count === 1 ? '' : 's'}` : 'Nothing on sale yet'}${when ? ' · ' + _esc(when) : ''}
+        ${range.count
+          ? `<b style="color:#8a6d2f">${_esc(range.label)}</b> on ${range.count} piece${range.count === 1 ? '' : 's'}`
+          : (saleStatus(s, today) === SALE_STATUS.ENDED
+              ? 'No record of which pieces took part'
+              : 'Nothing on sale yet')}
       </div>
     </div>`;
   }).join('');
@@ -5403,11 +5595,17 @@ function _saleStatusPill(status) {
   return `<span style="font-size:10px;color:${map[1]};background:${map[2]};border-radius:10px;padding:2px 8px">${map[0]}</span>`;
 }
 
+// Dates read the way they are spoken. Both bounds are inclusive whole days.
+function _saleDayLabel(d) {
+  const [y, m, day] = String(d).split('-').map(Number);
+  if (!y || !m || !day) return String(d);
+  return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]} ${day}, ${y}`;
+}
 function _saleWhenLabel(s) {
-  const a = _saleBoundIn(s.starts_at), b = _saleBoundIn(s.ends_at);
+  const a = _saleBoundIn(s.starts_on), b = _saleBoundIn(s.ends_on);
   if (!a && !b) return '';
-  if (a && b) return `${a} to ${b}`;
-  return a ? `from ${a}` : `until ${b}`;
+  if (a && b) return `${_saleDayLabel(a)} – ${_saleDayLabel(b)}`;
+  return a ? `From ${_saleDayLabel(a)}` : `Until ${_saleDayLabel(b)}`;
 }
 
 // ── The sale card on a product ──────────────────────────────────────────────
@@ -5441,7 +5639,7 @@ function renderDetailSaleCard(p) {
   // whether she discounts this piece by hand.
   const upcoming = (sales || [])
     .filter(s => saleStatus(s) === SALE_STATUS.SCHEDULED && salePricingFor(s, p))
-    .sort((a, b) => saleStartsAt(a) - saleStartsAt(b))[0];
+    .sort((a, b) => _saleStartKey(a).localeCompare(_saleStartKey(b)))[0];
   if (!upcoming) { el.style.display = 'none'; el.innerHTML = ''; return; }
 
   const u = salePricingFor(upcoming, p);
@@ -5457,10 +5655,15 @@ function renderDetailSaleCard(p) {
 function openSaleEditor(id) {
   const existing = id ? (sales || []).find(s => s.id === id) : null;
   _saleDraft = existing
-    ? { ...existing, starts_on: _saleBoundIn(existing.starts_at), ends_on: _saleBoundIn(existing.ends_at),
-        _collectionIds: saleCollectionIds(existing.id) }
-    : { id: null, name: '', enabled: true, scope_type: 'products',
-        default_discount_percent: 0, priority: 0, starts_on: '', ends_on: '', _collectionIds: [] };
+    ? { ...existing, starts_on: _saleBoundIn(existing.starts_on), ends_on: _saleBoundIn(existing.ends_on),
+        _collectionIds: saleCollectionIds(existing.id),
+        // A finished promotion is a record. Editing its discounts would rewrite
+        // what was actually offered, so it opens to be read, and Duplicate is
+        // how it gets reused.
+        _readonly: isSaleEnded(existing) }
+    : { id: null, name: '', public_heading: '', public_subheading: '', enabled: true,
+        scope_type: 'products', default_discount_percent: 0, priority: 0,
+        starts_on: '', ends_on: '', _collectionIds: [] };
 
   // The rules are edited as a draft so a failed save loses nothing.
   _saleRules = {};
@@ -5473,8 +5676,26 @@ function openSaleEditor(id) {
   _saleSelected.clear();
   document.getElementById('salesListScreen').style.display = 'none';
   document.getElementById('saleEditorScreen').style.display = 'flex';
-  document.getElementById('saleEditorTitle').textContent = existing ? 'Edit sale' : 'New sale';
+  document.getElementById('saleEditorTitle').textContent =
+    !existing ? 'New sale' : (_saleDraft._readonly ? 'Past sale' : 'Edit sale');
   renderSaleEditor();
+
+  // Give every covered piece a row while the sale is live, so the record is
+  // complete by the time it ends. Silent, idempotent, and never blocks the UI.
+  if (existing && isSaleActive(existing)) {
+    ensureSaleParticipants(existing)
+      .then(n => {
+        if (!n || _saleDraft?.id !== existing.id) return;
+        // The draft is what Save writes, and anything missing from it is
+        // deleted. Rows created behind its back have to join it.
+        saleProducts.filter(r => r.sale_id === existing.id).forEach(r => {
+          if (!_saleRules[r.product_id]) _saleRules[r.product_id] = { pricing_mode: r.pricing_mode,
+            discount_percent: r.discount_percent, sale_price: r.sale_price };
+        });
+        renderSaleEditor();
+      })
+      .catch(e => console.warn('[sales] participants:', e.message));
+  }
 }
 
 function saleDraftSet(field, value) {
@@ -5559,10 +5780,25 @@ function renderSaleEditor() {
            </div>`
         : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:6px">Every piece that is not archived. Exclude any you do not want in the table below.</div>`;
 
+  const overclaim = d.id ? saleCopyOverclaim({ ...d, id: d.id }) : null;
+
   el.innerHTML = `
-    <div class="field-label">Sale name</div>
-    <input type="text" class="field-input" value="${_esc(d.name || '')}" placeholder="e.g. Royal Muse Sale"
-      oninput="saleDraftSetQuiet('name', this.value)" style="margin-bottom:14px">
+    ${d._readonly ? `<div style="background:var(--sand-light);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);line-height:1.55">
+      This sale has ended. It is kept as a record of what was offered, so its prices cannot be changed. Use <b>Duplicate</b> to run it again.</div>` : ''}
+
+    <div class="field-label">Sale name <span style="font-weight:400;color:var(--muted)">— for you</span></div>
+    <input type="text" class="field-input" value="${_esc(d.name || '')}" placeholder="e.g. Royal Muse September Sale"
+      oninput="saleDraftSetQuiet('name', this.value)" style="margin-bottom:4px">
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Never shown to customers. Two sales may share a name — the dates tell them apart.</div>
+
+    <div class="field-label">Heading <span style="font-weight:400;color:var(--muted)">— for customers, optional</span></div>
+    <input type="text" class="field-input" value="${_esc(d.public_heading || '')}" placeholder="e.g. The Royal Muse Sale"
+      oninput="saleDraftSetQuiet('public_heading', this.value)" style="margin-bottom:10px">
+    <div class="field-label">Subheading <span style="font-weight:400;color:var(--muted)">— optional</span></div>
+    <input type="text" class="field-input" value="${_esc(d.public_subheading || '')}" placeholder="e.g. Up to 40% off selected pieces."
+      oninput="saleDraftSetQuiet('public_subheading', this.value)" onchange="renderSaleEditor()" style="margin-bottom:4px">
+    ${overclaim ? `<div style="font-size:11px;color:#8a1f1f;line-height:1.5;margin-bottom:10px">Your copy says ${overclaim.claimed}%, but ${_esc(overclaim.reason)}. Nothing has been changed — this is yours to decide.</div>` : ''}
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Used on the sale page when the website is ready. It does not create or change a homepage campaign.</div>
 
     <div class="field-label">This sale covers</div>
     ${scopePills}
@@ -5587,7 +5823,7 @@ function renderSaleEditor() {
         <input type="date" class="field-input" value="${_esc(d.ends_on || '')}" onchange="saleDraftSet('ends_on', this.value)">
       </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Leave blank for no start or no end. A sale with no end runs until you switch it off.</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Whole days, no times. Both dates count: a sale ending Sep 30 runs all of Sep 30. Leave blank for no start or no end — a sale with no end runs until you switch it off.</div>
 
     ${_homeToggle('Sale is on', d.enabled === true, 'saleDraftSetEnabled',
        d.enabled === true ? 'Customers see these prices while the sale is live.' : 'Nothing is on sale while this is off.')}
@@ -5595,6 +5831,31 @@ function renderSaleEditor() {
     ${_saleSummaryCard(priced.length, live.length, rangeLabel, problems)}
     ${_saleAdvancedBlock(d)}
     ${_saleProductTable(priced)}`;
+
+  _applySaleEditorMode(d);
+}
+
+// Save and Duplicate belong to a saved sale, and a finished one is readable but
+// not editable. Rather than thread a flag through every control above, the
+// state is applied to the rendered markup in one place.
+function _applySaleEditorMode(d) {
+  const dup = document.getElementById('saleDuplicateBtn');
+  if (dup) dup.style.display = d.id ? '' : 'none';
+  const save = document.getElementById('saleSaveBtn');
+  if (save) save.style.display = d._readonly ? 'none' : '';
+
+  if (!d._readonly) return;
+  const body = document.getElementById('saleEditorBody');
+  if (!body) return;
+  body.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; });
+  // The scope pills and picker rows are plain divs carrying onclick, so
+  // disabling form controls does not reach them.
+  body.querySelectorAll('[onclick]').forEach(el => {
+    if (el.tagName === 'BUTTON' || el.tagName === 'INPUT') return;
+    el.removeAttribute('onclick');
+    el.style.cursor = 'default';
+    el.style.opacity = '.75';
+  });
 }
 
 function saleDraftSetEnabled(v) { saleDraftSet('enabled', !!v); }
@@ -5880,6 +6141,7 @@ function saleTogglePickProduct(id) {
 async function saveSale(btn) {
   if (_saleBusy || !_saleDraft) return;
   const d = _saleDraft;
+  if (d._readonly) { showToast('This sale has ended. Duplicate it to run it again.'); return; }
   if (!(d.name || '').trim()) { showToast('Give this sale a name.'); return; }
 
   // Nothing invalid is written. A row that cannot price itself blocks the save
@@ -5894,12 +6156,14 @@ async function saveSale(btn) {
   try {
     const fields = {
       name: d.name.trim(),
+      public_heading: (d.public_heading || '').trim(),
+      public_subheading: (d.public_subheading || '').trim(),
       enabled: d.enabled === true,
       scope_type: d.scope_type,
       default_discount_percent: Math.max(0, Math.trunc(Number(d.default_discount_percent) || 0)),
       priority: Math.trunc(Number(d.priority) || 0),
-      starts_at: _saleBoundOut(d.starts_on, 'start'),
-      ends_at: _saleBoundOut(d.ends_on, 'end'),
+      starts_on: _saleBoundOut(d.starts_on, 'start'),
+      ends_on: _saleBoundOut(d.ends_on, 'end'),
     };
     let saleId = d.id;
     if (saleId) await updateSale(saleId, fields);
@@ -5922,6 +6186,9 @@ async function saveSale(btn) {
       await setSaleProductRule(saleId, productId, rule);
     }
 
+    const saved = (sales || []).find(x => x.id === saleId);
+    if (saved) await ensureSaleParticipants(saved);
+
     showToast('Sale saved ✓');
     backToSalesList();
   } catch (e) {
@@ -5933,11 +6200,33 @@ async function saveSale(btn) {
   }
 }
 
+// Deleting is not how a sale finishes — a finished sale ends and stays in Past,
+// which is the whole point of keeping the record. This erases it, and says so.
 async function deleteSaleFromEditor() {
   if (!_saleDraft?.id) { backToSalesList(); return; }
-  if (!confirm(`Delete “${_saleDraft.name || 'this sale'}”? Pieces go back to their regular prices.`)) return;
+  if (!confirm(`Permanently delete “${_saleDraft.name || 'this sale'}”?\n\n` +
+      `This erases the record of the promotion, including what each piece was offered at. ` +
+      `It cannot be undone.\n\n` +
+      `To simply finish a sale, switch it off or let its end date pass — it stays in Past.`)) return;
   try { await deleteSale(_saleDraft.id); showToast('Sale deleted'); backToSalesList(); }
   catch (e) { showToast('Could not delete: ' + e.message); }
+}
+
+async function duplicateSaleFromEditor(btn) {
+  if (_saleBusy || !_saleDraft?.id) return;
+  _saleBusy = true;
+  const orig = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Copying…'; }
+  try {
+    const copy = await duplicateSale(_saleDraft.id);
+    showToast('Copied — off until you switch it on');
+    openSaleEditor(copy.id);
+  } catch (e) {
+    showToast('Could not duplicate: ' + (e.message || e));
+  } finally {
+    _saleBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
 }
 
 // ─── WEBSITE PUBLISHING ──────────────────────────────────────────────────────

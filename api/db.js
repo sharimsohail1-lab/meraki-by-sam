@@ -60,15 +60,16 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   // Sale campaigns. See migration 034: every column is NOT NULL with a
   // sentinel, because stripNulls() above would silently drop a cleared date.
   sales: new Set([
-    'id','name','enabled','scope_type','default_discount_percent','priority',
-    'starts_at','ends_at','created_at','updated_at'
+    'id','name','public_heading','public_subheading','enabled','scope_type',
+    'default_discount_percent','priority','starts_on','ends_on',
+    'created_at','updated_at'
   ]),
   sale_collections: new Set([
     'id','sale_id','collection_id','created_at'
   ]),
   sale_products: new Set([
     'id','sale_id','product_id','pricing_mode','discount_percent','sale_price',
-    'created_at','updated_at'
+    'regular_price_snapshot','created_at','updated_at'
   ]),
   collections: new Set([
     'id','name','show_on_website','created_at','updated_at'
