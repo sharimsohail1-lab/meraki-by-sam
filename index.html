@@ -578,6 +578,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <button class="quick-btn" onclick="showScreen('stock');setStockView('collections',document.getElementById('stockViewCollections'))"><i class="ti ti-stack-2"></i><span>Collections</span></button>
         <button class="quick-btn" onclick="showScreen('show')"><i class="ti ti-building-store"></i><span id="t-qaExhibition">Exhibition</span></button>
         <button class="quick-btn" onclick="generateWhatsAppCatalog()"><i class="ti ti-brand-whatsapp"></i><span id="t-qaWhatsapp">WhatsApp Catalog</span></button>
+        <button class="quick-btn" onclick="openSalesScreen()"><i class="ti ti-tag"></i><span>Sales</span></button>
         <button class="quick-btn" onclick="showScreen('people')"><i class="ti ti-users"></i><span id="t-qaPeople">Customers</span></button>
         <button class="quick-btn" onclick="showScreen('storefront')"><i class="ti ti-layout-dashboard"></i><span>Website Home</span></button>
       </div>
@@ -814,6 +815,47 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <!-- CATALOG BUILDER OVERLAY -->
+<!-- Sales. A full-screen overlay like the catalogue builder: the pricing table
+     needs the width, and a sale is a task you finish and leave. -->
+<div class="catalog-overlay hidden" id="salesOverlay">
+  <!-- List -->
+  <div id="salesListScreen" style="display:flex;flex-direction:column;height:100%">
+    <div class="catalog-toolbar">
+      <button onclick="closeSalesScreen()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
+      <div class="catalog-toolbar-title">Sales</div>
+      <button class="btn btn-primary btn-sm" onclick="openSaleEditor(null)" style="padding:0 14px"><i class="ti ti-plus"></i> New</button>
+    </div>
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);background:#fff">
+      <div class="tab-pills" id="salesTabs"></div>
+    </div>
+    <div id="salesList" style="flex:1;overflow-y:auto;background:#fafaf8"></div>
+  </div>
+
+  <!-- Editor -->
+  <div id="saleEditorScreen" style="display:none;flex-direction:column;height:100%">
+    <div class="catalog-toolbar">
+      <button onclick="backToSalesList()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
+      <div class="catalog-toolbar-title" id="saleEditorTitle">New sale</div>
+      <button class="btn btn-primary btn-sm" id="saleSaveBtn" onclick="saveSale(this)" style="padding:0 14px">Save</button>
+    </div>
+    <div id="saleEditorBody" style="flex:1;overflow-y:auto;background:#fafaf8;padding:14px 16px 90px"></div>
+  </div>
+</div>
+
+<!-- Picking collections or products for a sale. One sheet, one list pattern. -->
+<div class="sheet-overlay" id="salePickerSheet" onclick="closeSheetOutside(event,'salePickerSheet')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="sheet-title" style="margin:0" id="salePickerTitle">Choose</div>
+      <button onclick="closeSheet('salePickerSheet')" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>
+    <input type="text" id="salePickerSearch" class="field-input" placeholder="Search" oninput="renderSalePicker()" autocapitalize="off" style="margin-bottom:10px">
+    <div id="salePickerList" style="max-height:52vh;overflow-y:auto;margin-bottom:12px"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="closeSheet('salePickerSheet')">Done</button>
+  </div>
+</div>
+
 <div class="catalog-overlay hidden" id="catalogBuilderOverlay">
   <!-- Step 1: Selection -->
   <div id="catalogSelScreen" style="display:flex;flex-direction:column;height:100%">
@@ -1322,6 +1364,9 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       </div>
       <div class="field-label">Price</div>
       <input type="number" id="detailPriceInput" class="field-input" placeholder="USD" style="margin-bottom:10px">
+      <!-- Read-only. The sale price is owned by the campaign, so it is shown here
+           and changed there — editing it in two places is how they drift apart. -->
+      <div id="detailSaleCard" style="display:none;margin:0 0 10px"></div>
       <div class="field-label">Collections</div>
       <div id="detailCollectionDisplay" onclick="openCollectionPicker({context:'detail',mode:'multi',targetId:'detailCollectionInput'})" style="display:flex;align-items:center;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;margin-bottom:10px;min-height:42px">
         <span id="detailCollectionLabel" style="flex:1;color:var(--muted)">Choose collections</span>
@@ -4912,6 +4957,987 @@ async function handleGalleryReplace(input) {
     showToast('Could not replace photo: ' + e.message);
     await _refreshPhotos();
   } finally { _photosBusy = false; }
+}
+
+// ─── SALES ───────────────────────────────────────────────────────────────────
+// A sale is a rule, not a price.
+//
+// products.price stays the one canonical regular price. Nothing here copies it,
+// nothing here is a second list price, and editing a regular price from inside
+// the Sales screen edits the product itself — which is why the UI says so out
+// loud. See migration 034 for the schema and for why no column is nullable.
+//
+// Three concepts, kept apart on purpose:
+//   the product's regular price   products.price
+//   what a campaign says it costs sale_products / the campaign default
+//   what was actually charged     a future invoice line, which will snapshot
+//                                 both of the above and never recompute them
+
+const SALE_SCOPES = ['sitewide', 'collections', 'products'];
+const SALE_MODES  = ['default', 'percent', 'sale_price', 'exclude'];
+
+// Every campaign is one of these, and the Sales screen groups by them.
+const SALE_STATUS = { DRAFT: 'draft', SCHEDULED: 'scheduled', ACTIVE: 'active', ENDED: 'ended' };
+
+let sales = [], saleCollections = [], saleProducts = [];
+
+// ── The money rules ─────────────────────────────────────────────────────────
+// Whole dollars and whole percents, and always rounded DOWN. Down rather than
+// nearest because a discount that rounds up is a discount the customer was not
+// promised, and a price that rounds up is a price they did not agree to. The
+// same two functions are used by the editor, by resolution, and by anything
+// downstream, so nothing can disagree about what 20% off $497 is.
+
+function saleFloorPrice(regular, percent) {
+  const r = Math.trunc(Number(regular) || 0);
+  const p = Math.trunc(Number(percent) || 0);
+  if (r <= 0 || p <= 0) return r > 0 ? r : 0;
+  return Math.floor(r * (100 - p) / 100);
+}
+
+function saleFloorPercent(regular, salePrice) {
+  const r = Math.trunc(Number(regular) || 0);
+  const s = Math.trunc(Number(salePrice) || 0);
+  if (r <= 0 || s <= 0 || s >= r) return 0;
+  return Math.floor(((r - s) / r) * 100);
+}
+
+// ── Scheduling ──────────────────────────────────────────────────────────────
+// '-infinity' and 'infinity' arrive from Postgres as those literal strings, so
+// they are read as "no bound" rather than parsed as dates.
+function _saleBound(v, fallback) {
+  if (v == null || v === '' || v === '-infinity' || v === 'infinity') return fallback;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : fallback;
+}
+function saleStartsAt(s) { return _saleBound(s?.starts_at, -Infinity); }
+function saleEndsAt(s)   { return _saleBound(s?.ends_at,    Infinity); }
+
+function saleStatus(s, now = Date.now()) {
+  if (!s || s.enabled !== true) return SALE_STATUS.DRAFT;
+  if (now < saleStartsAt(s)) return SALE_STATUS.SCHEDULED;
+  if (now > saleEndsAt(s))   return SALE_STATUS.ENDED;
+  return SALE_STATUS.ACTIVE;
+}
+function isSaleActive(s, now = Date.now()) { return saleStatus(s, now) === SALE_STATUS.ACTIVE; }
+
+// ── Membership ──────────────────────────────────────────────────────────────
+// Eligible means the piece exists and is not archived. Deliberately NOT
+// "published": a sale is often set up before the pieces go live, and a draft
+// piece already in a campaign should stay in it when it publishes.
+function isSaleEligible(p) { return !!p && p.is_archived !== true; }
+
+function saleProductRow(saleId, productId) {
+  return saleProducts.find(r => r.sale_id === saleId && r.product_id === productId) || null;
+}
+function saleCollectionIds(saleId) {
+  return saleCollections.filter(r => r.sale_id === saleId).map(r => r.collection_id);
+}
+
+// Does this campaign's scope cover this piece, before any override is read?
+function saleScopeCovers(s, p) {
+  if (!isSaleEligible(p)) return false;
+  if (s.scope_type === 'sitewide') return true;
+  if (s.scope_type === 'products') return !!saleProductRow(s.id, p.id);
+  if (s.scope_type === 'collections') {
+    const ids = saleCollectionIds(s.id);
+    if (!ids.length) return false;
+    const names = ids.map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean);
+    return names.some(n => productBelongsToCollection(p, n));
+  }
+  return false;
+}
+
+// Every piece a campaign covers, in inventory order.
+function saleProductsFor(s) {
+  if (!s) return [];
+  return (inventory || []).filter(p => saleScopeCovers(s, p));
+}
+
+// ── What one campaign says a piece costs ────────────────────────────────────
+// Returns null when this campaign puts the piece on no sale at all — excluded,
+// no usable discount, or a price that is not a discount.
+function salePricingFor(s, p) {
+  if (!s || !p || !saleScopeCovers(s, p)) return null;
+  const regular = Math.trunc(Number(p.price) || 0);
+  if (regular <= 0) return null;
+
+  const row = saleProductRow(s.id, p.id);
+  const mode = row && SALE_MODES.includes(row.pricing_mode) ? row.pricing_mode : 'default';
+  if (mode === 'exclude') return null;
+
+  let percent, salePrice;
+  if (mode === 'percent') {
+    percent = Math.trunc(Number(row.discount_percent) || 0);
+    salePrice = saleFloorPrice(regular, percent);
+  } else if (mode === 'sale_price') {
+    salePrice = Math.trunc(Number(row.sale_price) || 0);
+    percent = saleFloorPercent(regular, salePrice);
+  } else {
+    // Following the campaign. Changing the default re-prices every piece that
+    // never overrode it, with no rows rewritten.
+    percent = Math.trunc(Number(s.default_discount_percent) || 0);
+    salePrice = saleFloorPrice(regular, percent);
+  }
+
+  // A sale has to actually be a sale, and V1 does not sell anything for nothing.
+  if (!(percent > 0 && percent < 100)) return null;
+  if (!(salePrice >= 1 && salePrice < regular)) return null;
+
+  return {
+    regularPrice: regular,
+    salePrice,
+    discountPercent: percent,
+    saleCampaignId: s.id,
+    saleCampaignName: s.name || '',
+    scopeType: s.scope_type,
+    priority: Math.trunc(Number(s.priority) || 0),
+  };
+}
+
+// ── Resolution across overlapping campaigns ─────────────────────────────────
+// Discounts are never added together. Exactly one campaign wins, decided in
+// this order:
+//
+//   1. scope specificity   products beats collections beats sitewide
+//   2. priority, highest   left at 0 everywhere, this changes nothing
+//   3. lowest final price  the deterministic tiebreak
+//
+// Specificity first because it reads as intent: a campaign aimed at named
+// pieces is a more deliberate statement than one aimed at the whole site.
+// Priority exists so two genuinely competing campaigns can be settled by a
+// decision rather than by arithmetic, and it stays out of the everyday UI.
+const _SALE_SPECIFICITY = { products: 3, collections: 2, sitewide: 1 };
+
+function resolveProductSale(p, now = Date.now()) {
+  if (!p || !isSaleEligible(p)) return null;
+  const offers = (sales || [])
+    .filter(s => isSaleActive(s, now))
+    .map(s => salePricingFor(s, p))
+    .filter(Boolean);
+  if (!offers.length) return null;
+
+  offers.sort((a, b) =>
+    (_SALE_SPECIFICITY[b.scopeType] || 0) - (_SALE_SPECIFICITY[a.scopeType] || 0) ||
+    b.priority - a.priority ||
+    a.salePrice - b.salePrice);
+  return offers[0];
+}
+
+// The shape the storefront will eventually read. Written now so the app and the
+// website cannot end up with two different ideas of what a price is.
+function productPricing(p, now = Date.now()) {
+  const regular = Math.trunc(Number(p?.price) || 0);
+  const r = resolveProductSale(p, now);
+  return r
+    ? { regularPrice: regular, salePrice: r.salePrice, discountPercent: r.discountPercent,
+        isOnSale: true, saleCampaignId: r.saleCampaignId, saleCampaignName: r.saleCampaignName }
+    : { regularPrice: regular, salePrice: null, discountPercent: 0,
+        isOnSale: false, saleCampaignId: null, saleCampaignName: null };
+}
+
+// ── "Up to X% off" ──────────────────────────────────────────────────────────
+// Read off the pieces actually on sale in this campaign, so the app can never
+// advertise a number no piece has. A campaign whose top discount is 30% cannot
+// say "up to 40%".
+function saleDiscountRange(s) {
+  const pct = saleProductsFor(s)
+    .map(p => salePricingFor(s, p))
+    .filter(Boolean)
+    .map(x => x.discountPercent);
+  if (!pct.length) return { count: 0, min: 0, max: 0, label: '' };
+  const min = Math.min(...pct), max = Math.max(...pct);
+  return { count: pct.length, min, max, label: min === max ? `${max}% off` : `${min}%–${max}%` };
+}
+
+// ── Validation ──────────────────────────────────────────────────────────────
+// Returns an error string, or null when the row is fit to save. The editor
+// refuses to write anything this rejects.
+function validateSaleRow({ mode, regular, percent, salePrice, campaignDefault }) {
+  const r = Math.trunc(Number(regular) || 0);
+  if (mode === 'exclude') return null;
+  if (r <= 0) return 'Add a regular price to this piece first.';
+
+  if (mode === 'percent' || mode === 'default') {
+    const pRaw = mode === 'percent' ? percent : campaignDefault;
+    const p = Number(pRaw);
+    if (!Number.isFinite(p) || Math.trunc(p) !== p) return 'Discount must be a whole number.';
+    if (p <= 0) return mode === 'default'
+      ? 'This sale has no default discount yet — set one, or give this piece its own.'
+      : 'Discount must be more than 0%.';
+    if (p >= 100) return 'Discount must be under 100% — free pieces are not supported.';
+    if (saleFloorPrice(r, p) < 1) return 'That discount leaves less than $1. Lower the discount.';
+    return null;
+  }
+
+  if (mode === 'sale_price') {
+    const s = Number(salePrice);
+    if (!Number.isFinite(s) || Math.trunc(s) !== s) return 'Sale price must be a whole dollar amount.';
+    if (s < 1) return 'Sale price must be at least $1.';
+    if (s >= r) return 'Sale price must be lower than the regular price.';
+    if (saleFloorPercent(r, s) <= 0) return 'That is not enough of a discount to show as a sale.';
+    return null;
+  }
+  return 'Choose how this piece is priced.';
+}
+
+// ── Loading and writing ─────────────────────────────────────────────────────
+const SALE_COLS    = 'id,name,enabled,scope_type,default_discount_percent,priority,starts_at,ends_at,created_at,updated_at';
+const SALE_COLL_COLS = 'id,sale_id,collection_id,created_at';
+const SALE_PROD_COLS = 'id,sale_id,product_id,pricing_mode,discount_percent,sale_price,created_at,updated_at';
+
+let salesLoaded = false;
+
+async function loadSales() {
+  const [s, sc, sp] = await Promise.all([
+    db('select', 'sales',            { columns: SALE_COLS }),
+    db('select', 'sale_collections', { columns: SALE_COLL_COLS }),
+    db('select', 'sale_products',    { columns: SALE_PROD_COLS }),
+  ]);
+  sales = s || []; saleCollections = sc || []; saleProducts = sp || [];
+  salesLoaded = true;
+  return sales.length;
+}
+
+// A date input gives 'YYYY-MM-DD' or ''. Empty means no bound, which is a real
+// value here rather than a null the proxy would strip.
+function _saleBoundOut(value, kind) {
+  const v = (value || '').trim();
+  if (!v) return kind === 'start' ? '-infinity' : 'infinity';
+  // End of day for an end date, so "ends 5 June" includes the 5th.
+  return kind === 'start' ? `${v}T00:00:00Z` : `${v}T23:59:59Z`;
+}
+function _saleBoundIn(v) {
+  if (!v || v === '-infinity' || v === 'infinity') return '';
+  const d = new Date(v);
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
+}
+
+async function createSale(draft) {
+  const row = {
+    name: (draft.name || '').trim() || 'Untitled sale',
+    enabled: draft.enabled === true,
+    scope_type: SALE_SCOPES.includes(draft.scope_type) ? draft.scope_type : 'products',
+    default_discount_percent: Math.max(0, Math.trunc(Number(draft.default_discount_percent) || 0)),
+    priority: Math.trunc(Number(draft.priority) || 0),
+    starts_at: _saleBoundOut(draft.starts_on, 'start'),
+    ends_at:   _saleBoundOut(draft.ends_on, 'end'),
+  };
+  const created = (await db('insert', 'sales', { data: row }))?.[0];
+  if (created) sales.push(created);
+  return created;
+}
+
+async function updateSale(id, patch) {
+  const data = { ...patch, updated_at: new Date().toISOString() };
+  await db('update', 'sales', { id, data });
+  const i = sales.findIndex(s => s.id === id);
+  if (i >= 0) sales[i] = { ...sales[i], ...data };
+  return sales[i];
+}
+
+async function deleteSale(id) {
+  await db('delete', 'sales', { id });
+  sales = sales.filter(s => s.id !== id);
+  // The database cascades. Local state has to be told.
+  saleCollections = saleCollections.filter(r => r.sale_id !== id);
+  saleProducts    = saleProducts.filter(r => r.sale_id !== id);
+}
+
+async function setSaleCollections(saleId, collectionIds) {
+  const want = [...new Set((collectionIds || []).filter(Boolean))];
+  const mine = saleCollections.filter(r => r.sale_id === saleId);
+  const have = mine.map(r => r.collection_id);
+
+  // Deleted by row id, not by the pair: /api/db keys every delete on `id`.
+  for (const row of mine.filter(r => !want.includes(r.collection_id))) {
+    await db('delete', 'sale_collections', { id: row.id });
+  }
+  const added = [];
+  for (const collection_id of want.filter(x => !have.includes(x))) {
+    const row = (await db('insert', 'sale_collections', { data: { sale_id: saleId, collection_id } }))?.[0];
+    if (row) added.push(row);
+  }
+  saleCollections = saleCollections
+    .filter(r => r.sale_id !== saleId || want.includes(r.collection_id))
+    .concat(added);
+}
+
+// One row per piece, upserted. The unique index on (sale_id, product_id) makes
+// a second insert for the same pair a conflict rather than a duplicate, so an
+// existing row is updated instead.
+async function setSaleProductRule(saleId, productId, rule) {
+  const data = {
+    pricing_mode: SALE_MODES.includes(rule.pricing_mode) ? rule.pricing_mode : 'default',
+    discount_percent: Math.max(0, Math.trunc(Number(rule.discount_percent) || 0)),
+    sale_price: Math.max(0, Math.trunc(Number(rule.sale_price) || 0)),
+  };
+  const existing = saleProductRow(saleId, productId);
+  if (existing) {
+    // By row id, because /api/db updates on `id` alone.
+    await db('update', 'sale_products', {
+      id: existing.id, data: { ...data, updated_at: new Date().toISOString() } });
+    Object.assign(existing, data);
+  } else {
+    const row = (await db('insert', 'sale_products',
+      { data: { sale_id: saleId, product_id: productId, ...data } }))?.[0];
+    saleProducts.push(row || { sale_id: saleId, product_id: productId, ...data });
+  }
+  return saleProductRow(saleId, productId);
+}
+
+// Removing a row means "no override": the piece falls back to the campaign. In
+// a products-scoped campaign it also means the piece leaves the sale.
+async function clearSaleProductRule(saleId, productId) {
+  const row = saleProductRow(saleId, productId);
+  if (!row) return;
+  await db('delete', 'sale_products', { id: row.id });
+  saleProducts = saleProducts.filter(r => !(r.sale_id === saleId && r.product_id === productId));
+}
+
+// Editing the regular price from the Sales screen edits the PRODUCT. Said out
+// loud in the UI, because it is the one place in this screen where a change
+// leaves the campaign and lands on the piece itself — its catalogue entry, its
+// website page, everything.
+//
+// The piece's sale values are not rewritten here: percent mode re-derives the
+// sale price from the new regular, and sale_price mode re-derives the percent.
+// Both happen on read, so there is nothing to keep in step.
+async function setProductRegularPrice(productId, price) {
+  const p = Math.trunc(Number(price) || 0);
+  if (p <= 0) throw new Error('Regular price must be more than $0.');
+  await db('update', 'products', { id: productId, data: { price: p } });
+  const i = inventory.findIndex(x => x.id === productId);
+  if (i >= 0) {
+    inventory[i] = { ...inventory[i], price: p };
+    if (currentProduct && currentProduct.id === productId) currentProduct = inventory[i];
+  }
+  return p;
+}
+
+// ── Sales screen ────────────────────────────────────────────────────────────
+// The schema underneath is careful about overlaps, sentinels and precedence.
+// None of that belongs on this screen. What Saima does here is: name a sale,
+// say what it covers, set a discount, check the table, save.
+//
+// Priority is the one control deliberately hidden. It only matters when two
+// campaigns of the same scope cover one piece, so it lives behind Advanced and
+// the screen says so only when that is actually happening.
+
+let _salesTab = 'active';
+let _saleDraft = null;        // the campaign being edited
+let _saleRules = {};          // product_id -> { pricing_mode, discount_percent, sale_price }
+let _saleSelected = new Set();// bulk-action selection
+let _salePicker = null;       // 'collections' | 'products'
+let _saleBusy = false;
+
+function openSalesScreen(saleId) {
+  if (!requireAppDataLoaded('sales')) return;
+  document.getElementById('salesOverlay').classList.remove('hidden');
+  const target = saleId && (sales || []).some(s => s.id === saleId) ? saleId : null;
+  if (target) openSaleEditor(target); else backToSalesList();
+}
+function closeSalesScreen() {
+  document.getElementById('salesOverlay').classList.add('hidden');
+  _saleDraft = null; _saleRules = {}; _saleSelected.clear();
+  // A product sheet may be open underneath, still showing the price this
+  // campaign just changed.
+  if (currentProduct) renderDetailSaleCard(currentProduct);
+}
+function backToSalesList() {
+  document.getElementById('salesListScreen').style.display = 'flex';
+  document.getElementById('saleEditorScreen').style.display = 'none';
+  _saleDraft = null; _saleSelected.clear();
+  renderSalesList();
+}
+function setSalesTab(t) { _salesTab = t; renderSalesList(); }
+
+const _SALE_TAB_LABEL = { active: 'Active', scheduled: 'Scheduled', ended: 'Ended', draft: 'Drafts' };
+
+function renderSalesList() {
+  const now = Date.now();
+  const byStatus = { active: [], scheduled: [], ended: [], draft: [] };
+  (sales || []).forEach(s => byStatus[saleStatus(s, now)].push(s));
+
+  const tabs = document.getElementById('salesTabs');
+  if (tabs) tabs.innerHTML = ['active','scheduled','ended','draft'].map(t =>
+    `<button class="tab-pill ${t === _salesTab ? 'active' : ''}" onclick="setSalesTab('${t}')">${_SALE_TAB_LABEL[t]}${byStatus[t].length ? ' · ' + byStatus[t].length : ''}</button>`
+  ).join('');
+
+  const list = document.getElementById('salesList');
+  if (!list) return;
+  const rows = byStatus[_salesTab] || [];
+  if (!rows.length) {
+    list.innerHTML = `<div style="padding:40px 24px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6">
+      No ${_SALE_TAB_LABEL[_salesTab].toLowerCase()} sales.${_salesTab === 'active' ? '<br>Tap New to start one.' : ''}</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map(s => {
+    const range = saleDiscountRange(s);
+    const scope = s.scope_type === 'sitewide' ? 'Every piece in stock'
+      : s.scope_type === 'collections'
+        ? (saleCollectionIds(s.id).map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean).join(', ') || 'No collections chosen')
+        : `${saleProductsFor(s).length} chosen piece${saleProductsFor(s).length === 1 ? '' : 's'}`;
+    const when = _saleWhenLabel(s);
+    return `<div onclick="openSaleEditor('${s.id}')" style="background:#fff;border-bottom:1px solid var(--border);padding:14px 16px;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <span style="font-size:14px;font-weight:600;color:var(--ink)">${_esc(s.name || 'Untitled sale')}</span>
+        ${_saleStatusPill(saleStatus(s, now))}
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">${_esc(scope)}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        ${range.count ? `<b style="color:#8a6d2f">${_esc(range.label)}</b> on ${range.count} piece${range.count === 1 ? '' : 's'}` : 'Nothing on sale yet'}${when ? ' · ' + _esc(when) : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _saleStatusPill(status) {
+  const map = {
+    active:    ['Live', '#1d5c3f', '#e7f4ed'],
+    scheduled: ['Scheduled', '#7a4500', '#fff6e5'],
+    ended:     ['Ended', 'var(--muted)', 'var(--sand-light)'],
+    draft:     ['Off', 'var(--muted)', 'var(--sand-light)'],
+  }[status] || ['', '', ''];
+  return `<span style="font-size:10px;color:${map[1]};background:${map[2]};border-radius:10px;padding:2px 8px">${map[0]}</span>`;
+}
+
+function _saleWhenLabel(s) {
+  const a = _saleBoundIn(s.starts_at), b = _saleBoundIn(s.ends_at);
+  if (!a && !b) return '';
+  if (a && b) return `${a} to ${b}`;
+  return a ? `from ${a}` : `until ${b}`;
+}
+
+// ── The sale card on a product ──────────────────────────────────────────────
+// Status, not a control. It answers "what is this piece selling for today, and
+// why" without Saima having to remember which campaigns exist, and sends her to
+// the one place the answer can be changed.
+function renderDetailSaleCard(p) {
+  const el = document.getElementById('detailSaleCard');
+  if (!el) return;
+  if (!p) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  const pr = productPricing(p);
+  if (pr.isOnSale) {
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div style="border:1.5px solid var(--gold,#b8860b);border-radius:8px;padding:10px 12px;background:rgba(184,134,11,.06)">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <span style="font-size:18px;font-weight:600">$${pr.salePrice}</span>
+          <span style="font-size:13px;color:var(--muted);text-decoration:line-through">$${pr.regularPrice}</span>
+          <span style="font-size:11px;font-weight:600;color:var(--gold,#b8860b)">${pr.discountPercent}% off</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <span style="flex:1;font-size:11px;color:var(--muted)">On sale in ${_esc(pr.saleCampaignName || 'a sale')}</span>
+          <button onclick="openSalesScreen('${pr.saleCampaignId}')" style="background:none;border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--muted);cursor:pointer;padding:4px 10px">Manage</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Not on sale today, but something is coming. Worth saying, because it changes
+  // whether she discounts this piece by hand.
+  const upcoming = (sales || [])
+    .filter(s => saleStatus(s) === SALE_STATUS.SCHEDULED && salePricingFor(s, p))
+    .sort((a, b) => saleStartsAt(a) - saleStartsAt(b))[0];
+  if (!upcoming) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  const u = salePricingFor(upcoming, p);
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;border:1px dashed var(--border);border-radius:8px;padding:8px 12px">
+      <span style="flex:1;font-size:11px;color:var(--muted)">Scheduled: $${u.salePrice} (${u.discountPercent}% off) in ${_esc(upcoming.name || 'a sale')} ${_esc(_saleWhenLabel(upcoming))}</span>
+      <button onclick="openSalesScreen('${upcoming.id}')" style="background:none;border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--muted);cursor:pointer;padding:4px 10px">View</button>
+    </div>`;
+}
+
+// ── Editor ──────────────────────────────────────────────────────────────────
+function openSaleEditor(id) {
+  const existing = id ? (sales || []).find(s => s.id === id) : null;
+  _saleDraft = existing
+    ? { ...existing, starts_on: _saleBoundIn(existing.starts_at), ends_on: _saleBoundIn(existing.ends_at),
+        _collectionIds: saleCollectionIds(existing.id) }
+    : { id: null, name: '', enabled: true, scope_type: 'products',
+        default_discount_percent: 0, priority: 0, starts_on: '', ends_on: '', _collectionIds: [] };
+
+  // The rules are edited as a draft so a failed save loses nothing.
+  _saleRules = {};
+  if (existing) {
+    saleProducts.filter(r => r.sale_id === existing.id).forEach(r => {
+      _saleRules[r.product_id] = { pricing_mode: r.pricing_mode,
+        discount_percent: r.discount_percent, sale_price: r.sale_price };
+    });
+  }
+  _saleSelected.clear();
+  document.getElementById('salesListScreen').style.display = 'none';
+  document.getElementById('saleEditorScreen').style.display = 'flex';
+  document.getElementById('saleEditorTitle').textContent = existing ? 'Edit sale' : 'New sale';
+  renderSaleEditor();
+}
+
+function saleDraftSet(field, value) {
+  if (!_saleDraft) return;
+  _saleDraft[field] = value;
+  renderSaleEditor();
+}
+// Typing a name should not re-render the field under the cursor.
+function saleDraftSetQuiet(field, value) { if (_saleDraft) _saleDraft[field] = value; }
+
+function saleSetScope(v) {
+  if (!_saleDraft) return;
+  _saleDraft.scope_type = v;
+  renderSaleEditor();
+}
+
+// The pieces this draft covers, computed from the draft rather than the saved
+// campaign, so the table reacts before anything is written.
+function _saleDraftProducts() {
+  const d = _saleDraft;
+  if (!d) return [];
+  const eligible = (inventory || []).filter(isSaleEligible);
+  if (d.scope_type === 'sitewide') return eligible;
+  if (d.scope_type === 'products') return eligible.filter(p => _saleRules[p.id]);
+  const names = (d._collectionIds || [])
+    .map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean);
+  return names.length ? eligible.filter(p => names.some(n => productBelongsToCollection(p, n))) : [];
+}
+
+// What one row resolves to right now, from the draft. Mirrors salePricingFor()
+// but reads the unsaved rules.
+function _saleDraftRow(p) {
+  const d = _saleDraft;
+  const regular = Math.trunc(Number(p.price) || 0);
+  const rule = _saleRules[p.id] || { pricing_mode: 'default', discount_percent: 0, sale_price: 0 };
+  const mode = rule.pricing_mode;
+  let percent = 0, salePrice = 0;
+  if (mode === 'exclude') return { regular, mode, percent: 0, salePrice: 0, excluded: true, error: null };
+  if (mode === 'percent')        { percent = rule.discount_percent; salePrice = saleFloorPrice(regular, percent); }
+  else if (mode === 'sale_price'){ salePrice = rule.sale_price;     percent   = saleFloorPercent(regular, salePrice); }
+  else                           { percent = Math.trunc(Number(d.default_discount_percent) || 0);
+                                   salePrice = saleFloorPrice(regular, percent); }
+  const error = validateSaleRow({ mode, regular, percent: rule.discount_percent,
+    salePrice: rule.sale_price, campaignDefault: d.default_discount_percent });
+  return { regular, mode, percent, salePrice, excluded: false, error };
+}
+
+function renderSaleEditor() {
+  const d = _saleDraft;
+  const el = document.getElementById('saleEditorBody');
+  if (!el || !d) return;
+
+  const products = _saleDraftProducts();
+  const priced = products.map(p => ({ p, r: _saleDraftRow(p) }));
+  const live = priced.filter(x => !x.r.excluded && !x.r.error);
+  const pct = live.map(x => x.r.percent);
+  const rangeLabel = pct.length
+    ? (Math.min(...pct) === Math.max(...pct) ? `${Math.max(...pct)}% off`
+       : `${Math.min(...pct)}%–${Math.max(...pct)}%`)
+    : '';
+  const problems = priced.filter(x => !x.r.excluded && x.r.error).length;
+
+  const scopePills = _homePills([
+    { value: 'sitewide',    label: 'Everything' },
+    { value: 'collections', label: 'Collections' },
+    { value: 'products',    label: 'Chosen pieces' },
+  ], d.scope_type, 'saleSetScope');
+
+  const collNames = (d._collectionIds || [])
+    .map(id => (collections.find(c => c.id === id) || {}).name).filter(Boolean);
+
+  const scopeChooser =
+    d.scope_type === 'collections'
+      ? `<div onclick="openSalePicker('collections')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:46px;margin-bottom:6px">
+           <span style="flex:1;font-size:13px;color:${collNames.length ? 'var(--ink)' : 'var(--muted)'}">${collNames.length ? _esc(collNames.join(', ')) : 'Choose collections'}</span>
+           <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+         </div>`
+      : d.scope_type === 'products'
+        ? `<div onclick="openSalePicker('products')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;min-height:46px;margin-bottom:6px">
+             <span style="flex:1;font-size:13px;color:${products.length ? 'var(--ink)' : 'var(--muted)'}">${products.length ? `${products.length} piece${products.length === 1 ? '' : 's'} chosen` : 'Choose pieces'}</span>
+             <i class="ti ti-chevron-down" style="color:var(--muted)"></i>
+           </div>`
+        : `<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:6px">Every piece that is not archived. Exclude any you do not want in the table below.</div>`;
+
+  el.innerHTML = `
+    <div class="field-label">Sale name</div>
+    <input type="text" class="field-input" value="${_esc(d.name || '')}" placeholder="e.g. Royal Muse Sale"
+      oninput="saleDraftSetQuiet('name', this.value)" style="margin-bottom:14px">
+
+    <div class="field-label">This sale covers</div>
+    ${scopePills}
+    ${scopeChooser}
+
+    <div class="field-label" style="margin-top:12px">Default discount <span style="font-weight:400;color:var(--muted)">— optional</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <input type="number" inputmode="numeric" min="0" max="99" class="field-input" style="width:110px;margin:0"
+        value="${d.default_discount_percent || ''}" placeholder="0"
+        oninput="saleDraftSetQuiet('default_discount_percent', this.value)" onchange="renderSaleEditor()">
+      <span style="font-size:13px;color:var(--muted)">% off</span>
+    </div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Every piece starts here. Give any piece its own discount in the table below.</div>
+
+    <div style="display:flex;gap:10px;margin-bottom:6px">
+      <div style="flex:1">
+        <div class="field-label">Starts</div>
+        <input type="date" class="field-input" value="${_esc(d.starts_on || '')}" onchange="saleDraftSet('starts_on', this.value)">
+      </div>
+      <div style="flex:1">
+        <div class="field-label">Ends</div>
+        <input type="date" class="field-input" value="${_esc(d.ends_on || '')}" onchange="saleDraftSet('ends_on', this.value)">
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Leave blank for no start or no end. A sale with no end runs until you switch it off.</div>
+
+    ${_homeToggle('Sale is on', d.enabled === true, 'saleDraftSetEnabled',
+       d.enabled === true ? 'Customers see these prices while the sale is live.' : 'Nothing is on sale while this is off.')}
+
+    ${_saleSummaryCard(priced.length, live.length, rangeLabel, problems)}
+    ${_saleAdvancedBlock(d)}
+    ${_saleProductTable(priced)}`;
+}
+
+function saleDraftSetEnabled(v) { saleDraftSet('enabled', !!v); }
+
+function _saleSummaryCard(total, live, rangeLabel, problems) {
+  return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:16px 0 10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:6px">What customers will see</div>
+    <div style="font-size:13px;color:var(--ink);line-height:1.6">
+      ${live ? `<b>${_esc(rangeLabel)}</b> on ${live} of ${total} piece${total === 1 ? '' : 's'}.` : `Nothing is on sale yet.`}
+    </div>
+    ${live && rangeLabel.includes('–') ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Safe to advertise as “Up to ${_esc(rangeLabel.split('–')[1])} off”.</div>` : ''}
+    ${problems ? `<div style="font-size:11px;color:#8a1f1f;margin-top:6px">${problems} piece${problems === 1 ? ' needs' : 's need'} attention below.</div>` : ''}
+  </div>`;
+}
+
+// Priority lives here and nowhere else, and the screen only admits it exists
+// when two campaigns of the same scope actually overlap this one.
+function _saleAdvancedBlock(d) {
+  const clash = _saleOverlapCount(d);
+  if (!clash && !d.priority) return '';
+  return `<details style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px">
+    <summary style="font-size:12px;color:var(--muted);cursor:pointer">Advanced${clash ? ` · ${clash} other sale${clash === 1 ? '' : 's'} overlap${clash === 1 ? 's' : ''} this one` : ''}</summary>
+    <div style="font-size:11px;color:var(--muted);line-height:1.55;margin:8px 0">
+      When two sales of the same kind cover one piece, the higher number wins. Leave both at 0 and the bigger discount wins.
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--ink)">Priority</span>
+      <input type="number" inputmode="numeric" class="field-input" style="width:90px;margin:0"
+        value="${Math.trunc(Number(d.priority) || 0)}" onchange="saleDraftSet('priority', this.value)">
+    </div>
+  </details>`;
+}
+
+// How many other campaigns of the same scope specificity could fight with this
+// one over a piece. Used only to decide whether to mention Advanced at all.
+function _saleOverlapCount(d) {
+  const mine = new Set(_saleDraftProducts().map(p => p.id));
+  if (!mine.size) return 0;
+  return (sales || []).filter(s =>
+    s.id !== d.id && s.scope_type === d.scope_type && isSaleActive(s) &&
+    saleProductsFor(s).some(p => mine.has(p.id))).length;
+}
+
+// ── The product table ───────────────────────────────────────────────────────
+const _SALE_RULE_LABEL = { default: 'Campaign default', percent: 'Own discount', sale_price: 'Set price', exclude: 'Not on sale' };
+
+function _saleProductTable(priced) {
+  if (!priced.length) {
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:24px 16px;text-align:center;color:var(--muted);font-size:12px;line-height:1.6">
+      No pieces yet. Choose what this sale covers above.</div>`;
+  }
+  const anySelected = _saleSelected.size > 0;
+  const bulk = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--sand-light)">
+      <span style="font-size:11px;color:var(--muted);flex:1">${anySelected ? `${_saleSelected.size} selected` : 'Select pieces to change several at once'}</span>
+      ${anySelected ? `
+        <button onclick="saleBulk('default')" class="btn btn-secondary btn-sm" style="padding:0 10px;font-size:11px">Use default</button>
+        <button onclick="saleBulkPercent()" class="btn btn-secondary btn-sm" style="padding:0 10px;font-size:11px">Set %</button>
+        <button onclick="saleBulk('include')" class="btn btn-secondary btn-sm" style="padding:0 10px;font-size:11px">Include</button>
+        <button onclick="saleBulk('exclude')" class="btn btn-secondary btn-sm" style="padding:0 10px;font-size:11px">Exclude</button>
+        <button onclick="saleSelectNone()" style="background:none;border:none;font-size:11px;color:var(--muted);cursor:pointer">Clear</button>`
+      : `<button onclick="saleSelectAll()" style="background:none;border:none;font-size:11px;color:var(--ink);cursor:pointer;text-decoration:underline">Select all</button>`}
+    </div>`;
+
+  const rows = priced.map(({ p, r }) => {
+    const sel = _saleSelected.has(p.id);
+    const state = p.is_archived ? 'Archived' : (websiteStatus ? websiteStatus(p) : p.website_status);
+    return `<div style="border-bottom:1px solid var(--border);padding:12px;background:${r.excluded ? '#fbfbfa' : '#fff'}">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div onclick="saleToggleSelect('${p.id}')" style="flex-shrink:0;width:22px;height:22px;border-radius:6px;border:2px solid ${sel ? 'var(--emerald)' : 'var(--border)'};background:${sel ? 'var(--emerald)' : '#fff'};color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;margin-top:2px">${sel ? '<i class="ti ti-check" style="font-size:13px"></i>' : ''}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:${r.excluded ? 'var(--muted)' : 'var(--ink)'};word-break:break-word">${_esc(p.name || 'Untitled')}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:1px">${_esc(p.sku || '')}${state ? ' · ' + _esc(String(state)) : ''}</div>
+        </div>
+        <select onchange="saleSetMode('${p.id}', this.value)" style="flex-shrink:0;font-size:11px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;max-width:132px">
+          ${Object.entries(_SALE_RULE_LABEL).map(([v, l]) =>
+            `<option value="${v}" ${r.mode === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+
+      ${r.excluded ? `<div style="font-size:11px;color:var(--muted);margin:8px 0 0 32px">Not on sale.</div>` : `
+      <div style="display:flex;gap:8px;margin:10px 0 0 32px;flex-wrap:wrap">
+        <label style="flex:1;min-width:92px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px">Regular</div>
+          <div style="display:flex;align-items:center;gap:3px">
+            <span style="font-size:12px;color:var(--muted)">$</span>
+            <input type="number" inputmode="numeric" min="1" value="${r.regular || ''}" class="field-input"
+              style="margin:0;padding:6px 8px;font-size:13px" onchange="saleSetRegular('${p.id}', this.value, this)">
+          </div>
+        </label>
+        <label style="flex:1;min-width:92px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px">Sale price</div>
+          <div style="display:flex;align-items:center;gap:3px">
+            <span style="font-size:12px;color:var(--muted)">$</span>
+            <input type="number" inputmode="numeric" min="1" value="${r.salePrice || ''}" class="field-input"
+              style="margin:0;padding:6px 8px;font-size:13px" onchange="saleSetSalePrice('${p.id}', this.value)">
+          </div>
+        </label>
+        <label style="flex:1;min-width:78px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px">Discount</div>
+          <div style="display:flex;align-items:center;gap:3px">
+            <input type="number" inputmode="numeric" min="1" max="99" value="${r.percent || ''}" class="field-input"
+              style="margin:0;padding:6px 8px;font-size:13px" onchange="saleSetPercent('${p.id}', this.value)">
+            <span style="font-size:12px;color:var(--muted)">%</span>
+          </div>
+        </label>
+      </div>
+      ${r.error ? `<div style="font-size:11px;color:#8a1f1f;margin:6px 0 0 32px;line-height:1.5">${_esc(r.error)}</div>` : ''}`}
+    </div>`;
+  }).join('');
+
+  return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase">Pieces in this sale</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:3px">Regular price is the piece's real website price. Changing it here changes the piece itself.</div>
+    </div>
+    ${bulk}${rows}</div>`;
+}
+
+// ── Row edits. The synchronisation rules live here and nowhere else. ────────
+function _saleRule(id) {
+  if (!_saleRules[id]) _saleRules[id] = { pricing_mode: 'default', discount_percent: 0, sale_price: 0 };
+  return _saleRules[id];
+}
+
+function saleSetMode(id, mode) {
+  const rule = _saleRule(id);
+  const p = (inventory || []).find(x => x.id === id);
+  const regular = Math.trunc(Number(p?.price) || 0);
+  rule.pricing_mode = SALE_MODES.includes(mode) ? mode : 'default';
+  // Seed the newly authoritative field from what is on screen, so switching
+  // mode never blanks the row.
+  if (rule.pricing_mode === 'percent' && !rule.discount_percent) {
+    rule.discount_percent = Math.trunc(Number(_saleDraft.default_discount_percent) || 0) ||
+      saleFloorPercent(regular, rule.sale_price);
+  }
+  if (rule.pricing_mode === 'sale_price' && !rule.sale_price) {
+    const pct = rule.discount_percent || Math.trunc(Number(_saleDraft.default_discount_percent) || 0);
+    rule.sale_price = saleFloorPrice(regular, pct);
+  }
+  renderSaleEditor();
+}
+
+// Percent is authoritative: the sale price follows.
+function saleSetPercent(id, value) {
+  const rule = _saleRule(id);
+  rule.pricing_mode = 'percent';
+  rule.discount_percent = Math.trunc(Number(value) || 0);
+  const p = (inventory || []).find(x => x.id === id);
+  rule.sale_price = saleFloorPrice(p?.price, rule.discount_percent);
+  renderSaleEditor();
+}
+
+// Sale price is authoritative: the percent follows.
+function saleSetSalePrice(id, value) {
+  const rule = _saleRule(id);
+  rule.pricing_mode = 'sale_price';
+  rule.sale_price = Math.trunc(Number(value) || 0);
+  const p = (inventory || []).find(x => x.id === id);
+  rule.discount_percent = saleFloorPercent(p?.price, rule.sale_price);
+  renderSaleEditor();
+}
+
+// Regular price is the PRODUCT's. Written straight through, then whichever of
+// the two sale values is derived re-derives itself on the next render.
+async function saleSetRegular(id, value, input) {
+  const v = Math.trunc(Number(value) || 0);
+  if (v <= 0) { showToast('Regular price must be more than $0.'); renderSaleEditor(); return; }
+  try {
+    await setProductRegularPrice(id, v);
+    const rule = _saleRule(id);
+    // In percent mode the sale price follows the new regular; in sale-price
+    // mode the percent does. Both are recomputed from the stored authority.
+    if (rule.pricing_mode === 'sale_price') rule.discount_percent = saleFloorPercent(v, rule.sale_price);
+    else rule.sale_price = saleFloorPrice(v, rule.pricing_mode === 'percent'
+      ? rule.discount_percent : Math.trunc(Number(_saleDraft.default_discount_percent) || 0));
+    renderSaleEditor();
+    showToast('Regular price updated ✓');
+  } catch (e) {
+    showToast(e.message || 'Could not update the price.');
+    renderSaleEditor();
+  }
+}
+
+// ── Bulk ────────────────────────────────────────────────────────────────────
+function saleToggleSelect(id) {
+  _saleSelected.has(id) ? _saleSelected.delete(id) : _saleSelected.add(id);
+  renderSaleEditor();
+}
+function saleSelectAll() { _saleDraftProducts().forEach(p => _saleSelected.add(p.id)); renderSaleEditor(); }
+function saleSelectNone() { _saleSelected.clear(); renderSaleEditor(); }
+
+function saleBulk(action) {
+  const ids = [..._saleSelected];
+  if (!ids.length) return;
+  ids.forEach(id => {
+    const rule = _saleRule(id);
+    if (action === 'default') { rule.pricing_mode = 'default'; }
+    if (action === 'exclude') { rule.pricing_mode = 'exclude'; }
+    if (action === 'include' && rule.pricing_mode === 'exclude') { rule.pricing_mode = 'default'; }
+  });
+  _saleSelected.clear();
+  renderSaleEditor();
+}
+
+function saleBulkPercent() {
+  const ids = [..._saleSelected];
+  if (!ids.length) return;
+  const raw = prompt('Discount for the selected pieces, as a whole number:', '');
+  if (raw === null) return;
+  const pct = Math.trunc(Number(raw) || 0);
+  if (!(pct > 0 && pct < 100)) { showToast('Enter a whole number between 1 and 99.'); return; }
+  ids.forEach(id => {
+    const rule = _saleRule(id);
+    const p = (inventory || []).find(x => x.id === id);
+    rule.pricing_mode = 'percent';
+    rule.discount_percent = pct;
+    rule.sale_price = saleFloorPrice(p?.price, pct);
+  });
+  _saleSelected.clear();
+  renderSaleEditor();
+}
+
+// ── Picker ──────────────────────────────────────────────────────────────────
+function openSalePicker(kind) {
+  _salePicker = kind;
+  document.getElementById('salePickerTitle').textContent =
+    kind === 'collections' ? 'Choose collections' : 'Choose pieces';
+  const search = document.getElementById('salePickerSearch');
+  if (search) search.value = '';
+  renderSalePicker();
+  openSheet('salePickerSheet');
+}
+
+function renderSalePicker() {
+  const list = document.getElementById('salePickerList');
+  if (!list || !_saleDraft) return;
+  const q = (document.getElementById('salePickerSearch')?.value || '').trim().toLowerCase();
+
+  if (_salePicker === 'collections') {
+    const rows = (collections || [])
+      .filter(c => !q || (c.name || '').toLowerCase().includes(q));
+    list.innerHTML = rows.length ? rows.map(c => {
+      const on = (_saleDraft._collectionIds || []).includes(c.id);
+      return `<div onclick="saleTogglePickCollection('${c.id}')" style="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+        <div style="width:22px;height:22px;border-radius:6px;border:2px solid ${on ? 'var(--emerald)' : 'var(--border)'};background:${on ? 'var(--emerald)' : '#fff'};color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">${on ? '<i class="ti ti-check" style="font-size:13px"></i>' : ''}</div>
+        <span style="flex:1;font-size:13px;color:var(--ink)">${_esc(c.name)}</span>
+      </div>`;
+    }).join('') : `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No collections found.</div>`;
+    return;
+  }
+
+  const rows = (inventory || []).filter(isSaleEligible)
+    .filter(p => !q || `${p.name || ''} ${p.sku || ''}`.toLowerCase().includes(q))
+    .slice(0, 200);
+  list.innerHTML = rows.length ? rows.map(p => {
+    const on = !!_saleRules[p.id];
+    return `<div onclick="saleTogglePickProduct('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="width:22px;height:22px;border-radius:6px;border:2px solid ${on ? 'var(--emerald)' : 'var(--border)'};background:${on ? 'var(--emerald)' : '#fff'};color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">${on ? '<i class="ti ti-check" style="font-size:13px"></i>' : ''}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--ink);word-break:break-word">${_esc(p.name || 'Untitled')}</div>
+        <div style="font-size:10px;color:var(--muted)">${_esc(p.sku || '')}${p.price ? ' · $' + p.price : ' · no price'}</div>
+      </div>
+    </div>`;
+  }).join('') : `<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No pieces found.</div>`;
+}
+
+function saleTogglePickCollection(id) {
+  const ids = _saleDraft._collectionIds || (_saleDraft._collectionIds = []);
+  const i = ids.indexOf(id);
+  i >= 0 ? ids.splice(i, 1) : ids.push(id);
+  renderSalePicker();
+  renderSaleEditor();
+}
+
+function saleTogglePickProduct(id) {
+  if (_saleRules[id]) delete _saleRules[id];
+  else _saleRules[id] = { pricing_mode: 'default', discount_percent: 0, sale_price: 0 };
+  renderSalePicker();
+  renderSaleEditor();
+}
+
+// ── Save ────────────────────────────────────────────────────────────────────
+async function saveSale(btn) {
+  if (_saleBusy || !_saleDraft) return;
+  const d = _saleDraft;
+  if (!(d.name || '').trim()) { showToast('Give this sale a name.'); return; }
+
+  // Nothing invalid is written. A row that cannot price itself blocks the save
+  // and says which piece it is.
+  const priced = _saleDraftProducts().map(p => ({ p, r: _saleDraftRow(p) }));
+  const bad = priced.find(x => !x.r.excluded && x.r.error && _saleRules[x.p.id]);
+  if (bad) { showToast(`${bad.p.name || 'A piece'}: ${bad.r.error}`); return; }
+
+  _saleBusy = true;
+  const orig = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
+  try {
+    const fields = {
+      name: d.name.trim(),
+      enabled: d.enabled === true,
+      scope_type: d.scope_type,
+      default_discount_percent: Math.max(0, Math.trunc(Number(d.default_discount_percent) || 0)),
+      priority: Math.trunc(Number(d.priority) || 0),
+      starts_at: _saleBoundOut(d.starts_on, 'start'),
+      ends_at: _saleBoundOut(d.ends_on, 'end'),
+    };
+    let saleId = d.id;
+    if (saleId) await updateSale(saleId, fields);
+    else {
+      const created = await createSale({ ...fields, starts_on: d.starts_on, ends_on: d.ends_on });
+      if (!created) throw new Error('The sale could not be created.');
+      saleId = created.id;
+    }
+
+    if (d.scope_type === 'collections') await setSaleCollections(saleId, d._collectionIds);
+    else await setSaleCollections(saleId, []);
+
+    // Every rule in the draft is written; anything dropped from the draft is
+    // removed, which is how a piece leaves a chosen-pieces sale.
+    const wanted = new Set(Object.keys(_saleRules));
+    for (const row of saleProducts.filter(r => r.sale_id === saleId)) {
+      if (!wanted.has(row.product_id)) await clearSaleProductRule(saleId, row.product_id);
+    }
+    for (const [productId, rule] of Object.entries(_saleRules)) {
+      await setSaleProductRule(saleId, productId, rule);
+    }
+
+    showToast('Sale saved ✓');
+    backToSalesList();
+  } catch (e) {
+    console.error('[sales] save failed', e);
+    showToast('Could not save: ' + (e.message || e));
+  } finally {
+    _saleBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+async function deleteSaleFromEditor() {
+  if (!_saleDraft?.id) { backToSalesList(); return; }
+  if (!confirm(`Delete “${_saleDraft.name || 'this sale'}”? Pieces go back to their regular prices.`)) return;
+  try { await deleteSale(_saleDraft.id); showToast('Sale deleted'); backToSalesList(); }
+  catch (e) { showToast('Could not delete: ' + e.message); }
 }
 
 // ─── WEBSITE PUBLISHING ──────────────────────────────────────────────────────
@@ -11405,6 +12431,16 @@ async function _bootLoadData() {
   }
 
   try {
+    const n = await loadSales();
+    console.log('[BOOT] sales loaded', n);
+  } catch(e) {
+    // Non-fatal: pricing falls back to the regular price everywhere, which is
+    // the correct answer when the sale tables cannot be read.
+    console.warn('[BOOT] sales failed', e?.message || e);
+    sales = []; saleCollections = []; saleProducts = [];
+  }
+
+  try {
     // Once, ever. seeded_at is what stops a later boot undoing a removal.
     await seedNewArrivalsIfNeeded();
   } catch(e) {
@@ -13399,6 +14435,7 @@ function _openProductDetailUI(p) {
   _websiteMsg('');
   renderWebsiteSection(p);
   document.getElementById('detailPriceInput').value = p.price || '';
+  renderDetailSaleCard(p);
   document.getElementById('detailNotesInput').value = p.notes || '';
   const _detailCollArr = getProductCollections(p);
   document.getElementById('detailCollectionInput').value = _detailCollArr.join(', ');
@@ -13783,6 +14820,9 @@ async function saveProductEdits(opts) {
     renderProductCollectionVisibility(currentProduct);
 
     _invalidateMktPreview();
+    // The regular price is an input to every sale rule that follows the
+    // campaign default, so the card has to be recomputed, not left as it was.
+    renderDetailSaleCard(currentProduct);
     renderCollections();
     // Refresh snapshot so subsequent checks start clean
     window._detailOrigSnapshot = {

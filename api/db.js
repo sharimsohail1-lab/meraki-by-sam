@@ -57,6 +57,19 @@ const ALLOWED_COLUMNS_BY_TABLE = {
   exhibitions: new Set([
     'id','name','location','date','status','notes','created_at','updated_at'
   ]),
+  // Sale campaigns. See migration 034: every column is NOT NULL with a
+  // sentinel, because stripNulls() above would silently drop a cleared date.
+  sales: new Set([
+    'id','name','enabled','scope_type','default_discount_percent','priority',
+    'starts_at','ends_at','created_at','updated_at'
+  ]),
+  sale_collections: new Set([
+    'id','sale_id','collection_id','created_at'
+  ]),
+  sale_products: new Set([
+    'id','sale_id','product_id','pricing_mode','discount_percent','sale_price',
+    'created_at','updated_at'
+  ]),
   collections: new Set([
     'id','name','show_on_website','created_at','updated_at'
   ]),
