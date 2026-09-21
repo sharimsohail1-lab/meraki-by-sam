@@ -92,7 +92,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 #leadQRCode canvas, #leadQRCode img { width:216px !important; height:216px !important; display:block; }
 
 /* Toast */
-.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--ink); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; z-index: 999; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+/* z-index sits above .catalog-overlay (2000) and .sheet-overlay.over-fullscreen
+   (2100). A toast that cannot be seen is worse than no toast: it reports
+   success and failure alike into a layer hidden behind the screen that raised
+   it, which is how a failing Save came to look like a Save that did nothing.
+   white-space wraps because real error text is longer than a few words. */
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--ink); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; z-index: 2600; opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: min(92vw, 460px); white-space: normal; text-align: center; line-height: 1.45; }
 .toast.show { opacity: 1; }
 
 /* Modal overlay */
@@ -5311,8 +5316,13 @@ const SALE_COLL_COLS = 'id,sale_id,collection_id,created_at';
 const SALE_PROD_COLS = 'id,sale_id,product_id,pricing_mode,discount_percent,sale_price,regular_price_snapshot,created_at,updated_at';
 
 let salesLoaded = false;
+// Set when the sale tables could not be read at boot. The Sales screen shows
+// this rather than opening empty: an empty list and a broken database look
+// identical from the outside, and only one of them can be fixed by saving.
+let salesLoadError = null;
 
 async function loadSales() {
+  salesLoadError = null;
   const [s, sc, sp] = await Promise.all([
     db('select', 'sales',            { columns: SALE_COLS }),
     db('select', 'sale_collections', { columns: SALE_COLL_COLS }),
@@ -5419,6 +5429,90 @@ async function setSaleProductRule(saleId, productId, rule) {
 
 function _saleLivePrice(productId) {
   return Math.trunc(Number((inventory || []).find(p => p.id === productId)?.price) || 0);
+}
+
+// ── What the live database actually has ─────────────────────────────────────
+//
+// The migration runner records a file as run and then skips it forever. That
+// makes its log a record of what it was ASKED to do, not of what the schema
+// now contains — if an earlier build of 034 ran against this database, the
+// runner reports "already run" and will never apply the newer statements. So
+// the log saying 034 is done is not evidence that these columns exist.
+//
+// This asks the database instead. It is read-only, runs on demand, goes
+// through the same /api/db the app already uses, and adds no endpoint. The
+// happy path is three selects; only a table that fails gets probed column by
+// column to name what is missing.
+const SALE_SCHEMA_EXPECTED = {
+  sales: SALE_COLS.split(','),
+  sale_collections: SALE_COLL_COLS.split(','),
+  sale_products: SALE_PROD_COLS.split(','),
+};
+
+async function diagnoseSalesSchema() {
+  const report = { ok: true, tables: {} };
+  for (const [table, cols] of Object.entries(SALE_SCHEMA_EXPECTED)) {
+    try {
+      await db('select', table, { columns: cols.join(',') });
+      report.tables[table] = { status: 'ok', missing: [] };
+    } catch (e) {
+      report.ok = false;
+      const kind = saleWriteErrorKind(e);
+      if (kind === 'missing-table') {
+        report.tables[table] = { status: 'missing-table', missing: cols, error: e.message };
+        continue;
+      }
+      // The table is there but something in the column list is not. Ask for one
+      // column at a time to find out which.
+      const missing = [];
+      for (const c of cols) {
+        try { await db('select', table, { columns: c }); }
+        catch (e2) { missing.push(c); }
+      }
+      report.tables[table] = {
+        status: missing.length ? 'missing-columns' : 'unreadable',
+        missing, error: e.message,
+      };
+    }
+  }
+  console.log('[sales] schema diagnostic', JSON.stringify(report, null, 2));
+  return report;
+}
+
+function _saleSchemaReportHtml(report) {
+  if (report.ok) {
+    return `<div style="font-size:12px;color:#1d5c3f;line-height:1.6">All three Sales tables are present with every column the app expects. The problem is not the schema.</div>`;
+  }
+  const rows = Object.entries(report.tables).map(([t, r]) => {
+    if (r.status === 'ok') return `<li><b>${_esc(t)}</b> — fine</li>`;
+    if (r.status === 'missing-table') return `<li><b>${_esc(t)}</b> — the table does not exist</li>`;
+    if (r.status === 'missing-columns') return `<li><b>${_esc(t)}</b> — missing ${r.missing.map(c => `<code>${_esc(c)}</code>`).join(', ')}</li>`;
+    return `<li><b>${_esc(t)}</b> — could not be read: ${_esc(r.error || '')}</li>`;
+  }).join('');
+  const anyMissingCols = Object.values(report.tables).some(r => r.status === 'missing-columns');
+  return `<div style="font-size:12px;color:#8a1f1f;line-height:1.6">
+      <div style="margin-bottom:6px">The database does not match what the app expects:</div>
+      <ul style="margin:0 0 8px;padding-left:18px">${rows}</ul>
+      <div style="color:var(--muted);font-size:11px;line-height:1.6">${
+        anyMissingCols
+          ? 'This database ran an older version of migration 034. The runner records a file once and skips it afterwards, so re-running /api/migrate will not repair it — the fix needs a follow-up migration. Send this report on and it can be written.'
+          : 'Run /api/migrate against production, then reload. If it reports 034 as already run, send this report on.'
+      }</div>
+    </div>`;
+}
+
+async function runSalesDiagnostic(btn) {
+  const box = document.getElementById('salesDiagnostic');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  if (box) box.innerHTML = '<div style="font-size:12px;color:var(--muted)">Asking the database what it has…</div>';
+  try {
+    const report = await diagnoseSalesSchema();
+    if (box) box.innerHTML = _saleSchemaReportHtml(report);
+  } catch (e) {
+    if (box) box.innerHTML = `<div style="font-size:12px;color:#8a1f1f">The check itself failed: ${_esc(e.message || String(e))}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Check database'; }
+  }
 }
 
 // ── Inquiries that arrived while a sale was on ──────────────────────────────
@@ -5708,6 +5802,24 @@ function setSalesTab(t) { _salesTab = t; renderSalesList(); }
 const _SALE_TAB_LABEL = { active: 'Active', scheduled: 'Scheduled', ended: 'Ended', draft: 'Drafts' };
 
 function renderSalesList() {
+  // The tables could not be read. Saying so beats an empty list, which looks
+  // like "no sales yet" and invites a save that cannot possibly work.
+  if (salesLoadError) {
+    const list = document.getElementById('salesList');
+    const tabs = document.getElementById('salesTabs');
+    if (tabs) tabs.innerHTML = '';
+    if (list) list.innerHTML = `<div style="padding:24px 16px">
+      <div style="background:#fff4f3;border:1px solid #e9b7b2;border-radius:10px;padding:14px 16px">
+        <div style="font-size:13px;font-weight:600;color:#8a1f1f;margin-bottom:6px">Sales could not be loaded.</div>
+        <div style="font-size:12px;color:#8a1f1f;line-height:1.6;margin-bottom:10px">${_esc(saleWriteErrorMessage(salesLoadError))}</div>
+        <button onclick="runSalesDiagnostic(this)" class="btn btn-secondary btn-sm" style="padding:0 14px">Check database</button>
+        <div id="salesDiagnostic" style="margin-top:10px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:12px">Creating a sale will not work until this is fixed. Nothing already saved has been lost.</div>
+    </div>`;
+    return;
+  }
+
   const today = businessToday();
   const byStatus = { active: [], scheduled: [], ended: [], draft: [] };
   (sales || []).forEach(s => byStatus[saleStatus(s, today)].push(s));
@@ -5842,6 +5954,7 @@ function renderDetailSaleCard(p) {
 
 // ── Editor ──────────────────────────────────────────────────────────────────
 function openSaleEditor(id) {
+  if (salesLoadError) { backToSalesList(); showToast('Sales could not be loaded — check the database first.', 5000); return; }
   const existing = id ? (sales || []).find(s => s.id === id) : null;
   _saleDraft = existing
     ? { ...existing, starts_on: _saleBoundIn(existing.starts_on), ends_on: _saleBoundIn(existing.ends_on),
@@ -6080,7 +6193,7 @@ function saleSetStartDate(v) {
 // Rendered next to Save, because that is where the question is asked. Save is
 // never disabled: a button that does nothing and says nothing is the thing
 // being fixed here.
-function renderSaleProblems(problems) {
+function renderSaleProblems(problems, heading) {
   const box = document.getElementById('saleProblemSummary');
   if (!box) return;
   document.querySelectorAll('.sale-field-bad').forEach(el => {
@@ -6089,20 +6202,23 @@ function renderSaleProblems(problems) {
   });
   if (!problems || !problems.length) { box.innerHTML = ''; return; }
 
-  problems.forEach(pr => {
-    const el = document.getElementById(pr.field);
-    if (el) { el.classList.add('sale-field-bad'); el.style.outline = '2px solid #b3261e'; el.style.outlineOffset = '2px'; }
-  });
+  if (!heading) {
+    problems.forEach(pr => {
+      const el = document.getElementById(pr.field);
+      if (el) { el.classList.add('sale-field-bad'); el.style.outline = '2px solid #b3261e'; el.style.outlineOffset = '2px'; }
+    });
+  }
 
   const n = problems.length;
+  const title = heading || `Please fix ${n} thing${n === 1 ? '' : 's'} before saving.`;
   box.innerHTML = `<div style="background:#fff4f3;border:1px solid #e9b7b2;border-radius:10px;padding:12px 14px">
-    <div style="font-size:12px;font-weight:600;color:#8a1f1f;margin-bottom:6px">Please fix ${n} thing${n === 1 ? '' : 's'} before saving.</div>
+    <div style="font-size:12px;font-weight:600;color:#8a1f1f;margin-bottom:6px">${_esc(title)}</div>
     <ul style="margin:0;padding-left:18px;font-size:12px;color:#8a1f1f;line-height:1.7">
       ${problems.map(pr => `<li>${_esc(pr.message)}</li>`).join('')}
     </ul>
   </div>`;
 
-  const first = document.getElementById(problems[0].field);
+  const first = heading ? document.getElementById('saleProblemSummary') : document.getElementById(problems[0].field);
   if (first) {
     first.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (typeof first.focus === 'function' && /INPUT|SELECT|TEXTAREA/.test(first.tagName)) {
@@ -6615,8 +6731,10 @@ async function saveSale(btn) {
     showToast('Sale saved.');
     backToSalesList();
   } catch (e) {
-    console.error('[sales] save failed', e);
-    showToast(saleWriteErrorMessage(e));
+    console.error('[sales] save failed:', e?.message, '| code:', e?.code || 'none', e);
+    const msg = saleWriteErrorMessage(e);
+    renderSaleProblems([{ field: 'saleNameField', message: msg }], 'Sale could not be saved.');
+    showToast(msg, 6000);
   } finally {
     _saleBusy = false;
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
@@ -6630,16 +6748,40 @@ async function saveSale(btn) {
 //
 // 42P01 is Postgres for an undefined table; PGRST20x are PostgREST's schema
 // cache misses for a table or column it cannot find.
-function saleWriteErrorMessage(e) {
+// A save that fails must say why. The backend's own words are the useful part,
+// so they are kept and shown — they carry table and column names, which is
+// schema, not secrets. Nothing here is a credential, a key or a row value.
+//
+// The earlier version collapsed every failure into one of two sentences and
+// threw the detail away. That turned "this column does not exist" into "please
+// try again", which is advice that cannot work.
+function saleWriteErrorKind(e) {
   const code = String(e?.code || '');
   const msg  = String(e?.message || '');
-  const missingSchema =
-    code === '42P01' || code === '42703' || /^PGRST(20[0-9])$/.test(code) ||
-    /relation .*(sales|sale_collections|sale_products).* does not exist/i.test(msg) ||
-    /could not find the (table|column)/i.test(msg);
-  return missingSchema
-    ? 'Sales database setup is not available yet. Apply migration 034, then try again.'
-    : 'Sale could not be saved. Please try again.';
+  if (code === '42P01' || /relation .*(sales|sale_collections|sale_products).* does not exist/i.test(msg)
+      || /could not find the table/i.test(msg)) return 'missing-table';
+  if (code === '42703' || /^PGRST204$/.test(code) || /could not find the .* column/i.test(msg)) return 'missing-column';
+  if (code === '23505') return 'duplicate';
+  if (code === '23503') return 'reference';
+  if (code === '42501' || /permission denied|row-level security|not authorized/i.test(msg)) return 'permission';
+  if (/^PGRST/.test(code)) return 'schema-cache';
+  return 'unknown';
+}
+
+const _SALE_ERROR_LEAD = {
+  'missing-table':  'The Sales tables are not in the database yet. Run /api/migrate, then try again.',
+  'missing-column': 'A column the app expects is missing from the Sales tables. The database is on an older version of migration 034.',
+  'schema-cache':   'The database has not picked up the Sales tables yet. Run /api/migrate to reload its schema, then try again.',
+  'duplicate':      'That would create a duplicate the database will not allow.',
+  'reference':      'A piece or collection this sale points at no longer exists.',
+  'permission':     'The server was not allowed to write to the Sales tables.',
+  'unknown':        'Sale could not be saved.',
+};
+
+function saleWriteErrorMessage(e) {
+  const lead = _SALE_ERROR_LEAD[saleWriteErrorKind(e)] || _SALE_ERROR_LEAD.unknown;
+  const detail = String(e?.message || '').trim();
+  return detail ? `${lead} (${detail})` : lead;
 }
 
 // The app confirms destructive things in a bottom sheet, not a browser dialog.
@@ -13212,8 +13354,10 @@ async function _bootLoadData() {
   } catch(e) {
     // Non-fatal: pricing falls back to the regular price everywhere, which is
     // the correct answer when the sale tables cannot be read.
-    console.warn('[BOOT] sales failed', e?.message || e);
+    console.warn('[BOOT] sales failed', e?.message || e, '| code:', e?.code || 'none');
     sales = []; saleCollections = []; saleProducts = [];
+    salesLoaded = false;
+    salesLoadError = { message: e?.message || String(e), code: e?.code || null };
   }
 
   try {
