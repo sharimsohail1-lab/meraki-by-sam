@@ -27,8 +27,20 @@ const VALID_STATUSES = ['new', 'contacted', 'closed'];
 const INQUIRY_COLS =
   'id,created_at,updated_at,source,customer_name,phone,email,state,preferred_size,note,status';
 
+// price_snapshot keeps the meaning it has always had: the effective price the
+// customer was quoted. The four snapshot columns beside it are written by the
+// website at submission and are never updated afterwards, which is what makes
+// an old inquiry still readable once the sale has ended, the campaign has been
+// deleted and the piece has been repriced.
+//
+// All four are nullable, and all four NULL is what a row written before they
+// existed looks like. That is a distinct state from "sold at full price", which
+// records a discount of 0 — the app must never read the first as the second and
+// claim a saving nobody made.
 const ITEM_COLS =
-  'id,inquiry_id,product_id,product_slug,product_sku,product_name,requested_size,price_snapshot,sort_order,created_at';
+  'id,inquiry_id,product_id,product_slug,product_sku,product_name,requested_size,' +
+  'price_snapshot,regular_price_snapshot,discount_percent_snapshot,sale_id_snapshot,sale_name_snapshot,' +
+  'sort_order,created_at';
 
 // A bounded window. The inbox is a working queue, not an archive browser, and an
 // unbounded select would grow into a timeout as inquiries accumulate.

@@ -7105,6 +7105,96 @@ function _inquiryFirstName(name) {
 // product: a long list reads like a receipt, and the point is to open a
 // conversation. It closes by asking for the order, because a message that only
 // offers help tends to end in thanks rather than a sale.
+// Totals appear only when at least one piece carries proven sale data. An
+// inquiry from before this existed, or one with nothing discounted, keeps the
+// layout it had — there is no point adding a savings line that reads zero.
+function _inqTotalsHtml(items) {
+  const t = inquiryTotals(items);
+  if (!t.anySale) return '';
+  const row = (label, value, strong) => `<div style="display:flex;justify-content:space-between;gap:12px;font-size:${strong ? '13px' : '12px'};color:${strong ? 'var(--ink)' : 'var(--muted)'};${strong ? 'font-weight:600;' : ''}margin-top:${strong ? '5px' : '3px'}">
+      <span>${label}</span><span>${_esc(value)}</span></div>`;
+  return `<div style="background:var(--sand-light);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-top:2px">
+    ${row('Regular value', _inqPrice(t.regular))}
+    ${row('Inquiry value', _inqPrice(t.effective))}
+    ${row('Savings', _inqPrice(t.savings), true)}
+  </div>`;
+}
+
+// ── What an inquiry item cost, as recorded at the time ──────────────────────
+//
+// Every figure here comes from the item's own immutable snapshot columns.
+// Nothing consults products.price, the sale resolver, the sales tables or
+// collection membership: an inquiry is a record of what a customer was quoted
+// on one particular day, and it must read the same after the sale ends, the
+// campaign is deleted and the piece is repriced.
+//
+// The columns are `numeric`, which PostgREST may hand back as a string, so
+// everything is normalised in one place before any arithmetic or rendering.
+function _inqNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+// Whole dollars are the house style, and every price in this app is one. A
+// value that somehow is not integral keeps its cents rather than being rounded
+// into a number nobody recorded.
+function _inqPrice(n) {
+  const v = Number(n) || 0;
+  return '$' + (Number.isInteger(v) ? v.toLocaleString('en-US')
+                                    : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+}
+
+// One item's pricing, reduced to a shape the renderer can trust.
+//
+//   legacy  the snapshot columns predate this feature — nothing about a sale
+//           is known, so nothing about a sale is claimed
+//   full    captured, and sold at its regular price
+//   sale    captured, and genuinely discounted
+//   plain   captured but self-contradictory. Shown as a plain price rather
+//           than as a discount that cannot be true
+//
+// `regular` always equals `effective` except on a real sale, so totals can sum
+// it blindly and savings can never come out negative.
+function inquiryItemPricing(it) {
+  const effective = _inqNum(it?.price_snapshot);
+  const regular = _inqNum(it?.regular_price_snapshot);
+  const percent = _inqNum(it?.discount_percent_snapshot);
+  const plain = k => ({ kind: k, effective, regular: effective, discountPercent: 0,
+                        savings: 0, saleId: null, saleName: null });
+
+  // Both absent is exactly what a row written before these columns looks like.
+  if (it?.regular_price_snapshot == null && it?.discount_percent_snapshot == null) return plain('legacy');
+  if (effective === null || regular === null || percent === null) return plain('plain');
+  if (!Number.isInteger(percent)) return plain('plain');
+  if (percent === 0) return plain('full');
+
+  // A discount has to be believable in both directions before it is shown.
+  if (percent < 0 || percent >= 100) return plain('plain');
+  if (regular <= effective || effective < 0) return plain('plain');
+
+  return {
+    kind: 'sale', effective, regular, discountPercent: percent,
+    // Taken from the two recorded prices, never re-derived from the percentage,
+    // which is floored and so cannot be multiplied back out exactly.
+    savings: regular - effective,
+    saleId: it.sale_id_snapshot || null,
+    // A UUID is not a label. Without a name the campaign simply goes unnamed.
+    saleName: (it.sale_name_snapshot || '').trim() || null,
+  };
+}
+
+// Inquiry-wide totals, from the per-item shapes above. A legacy or malformed
+// row contributes the same amount to both sides, so it can never invent a
+// saving — which is the whole point.
+function inquiryTotals(items) {
+  const rows = (items || []).map(inquiryItemPricing);
+  const anySale = rows.some(r => r.kind === 'sale');
+  let regular = 0, effective = 0;
+  rows.forEach(r => { regular += r.regular || 0; effective += r.effective || 0; });
+  return { anySale, regular, effective, savings: Math.max(0, regular - effective) };
+}
+
 function inquiryWhatsappMessage(inq) {
   const first = _inquiryFirstName(inq?.customer_name);
   const names = (inq?.items || []).map(i => (i.product_name || '').trim()).filter(Boolean);
@@ -7193,9 +7283,23 @@ function _renderInquiryDetail() {
       // asked about. A live product is used only to add an image, never to
       // replace the recorded name, SKU or price.
       itemsEl.innerHTML = inq.items.map(it => {
+        const pr = inquiryItemPricing(it);
+        const onSale = pr.kind === 'sale';
+
+        // A discounted piece shows what it was, what it became and what that
+        // saved. Everything else keeps the single plain price it has always
+        // had — a legacy row in particular must look untouched.
+        const priceBlock = onSale
+          ? `<div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-top:2px">
+               <span style="font-size:11.5px;color:var(--muted);text-decoration:line-through">${_esc(_inqPrice(pr.regular))}</span>
+               <span style="font-size:14px;font-weight:600;color:var(--ink)">${_esc(_inqPrice(pr.effective))}</span>
+             </div>
+             <div style="font-size:10.5px;color:#8a6d2f;margin-top:1px">${pr.discountPercent}% OFF · Saved ${_esc(_inqPrice(pr.savings))}</div>`
+          : '';
+
         const bits = [
           it.product_sku ? _esc(it.product_sku) : null,
-          it.price_snapshot != null ? '$' + _esc(String(it.price_snapshot)) : null,
+          (!onSale && pr.effective !== null) ? _esc(_inqPrice(pr.effective)) : null,
         ].filter(Boolean).join(' · ');
         const legacySize = (it.requested_size || '').trim();
         return `<div style="display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
@@ -7203,10 +7307,12 @@ function _renderInquiryDetail() {
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--ink);word-break:break-word">${_esc(it.product_name || 'Piece')}</div>
             ${bits ? `<div class="inq-meta">${bits}</div>` : ''}
+            ${priceBlock}
+            ${onSale && pr.saleName ? `<div class="inq-meta" style="margin-top:2px">Sale: ${_esc(pr.saleName)}</div>` : ''}
             ${legacySize ? `<div class="inq-meta">Asked for size ${_esc(legacySize)}</div>` : ''}
           </div>
         </div>`;
-      }).join('');
+      }).join('') + _inqTotalsHtml(inq.items);
     }
   }
 
