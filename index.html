@@ -1030,7 +1030,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   <div class="sheet" style="height:88vh;overflow-y:auto">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-      <div style="font-size:17px;font-weight:700;color:var(--burgundy)"><i class="ti ti-sparkles"></i> Current Campaign</div>
+      <div style="font-size:17px;font-weight:700;color:var(--burgundy)" id="homeCampaignSheetTitle"><i class="ti ti-sparkles"></i> Current Campaign</div>
       <button class="modal-close" style="position:static" onclick="closeSheet('homeCampaignSheet')"><i class="ti ti-x"></i></button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">The picture and words at the very top of the homepage. Tapping it opens wherever the campaign goes.</div>
@@ -8078,10 +8078,11 @@ const HOME_COUNT_MAX = 8;
 // These keys are stable identifiers. They are safe for the website to use later
 // as analytics section names — nothing about them is derived from copy, and
 // renaming a heading does not change them.
-const HOMEPAGE_SECTIONS = ['campaign', 'featured_edit', 'new_arrivals'];
+const HOMEPAGE_SECTIONS = ['campaign', 'sale_campaign', 'featured_edit', 'new_arrivals'];
 
 const HOMEPAGE_SECTION_LABELS = {
   campaign:      'Current Campaign',
+  sale_campaign: 'Sale Edit',
   featured_edit: 'Featured Edit',
   new_arrivals:  'New Arrivals',
 };
@@ -8215,6 +8216,46 @@ function _normalizeCampaign(raw, index) {
   };
 }
 
+// ── The Sale Edit ───────────────────────────────────────────────────────────
+//
+// One reusable piece of creative that stands for every sale at once. It is not
+// tied to a sale record, is never duplicated per sale, and is never created as
+// a side effect of saving one.
+//
+// It deliberately does NOT live in campaigns[]. That array's first entry is
+// mirrored into homepage_config.campaign on every save, because the deployed
+// storefront still reads the singular key — so a Sale Edit sitting at index 0
+// would become the live hero, permanently, with none of the "only while
+// something is discounted" logic that makes it correct. A sibling key cannot
+// be mirrored by accident, and is invisible to the storefront until Website
+// Claude reads it.
+//
+// It carries no destination: its button always goes to the sale route, which
+// means "everything currently discounted". And it carries no discount copy —
+// "UP TO 40% OFF" is computed by the website from resolved pricing, because a
+// stored percentage goes stale the moment an override, an exclusion or an
+// overlapping sale changes what customers actually see.
+function _normalizeSaleCampaign(raw) {
+  const c = (raw && typeof raw === 'object') ? raw : {};
+  const mediaUrl  = _homeText(c.media_url);
+  const mediaType = mediaUrl ? _homeEnum(c.media_type, ['image', 'video'], 'image') : null;
+  return {
+    show:             _homeBool(c.show, false),
+    heading:          _homeText(c.heading),
+    subheading:       _homeText(c.subheading),
+    media_type:       mediaType,
+    media_url:        mediaUrl,
+    media_poster_url: mediaType === 'video' ? _homeText(c.media_poster_url) : null,
+    media_crop_mobile:  _normalizeCrop(c.media_crop_mobile),
+    media_crop_desktop: _normalizeCrop(c.media_crop_desktop),
+    theme:            _homeEnum(c.theme, HOMEPAGE_THEMES, 'default'),
+    show_cta:         _homeBool(c.show_cta, true),
+    cta_label:        _homeText(c.cta_label) || null,
+  };
+}
+
+function _blankSaleCampaign() { return _normalizeSaleCampaign({}); }
+
 // The empty campaign, for the editor and for code that reads "the campaign"
 // when none exists yet.
 function _blankCampaign() {
@@ -8295,6 +8336,7 @@ function normalizeHomepageConfig(raw) {
       included_ids: _normalizeProductIds(sel.included_ids),
       excluded_ids: _normalizeProductIds(sel.excluded_ids),
     },
+    sale_campaign: _normalizeSaleCampaign(src.sale_campaign),
     section_order: _normalizeSectionOrder(src.section_order),
     // Customer Looks is not built in this phase. The key is reserved so adding
     // it later is additive and the website can test for its absence today.
@@ -8394,6 +8436,10 @@ function campaignCollectionLock(name) {
 
 function isHomepageSectionEnabled(key, cfg = getHomepageConfig()) {
   if (key === 'campaign') return isCampaignActive(cfg);
+  // The Sale Edit is switched on here and shown by the website only while
+  // something is actually discounted. `show` is the operator's intent, not a
+  // statement about today.
+  if (key === 'sale_campaign') return cfg.sale_campaign?.show === true;
   return cfg[key] ? cfg[key].show === true : false;
 }
 
@@ -8563,6 +8609,33 @@ function _storableHomepageConfig(cfg) {
     campaigns,
     campaign: campaigns && campaigns.length ? campaigns[0] : { show: false },
   };
+}
+
+// Switching it off keeps the creative. She spent time on the picture and the
+// crops, and turning the section off is not a reason to lose them.
+async function hideSaleCampaign(btn) {
+  if (_homeBusy) return;
+  _homeBusy = true;
+  const html = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Hiding…'; }
+  try {
+    await saveSaleCampaign({ ..._homeDraft, show: false });
+    closeSheet('homeCampaignSheet');
+    renderStorefrontHome();
+    showToast('Sale Edit hidden — the picture is kept');
+  } catch (e) {
+    showToast('Could not hide it: ' + e.message);
+  } finally {
+    _homeBusy = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = html; }
+  }
+}
+
+async function saveSaleCampaign(patch) {
+  const cfg = getHomepageConfig();
+  const next = normalizeHomepageConfig({ ...cfg, sale_campaign: { ...cfg.sale_campaign, ...patch } });
+  await _persistWebsiteSettings({ homepage_config: _storableHomepageConfig(next) });
+  return next.sale_campaign;
 }
 
 async function saveCampaignList(list) {
@@ -9028,16 +9101,29 @@ function renderStorefrontHome() {
   // controls to move it. A section that is off keeps its place in this list so
   // it can be positioned before being switched on, but it never occupies a
   // position on the website.
-  const bodies  = { campaign: campaignBody, featured_edit: featuredBody, new_arrivals: newArrivalsBody };
-  const icons   = { campaign: 'ti-sparkles', featured_edit: 'ti-star', new_arrivals: 'ti-clock-plus' };
-  const editors = { campaign: 'openCampaignEditor(null)', featured_edit: 'openFeaturedEditEditor()', new_arrivals: 'openNewArrivalsEditor()' };
+  const sc = cfg.sale_campaign || {};
+  const saleBody = `<div style="font-size:12px;color:var(--ink);line-height:1.6">${
+      sc.show
+        ? 'Appears on the website by itself whenever anything is on sale, and disappears when nothing is.'
+        : 'One reusable piece of creative for every sale. Set it up once and it looks after itself.'}</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.55;margin-top:6px">${
+      sc.media_url ? (sc.media_type === 'video' ? 'Video set' : 'Image set') : 'No image yet'
+    }${sc.heading ? ' · ' + _esc(sc.heading) : ' · “The Sale Edit”'} · the discount line is written automatically from the real prices.</div>`;
+
+  const bodies  = { campaign: campaignBody, sale_campaign: saleBody, featured_edit: featuredBody, new_arrivals: newArrivalsBody };
+  const icons   = { campaign: 'ti-sparkles', sale_campaign: 'ti-tag', featured_edit: 'ti-star', new_arrivals: 'ti-clock-plus' };
+  const editors = { campaign: 'openCampaignEditor(null)', sale_campaign: 'openSaleCampaignEditor()',
+                    featured_edit: 'openFeaturedEditEditor()', new_arrivals: 'openNewArrivalsEditor()' };
 
   const sectionCards = cfg.section_order.map((key, i) => {
     const on = isHomepageSectionEnabled(key, cfg);
     const pos = on ? enabled.indexOf(key) + 1 : null;
     const bad = homepageIssuesFor(key, cfg).filter(x => x.severity === 'error');
     const badge = on
-      ? `<span style="font-size:10px;color:#1d5c3f;background:#e7f4ed;border-radius:10px;padding:2px 8px">${key === 'campaign' ? 'Live on Website' : 'Showing'} · ${pos}</span>`
+      ? `<span style="font-size:10px;color:#1d5c3f;background:#e7f4ed;border-radius:10px;padding:2px 8px">${
+            key === 'campaign' ? 'Live on Website'
+          : key === 'sale_campaign' ? 'On when a sale runs'
+          : 'Showing'} · ${pos}</span>`
       : (key === 'campaign'
           ? '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Default Homepage Active</span>'
           : '<span style="font-size:10px;color:var(--muted);background:var(--sand-light);border-radius:10px;padding:2px 8px">Hidden</span>');
@@ -9177,9 +9263,13 @@ function _homeCtaBlock(cta, prefix, opts = {}) {
 
 // null id means "a new campaign" — the editor is the same either way.
 let _homeCampaignId = null;
+// Which thing the one campaign editor is currently editing: a homepage
+// campaign, or the single reusable Sale Edit.
+let _homeEditKind = 'campaign';
 
 function openCampaignEditor(id) {
   const existing = id ? campaignById(id) : null;
+  _homeEditKind = 'campaign';
   _homeCampaignId = existing ? existing.id : null;
   _homeDraft = existing ? { ...existing } : _blankCampaign();
   // The crops are objects, and a shallow copy would hand the editor the very
@@ -9187,6 +9277,19 @@ function openCampaignEditor(id) {
   // before anything was saved, and Cancel would not undo it.
   CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _normalizeCrop(_homeDraft[f.field]); });
   // Mobile is the harder crop and the one most customers see, so it opens first.
+  _homeCropTab = 'mobile';
+  renderCampaignEditor();
+  openSheet('homeCampaignSheet');
+}
+
+// The Sale Edit uses the campaign editor wholesale — same media upload, same
+// crop frames, same theme, same copy fields. Only the destination is missing,
+// because it has exactly one, and only Save differs.
+function openSaleCampaignEditor() {
+  _homeEditKind = 'sale';
+  _homeCampaignId = null;
+  _homeDraft = { ...getHomepageConfig().sale_campaign };
+  CAMPAIGN_CROP_FRAMES.forEach(f => { _homeDraft[f.field] = _normalizeCrop(_homeDraft[f.field]); });
   _homeCropTab = 'mobile';
   renderCampaignEditor();
   openSheet('homeCampaignSheet');
@@ -9216,12 +9319,24 @@ function renderCampaignEditor() {
     ? `<button class="btn" style="width:100%;background:#fff;border:1px solid var(--border);font-size:12px;margin-bottom:8px" onclick="document.getElementById('homeCampaignPosterInput').click()"><i class="ti ti-photo"></i> ${d.media_poster_url ? 'Replace still image' : 'Add still image'}</button>`
     : '';
 
+  const isSale = _homeEditKind === 'sale';
+  const title = document.getElementById('homeCampaignSheetTitle');
+  if (title) title.innerHTML = isSale
+    ? '<i class="ti ti-tag"></i> Sale Edit'
+    : '<i class="ti ti-sparkles"></i> Current Campaign';
+
   el.innerHTML =
-    _homeIssueBanner('campaign', { ...d, show: true }) +
-    `<div class="field-label">Campaign name</div>
-     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="e.g. Roselle"
+    (isSale
+      ? `<div style="background:var(--sand-light);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:12px;color:var(--muted);line-height:1.6">
+           This appears on the website by itself whenever anything is on sale, and disappears when nothing is. You set the look — the website writes the discount line from the real prices.
+         </div>`
+      : _homeIssueBanner('campaign', { ...d, show: true })) +
+    `<div class="field-label">${isSale ? 'Heading' : 'Campaign name'} ${isSale ? '<span style="font-weight:400;color:var(--muted)">— optional</span>' : ''}</div>
+     <input type="text" class="field-input" value="${_esc(d.heading || '')}" placeholder="${isSale ? 'The Sale Edit' : 'e.g. Roselle'}"
        oninput="campaignSet('heading', this.value)" style="margin-bottom:6px">
-     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Used to identify the campaign here, and as the campaign heading on the website.</div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">${isSale
+        ? 'Left blank, the website uses “The Sale Edit”. The discount line underneath is always worked out automatically.'
+        : 'Used to identify the campaign here, and as the campaign heading on the website.'}</div>
 
      <div class="field-label">Subheading <span style="font-weight:400;color:var(--muted)">— optional</span></div>
      <input type="text" class="field-input" value="${_esc(d.subheading || '')}" placeholder="e.g. Hand-finished pieces for the season"
@@ -9247,9 +9362,18 @@ function renderCampaignEditor() {
       ], d.theme, 'campaignSetTheme')}
      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:14px">Chooses the colours and mood the website already has ready. You are not picking colours yourself.</div>
 
-     ${_homeCtaBlock(d, 'campaign', { destinationLead: true })}
+     ${isSale
+        ? `<div class="field-label">Button</div>
+           ${_homeToggle('Show a button', d.show_cta !== false, 'campaignSetShowCta',
+              'It always opens the sale page, which lists everything currently reduced.')}
+           ${d.show_cta !== false ? `<input type="text" class="field-input" value="${_esc(d.cta_label || '')}" placeholder="Shop Sale"
+              oninput="campaignSet('cta_label', this.value)" style="margin-bottom:14px">` : ''}`
+        : _homeCtaBlock(d, 'campaign', { destinationLead: true })}
 
-     ${_homeCampaignId
+     ${isSale
+        ? `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px;margin-bottom:4px" onclick="hideSaleCampaign(this)">Stop showing the Sale Edit</button>`
+        : ''}
+     ${!isSale && _homeCampaignId
         ? `<button class="btn" style="width:100%;background:none;border:none;color:#8a1f1f;font-size:12px;margin-bottom:4px" onclick="deleteCampaignFromEditor()">Delete this campaign</button>`
         : ''}
      ${d.show
@@ -9535,6 +9659,15 @@ async function saveCampaign(btn) {
     // Saving a campaign is how it is put on the website — an operator editing
     // one while the default homepage is showing means to use it. Which is
     // exactly why it has to be fit to be live before it can be saved.
+    if (_homeEditKind === 'sale') {
+      // Saving the Sale Edit switches it on, the same way saving a campaign
+      // does. The website still shows it only while something is discounted.
+      await saveSaleCampaign({ ..._homeDraft, show: true });
+      closeSheet('homeCampaignSheet');
+      renderStorefrontHome();
+      showToast('Sale Edit saved ✓');
+      return;
+    }
     const blocked = _homeBlockedBySection('campaign', { ..._homeDraft, show: true }, true);
     if (blocked) { showToast(blocked); renderCampaignEditor(); return; }
     if (_homeCampaignId) await saveCampaignById(_homeCampaignId, { ..._homeDraft, show: true });
