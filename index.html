@@ -17272,21 +17272,23 @@ const A4 = {
   W: 210, H: 297,
   SIDE: 8,              // photo and name margin — inside every printer's "Fit" area
   TOP: 8,
-  FOOTER_Y: 289,
   MAX_DPI: 300,         // never embed more pixels than print can use
   JPEG_QUALITY: 0.88,
   LOGO_DPI: 180,        // the logo is never drawn larger than this supports
 };
-// Digital page geometry, in Digital canvas pixels. The A4 pages are that same
-// composition scaled to the sheet: PX converts a Digital pixel to A4 millimetres.
+// The A4 cover is the Digital cover scaled to the sheet: PX converts a Digital
+// canvas pixel to A4 millimetres.
 const DIGITAL_W = 1080;
 const PX = 210 / DIGITAL_W;
-// Colours read straight from the Digital renderer: the band behind its photos
-// (#f0ede8), its product-name ink (#1a1a1a), its cover title ink (#1a1008).
-const A4_PAGE = [240, 237, 232];
-const A4_INK = [26, 26, 26];
+// Colours from the Meraki palette the Digital catalog already uses: the cream
+// of its cover (#FAF5EC) as the paper, the brand burgundy (#7A2337) for names,
+// the rose of its cover frame for photo hairlines, and its taupe for the
+// quiet lines. Ink stays on text and hairlines; no blocks, no gradients.
+const A4_PAGE = [250, 245, 236];
+const A4_BURGUNDY = [122, 35, 55];
 const A4_TITLE_INK = [26, 16, 8];
-const A4_FAINT = [196, 189, 181];
+const A4_TAUPE = [139, 129, 120];
+const A4_HAIRLINE = [211, 180, 179];
 
 function setA4CatalogLayout(layout) {
   a4CatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
@@ -17362,7 +17364,7 @@ async function _a4LoadPhoto(p, layout) {
   throw new Error(`Could not load the photo for "${p.name}"${lastErr?.message ? ' (' + lastErr.message + ')' : ''}`);
 }
 
-function _a4Text(pdf, text, x, y, { size, color = A4_INK, style = 'normal', align = 'left', tracking = 0 }) {
+function _a4Text(pdf, text, x, y, { size, color = A4_TITLE_INK, style = 'normal', align = 'left', tracking = 0 }) {
   pdf.setFont('times', style);
   pdf.setFontSize(size);
   pdf.setTextColor(...color);
@@ -17398,18 +17400,43 @@ function _a4Canvas(pdf, color = A4_PAGE) {
 
 const _a4SiteLabel = () => MERAKI_SITE_URL.replace(/^https?:\/\/(www\.)?/, '');
 
-// Print-only, and meant to all but disappear.
-function _a4Footer(pdf, pageNo) {
-  _a4Text(pdf, _a4SiteLabel(), A4.SIDE, A4.FOOTER_Y, { size: 6.5, color: A4_FAINT, tracking: 0.3 });
-  _a4Text(pdf, String(pageNo), A4.W - A4.SIDE, A4.FOOTER_Y, { size: 6.5, color: A4_FAINT, align: 'right' });
+// The logo, prepared once per PDF. jsPDF stores identical image data once, so
+// repeating it on every page adds nothing to the file.
+async function _a4LoadLogo() {
+  let logo = null;
+  try { logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch (_) {}
+  if (!logo || !(logo.naturalWidth > 0)) return null;
+  const c = document.createElement('canvas');
+  c.width = logo.naturalWidth; c.height = logo.naturalHeight;
+  c.getContext('2d').drawImage(logo, 0, 0);
+  const out = { dataUrl: c.toDataURL('image/png'), pxW: logo.naturalWidth, pxH: logo.naturalHeight };
+  c.width = c.height = 0;
+  return out;
+}
+
+// Bottom-right brand mark on every product page: the logo, small enough that
+// today's 330 px file is sharp, with the website beneath it. It replaces the
+// page number — at a stall, the brand on every page matters more.
+const A4_MARK_W = 20;
+const A4_MARK_BOTTOM = 283;
+function _a4BrandMark(pdf, logo, right) {
+  const cx = right - A4_MARK_W / 2;
+  if (logo) {
+    const h = A4_MARK_W * logo.pxH / logo.pxW;
+    pdf.addImage(logo.dataUrl, 'PNG', right - A4_MARK_W, A4_MARK_BOTTOM - h, A4_MARK_W, h);
+  } else {
+    _a4Text(pdf, 'Meraki by Saima', right, A4_MARK_BOTTOM - 1, { size: 11, style: 'italic', align: 'right', color: A4_BURGUNDY });
+  }
+  _a4Text(pdf, _a4SiteLabel(), logo ? cx : right, A4_MARK_BOTTOM + 4.2,
+    { size: 6.5, color: A4_TAUPE, align: logo ? 'center' : 'right', tracking: 0.2 });
 }
 
 // The Digital cover (_buildCatalogCoverCanvas), redrawn in vector on A4: every
 // offset below is its pixel value times PX, and its vertical anchors (logo at
-// 28 %, rule at 50 %) are taken as fractions of the A4 height. The ground is
+// 33 %, rule at 50 %) are taken as fractions of the A4 height. The ground is
 // its cream rather than its gentle gradient. Dark Digital themes fall back to
 // the default cream theme — A4 never prints a dark sheet.
-async function _a4Cover(pdf, title) {
+async function _a4Cover(pdf, title, logo) {
   const themed = getCatalogCoverTheme(title);
   const theme = themed.light ? themed : getCatalogCoverTheme('');
   const bg = _a4Hex(theme.bg1), accent = _a4Hex(theme.accent);
@@ -17430,17 +17457,13 @@ async function _a4Cover(pdf, title) {
   // The logo box keeps Digital's 176 px height so everything below lands where
   // it does there; the artwork inside it is capped at what its pixels support.
   const BOX_H = 176 * PX;
-  let cy = H * 0.28;
-  let logo = null;
-  try { logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch (_) {}
-  if (logo && logo.naturalWidth > 0) {
-    const h = Math.min(BOX_H, logo.naturalHeight / A4.LOGO_DPI * 25.4);
-    const w = h * logo.naturalWidth / logo.naturalHeight;
-    const c = document.createElement('canvas');
-    c.width = logo.naturalWidth; c.height = logo.naturalHeight;
-    c.getContext('2d').drawImage(logo, 0, 0);
-    pdf.addImage(c.toDataURL('image/png'), 'PNG', cx - w / 2, cy - h / 2, w, h);
-    c.width = c.height = 0;
+  // Digital anchors the logo at 28 % of a much taller page; on A4 that leaves
+  // the lower half bare, so the group sits at the optical centre instead.
+  let cy = H * 0.33;
+  if (logo) {
+    const h = Math.min(BOX_H, logo.pxH / A4.LOGO_DPI * 25.4);
+    const w = h * logo.pxW / logo.pxH;
+    pdf.addImage(logo.dataUrl, 'PNG', cx - w / 2, cy - h / 2, w, h);
     cy += BOX_H / 2 + 56 * PX;
   } else {
     _a4Text(pdf, 'Meraki by Saima', cx, cy, { size: 36 * PX / 0.3528, style: 'italic', align: 'center', color: accent });
@@ -17475,46 +17498,76 @@ async function _a4Cover(pdf, title) {
     { size: 23 * PX / 0.3528, align: 'center', color: _a4Mix([40, 26, 12], bg, 0.72) });
 }
 
-// The Digital product page's top half, at A4 scale: a full-width 4:5 photo
-// band starting near the top, the photo fitted inside it exactly as Digital
-// fits it (never cropped; a wide shot sits in the band's middle), and the name
-// in bold serif at Digital's left padding, its gap below the band scaled from
-// Digital's 36 px. Everything Digital prints after the name is simply absent.
-function _a4ProductBlock(pdf, img, name, x, y, bandW, nameSize, nameLH) {
-  const bandH = bandW * 1350 / DIGITAL_W;
-  const { w, h } = _a4Fit(img, bandW, bandH);
-  pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x + (bandW - w) / 2, y + (bandH - h) / 2, w, h);
-  const top = y + bandH + 36 * bandW / DIGITAL_W;
-  const ascent = nameSize * 0.3528 * 0.72;
-  _a4NameLines(pdf, name, nameSize, bandW, 'bold').forEach((l, i) =>
-    _a4Text(pdf, l, x, top + ascent + i * nameLH, { size: nameSize, style: 'bold', color: A4_INK }));
+// The line under a name: the piece's own collection, so a Full Collection
+// catalog still tells a customer which edit a piece belongs to. In a single
+// collection's catalog it is that collection.
+function _a4PieceLabel(p) {
+  const names = getProductCollections(p).filter(n => !archivedCollectionNames.has(n));
+  return names.find(n => n !== catalogCollection) || catalogCollection || '';
 }
 
-// Name size is Digital's 48 px on a 1080 px page, scaled to the band width:
-// about 24 pt on a Lookbook page.
-const _a4NameSize = bandW => 48 * bandW / DIGITAL_W / 0.3528;
-
-async function _a4LookbookPage(pdf, p) {
-  const bandW = A4.W - A4.SIDE * 2;
-  const img = await _a4LoadPhoto(p, 'lookbook');
-  const size = _a4NameSize(bandW);
-  _a4ProductBlock(pdf, img, p.name, A4.SIDE, A4.TOP, bandW, size, 58 * bandW / DIGITAL_W);
+// Photo with a hairline in the cover frame's rose, so photographs shot against
+// very different backdrops share one finished edge. Fitted, never cropped.
+function _a4FramedPhoto(pdf, img, x, y, w, h) {
+  pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x, y, w, h);
+  pdf.setDrawColor(...A4_HAIRLINE);
+  pdf.setLineWidth(0.3);
+  pdf.rect(x, y, w, h, 'S');
 }
 
-// Compact: four of the same blocks, 2 × 2, each a scaled-down Digital page top.
-async function _a4CompactPage(pdf, items, onPhoto) {
-  const GUTTER = 6, ROW_GAP = 4;
-  const bandW = (A4.W - A4.SIDE * 2 - GUTTER) / 2;
-  const bandH = bandW * 1350 / DIGITAL_W;
-  const size = _a4NameSize(bandW);
-  const lh = 58 * bandW / DIGITAL_W;
-  const rowH = bandH + 36 * bandW / DIGITAL_W + 2 * lh + ROW_GAP;
-  for (let i = 0; i < items.length; i++) {
-    onPhoto();
-    const img = await _a4LoadPhoto(items[i], 'compact');
-    _a4ProductBlock(pdf, img, items[i].name,
-      A4.SIDE + (i % 2) * (bandW + GUTTER), A4.TOP + Math.floor(i / 2) * rowH, bandW, size, lh);
+// Name in bold burgundy serif, collection in taupe italic beneath, both set
+// from the photo's left edge. Returns nothing; heights are planned by callers.
+function _a4Caption(pdf, lines, label, x, top, { size, lh, labelSize, labelGap }) {
+  const ascent = size * 0.3528 * 0.72;
+  lines.forEach((l, i) => _a4Text(pdf, l, x, top + ascent + i * lh, { size, style: 'bold', color: A4_BURGUNDY }));
+  if (label) {
+    _a4Text(pdf, label, x, top + ascent + (lines.length - 1) * lh + labelGap,
+      { size: labelSize, style: 'italic', color: A4_TAUPE });
   }
+}
+
+// Lookbook: the photograph as large as the page allows — top margin to just
+// above the caption — with the caption under its left edge and the brand mark
+// under its right.
+async function _a4LookbookPage(pdf, p, logo) {
+  const MAX_W = A4.W - A4.SIDE * 2;
+  const SIZE = 24, LH = 9.5, LABEL = 11, LABEL_GAP = 6.5, GAP = 6;
+  const img = await _a4LoadPhoto(p, 'lookbook');
+  const label = _a4PieceLabel(p);
+  // A narrow photo leaves a narrow column for its name, so lines are measured
+  // against the widest the photo could be, then trimmed after fitting.
+  let lines = _a4NameLines(pdf, p.name, SIZE, MAX_W - A4_MARK_W - 8, 'bold');
+  const captionH = SIZE * 0.3528 * 0.72 + (lines.length - 1) * LH + (label ? LABEL_GAP : 0) + 1.5;
+  const maxH = A4_MARK_BOTTOM - captionH - GAP - A4.TOP;
+  const { w, h } = _a4Fit(img, MAX_W, maxH);
+  const x = (A4.W - w) / 2, y = A4.TOP;
+  _a4FramedPhoto(pdf, img, x, y, w, h);
+  lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w - A4_MARK_W - 8, 90), 'bold');
+  _a4Caption(pdf, lines, label, x, y + h + GAP, { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
+  _a4BrandMark(pdf, logo, x + w);
+}
+
+// Compact: the same system, four to a page. Photos share a foot line in each
+// row so the captions align; one brand mark for the page.
+async function _a4CompactPage(pdf, items, onPhoto, logo) {
+  const GUTTER = 8, ROW_GAP = 7, SIZE = 12, LH = 5, LABEL = 8.5, LABEL_GAP = 4.3, GAP = 3.5;
+  const cellW = (A4.W - A4.SIDE * 2 - GUTTER) / 2;
+  const captionH = SIZE * 0.3528 * 0.72 + LH + LABEL_GAP + 1.5; // room for two name lines
+  const areaH = (A4_MARK_BOTTOM - 16 - A4.TOP - ROW_GAP) / 2 - GAP - captionH;
+  for (let i = 0; i < items.length; i++) {
+    const p = items[i];
+    onPhoto();
+    const cellX = A4.SIDE + (i % 2) * (cellW + GUTTER);
+    const cellY = A4.TOP + Math.floor(i / 2) * (areaH + GAP + captionH + ROW_GAP);
+    const img = await _a4LoadPhoto(p, 'compact');
+    const { w, h } = _a4Fit(img, cellW, areaH);
+    const x = cellX + (cellW - w) / 2;
+    _a4FramedPhoto(pdf, img, x, cellY + areaH - h, w, h);
+    const lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w, 60), 'bold');
+    _a4Caption(pdf, lines, _a4PieceLabel(p), x, cellY + areaH + GAP,
+      { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
+  }
+  _a4BrandMark(pdf, logo, A4.W - A4.SIDE);
 }
 
 // Photos are loaded one at a time and released as soon as they are embedded, so
@@ -17528,21 +17581,20 @@ async function _buildA4CatalogPdf({ layout, cover, onProgress }) {
   const title = catalogTitle();
   pdf.setProperties({ title: `${title} · Meraki by Saima`, creator: 'Meraki by Saima' });
 
-  let page = 1;
-  if (cover) await _a4Cover(pdf, title);
+  const logo = await _a4LoadLogo();
+  if (cover) await _a4Cover(pdf, title, logo);
   const perPage = layout === 'compact' ? 4 : 1;
   let done = 0;
   for (let start = 0; start < items.length; start += perPage) {
-    if (cover || start > 0) { pdf.addPage('a4', 'portrait'); page++; }
+    if (cover || start > 0) pdf.addPage('a4', 'portrait');
     _a4Canvas(pdf);
     const slice = items.slice(start, start + perPage);
     if (layout === 'compact') {
-      await _a4CompactPage(pdf, slice, () => onProgress?.(++done, items.length));
+      await _a4CompactPage(pdf, slice, () => onProgress?.(++done, items.length), logo);
     } else {
       onProgress?.(++done, items.length);
-      await _a4LookbookPage(pdf, slice[0]);
+      await _a4LookbookPage(pdf, slice[0], logo);
     }
-    _a4Footer(pdf, page);
   }
   return pdf;
 }
