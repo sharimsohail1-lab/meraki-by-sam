@@ -2030,12 +2030,13 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 
     <!-- Photo -->
     <div style="margin-bottom:14px">
-      <div class="field-label">Photo (optional)</div>
+      <div class="field-label" id="exhItemPhotoLabel">Photo (optional)</div>
       <div style="display:flex;gap:12px;align-items:center">
         <div id="exhItemPhotoPreview" onclick="document.getElementById('exhItemPhotoInput').click()" style="width:72px;height:72px;border-radius:10px;border:2px dashed var(--border);background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;overflow:hidden">
           <i class="ti ti-camera" style="font-size:24px;color:var(--muted)"></i>
         </div>
-        <div style="flex:1">
+        <div id="exhProductNote" style="display:none;flex:1;font-size:12px;color:var(--muted);line-height:1.5">From Products. Sizes saved here change this product's stock everywhere, including its product page.</div>
+        <div style="flex:1" id="exhItemPhotoActions">
           <button onclick="document.getElementById('exhItemPhotoInput').click()" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px">Upload Photo</button>
           <button id="exhSuggestNameBtn" onclick="suggestExhItemName()" class="btn btn-secondary btn-sm" style="width:100%"><i class="ti ti-sparkles"></i> Suggest name</button>
         </div>
@@ -2050,7 +2051,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
 
     <!-- Name -->
-    <div class="field-label">Item Name *</div>
+    <div class="field-label" id="exhItemNameLabel">Item Name *</div>
     <input type="text" id="exhItemNameInput" class="field-input" placeholder="e.g. Ivory Lawn Suit" style="margin-bottom:12px">
 
     <!-- Price / Cost -->
@@ -2059,7 +2060,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
         <div class="field-label">Price USD</div>
         <input type="number" id="exhItemPriceInput" class="field-input" placeholder="e.g. 100" min="0" step="1">
       </div>
-      <div>
+      <div id="exhItemCostWrap">
         <div class="field-label">Cost PKR</div>
         <input type="number" id="exhItemCostInput" class="field-input" placeholder="e.g. 18000" min="0" step="100">
       </div>
@@ -2070,11 +2071,14 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div id="exhSizeGrid" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:0 12px;margin-bottom:14px"></div>
 
     <!-- Notes -->
-    <div class="field-label">Notes (optional)</div>
-    <textarea id="exhItemNotesInput" class="field-input" rows="2" placeholder="Colours, fabric, etc." style="resize:none;margin-bottom:16px"></textarea>
+    <div id="exhItemNotesWrap">
+      <div class="field-label">Notes (optional)</div>
+      <textarea id="exhItemNotesInput" class="field-input" rows="2" placeholder="Colours, fabric, etc." style="resize:none;margin-bottom:16px"></textarea>
+    </div>
 
     <input type="hidden" id="exhItemEditId" value="">
     <button onclick="saveExhItem()" class="btn btn-primary" id="saveExhItemBtn" style="width:100%"><i class="ti ti-device-floppy"></i> Save Item</button>
+    <button onclick="openFullProductFromExh(_exhEditProductId)" class="btn btn-secondary" id="exhOpenProductBtn" style="width:100%;margin-top:10px;display:none"><i class="ti ti-external-link"></i> Open Full Product</button>
   </div>
 </div>
 
@@ -2537,6 +2541,13 @@ let currentAnalysis = null;  // { sku, name, description, ideogramPrompt }
 let currentExhibition = null;
 let exhItems = [];           // exh_items rows for currentExhibition (photo stripped)
 let exhSales = [];           // exh_sales rows for currentExhibition (non-voided)
+// exhibition_items rows for currentExhibition, one per product. Membership only —
+// an imported product's stock is always products.size_inventory, never a copy.
+let exhLinks = [];
+// Which exhibition exhItems / exhSales / exhLinks currently describe. They are
+// shared globals, so anything that writes to them or renders them checks this
+// first rather than showing one exhibition's stock under another's title.
+let _exhDataFor = null;
 // Session-scoped photo cache — keyed by exh_items.id. Never reset on tracker reopen.
 const _exhPhotoCache = {};
 // Tracks which exhibition IDs have already been fully loaded (photos fetched) this session.
@@ -2546,6 +2557,12 @@ let _exhRefreshInFlight = false;
 // Guards against concurrent per-item photo fetches. Value = Set of itemIds in flight.
 const _exhPhotoFetchInFlight = new Set();
 let _exhItem = null;         // item currently being acted on (sale / adjust / edit)
+// Add/Edit Item sheet mode. 'product' edits an imported product's sizes, and
+// _exhEditOpenedSizes is what the sheet showed when it opened, so a save can tell
+// which sizes Saima changed and whether anyone else changed them meanwhile.
+let _exhEditMode = 'item';
+let _exhEditProductId = null;
+let _exhEditOpenedSizes = null;
 let _exhTrackerTab = 'inventory';
 let _exhListFilter = 'active';   // 'active' | 'archived' on exhibitions list
 let _exhItemFilter = 'active';   // 'active' | 'archived' inside tracker
@@ -19336,26 +19353,36 @@ async function openExhibitionDetail(id) {
   document.getElementById('exhDetailName').textContent = e.name;
   document.getElementById('exhDetailMeta').textContent = [e.location, e.date].filter(Boolean).join(' · ');
 
-  // Load items
-  let items = [];
-  try { items = await db('select', 'exhibition_items', { filter: { exhibition_id: e.id } }); }
-  catch { items = []; }
+  if (_pendingExhFor !== e.id) { pendingExhItems.clear(); _pendingExhFor = e.id; }
 
-  const itemProducts = (items || []).map(ei => {
+  // Load items, and this exhibition's sales so the figures here match the
+  // tracker's Summary tab exactly.
+  let [items, sales] = await Promise.all([
+    db('select', 'exhibition_items', { filter: { exhibition_id: e.id } }).catch(() => []),
+    db('select', 'exh_sales', { filter: { exhibition_id: e.id } }).catch(() => []),
+  ]);
+  // A tap elsewhere may have opened another exhibition while this was loading.
+  if (currentExhibition?.id !== e.id) return;
+  sales = (sales || []).filter(s => !s.voided);
+
+  const itemProducts = _uniqueExhLinks(items || []).map(ei => {
     const prod = inventory.find(p => p.id === ei.product_id);
     return prod ? { ...ei, product: prod } : null;
   }).filter(Boolean);
 
-  const sold = itemProducts.filter(i => i.product.status === 'sold').length;
+  // Pieces and revenue come from logged sales, size by size. A product's status
+  // says nothing about this exhibition: one size sold leaves it available, and a
+  // product sold elsewhere was not revenue here.
+  const sold = sales.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
   const res = itemProducts.filter(i => i.product.status === 'reserved').length;
-  const rev = itemProducts.filter(i => i.product.status === 'sold').reduce((s, i) => s + (i.product.price || 0), 0);
+  const rev = sales.reduce((a, s) => a + (Number(s.sold_price_usd) || 0) * (Number(s.quantity) || 1), 0);
 
   const summary = document.getElementById('exhSummary');
-  if (itemProducts.length) {
+  if (itemProducts.length || sales.length) {
     summary.style.display = 'grid';
     document.getElementById('exhSumSold').textContent = sold;
     document.getElementById('exhSumRes').textContent = res;
-    document.getElementById('exhSumRev').textContent = '$' + rev;
+    document.getElementById('exhSumRev').textContent = '$' + Math.round(rev * 100) / 100;
   } else summary.style.display = 'none';
 
   // Status actions
@@ -19382,7 +19409,7 @@ async function openExhibitionDetail(id) {
         : (summary ? `<div class="exh-item-sizes" style="font-size:11px;color:var(--muted)">${summary}</div>` : '');
       return `
       <div class="exh-item-row">
-        ${(() => { const _s = productImageSrc(p); return _s ? `<img src="${_esc(_s)}" class="exh-item-thumb" alt="" loading="lazy">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'; })()}
+        ${(() => { const _s = saleThumbUrl(p); return _s ? `<img src="${_esc(_s)}" class="exh-item-thumb" alt="" loading="lazy">` : '<div class="exh-item-thumb" style="display:flex;align-items:center;justify-content:center"><i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i></div>'; })()}
         <div class="exh-item-info">
           <div class="exh-item-name">${p.name}</div>
           <div class="exh-item-sku">${p.sku}</div>
@@ -19390,7 +19417,7 @@ async function openExhibitionDetail(id) {
           <span class="status-pill status-${p.status}">${p.status}</span>
         </div>
         <div class="exh-action-btns">
-          ${canSell ? `<button class="exh-btn-sold" id="exhSellProd-${p.id}" onclick="openLogExhSaleProduct('${p.id}')">Log Sale</button>` : ''}
+          ${canSell ? `<button class="exh-btn-sold" id="exhSellProd-${p.id}" onclick="openLogExhSaleProduct('${p.id}',this)">Log Sale</button>` : ''}
           ${p.status !== 'reserved' && !soldOut ? `<button class="exh-btn-res" onclick="markExhItemStatus('${p.id}','reserved')">Reserve</button>` : ''}
         </div>
       </div>`;
@@ -19404,13 +19431,17 @@ async function openExhibitionDetail(id) {
   selectDiv.style.display = 'block';
   const grid = document.getElementById('exhSelectGrid');
   const assignedIds = new Set(itemProducts.map(i => i.product.id));
+  _exhAssignedProductIds = assignedIds;
   const available = inventory.filter(p => !isProductSoldOut(p));
   grid.innerHTML = available.map(p => {
-    const thumbSrc = productImageSrc(p);
-    return `<div class="product-card ${assignedIds.has(p.id) ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${assignedIds.has(p.id) ? 'border-color:var(--burgundy);border-width:2px' : ''}">
+    const thumbSrc = saleThumbUrl(p);
+    const added = assignedIds.has(p.id);
+    const marked = added || pendingExhItems.has(p.id);
+    return `<div class="product-card ${added ? 'selected' : ''}" id="exh-sel-${p.id}" onclick="toggleExhibitionItem('${p.id}',this)" style="${marked ? 'border-color:var(--burgundy);border-width:2px' : ''}">
       <div class="product-thumb">
         ${thumbSrc ? `<img src="${_esc(thumbSrc)}" alt="${_esc(p.name || '')}" loading="lazy">` : '<i class="ti ti-hanger"></i>'}
         <div class="product-sku">${p.sku}</div>
+        ${added ? '<div style="position:absolute;top:6px;right:6px;background:var(--burgundy);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px"><i class="ti ti-check"></i> Added</div>' : ''}
       </div>
       <div class="product-info"><div class="product-name">${p.name}</div></div>
     </div>`;
@@ -19420,7 +19451,21 @@ async function openExhibitionDetail(id) {
 }
 
 let pendingExhItems = new Set();
+let _pendingExhFor = null;           // exhibition the pending selection was made in
+let _exhAssignedProductIds = new Set();
+
+// One link per product. The table has no unique constraint yet, so older taps
+// may have left duplicate rows — the first one stands in for the product.
+function _uniqueExhLinks(rows) {
+  const seen = new Set();
+  return (rows || []).filter(r => r.product_id && !seen.has(r.product_id) && seen.add(r.product_id));
+}
+
 function toggleExhibitionItem(productId, el) {
+  if (_exhAssignedProductIds.has(productId)) {
+    showToast('Already in this exhibition. To take it out, use ⋯ → Remove from Exhibition in Track Inventory.', 5000);
+    return;
+  }
   if (pendingExhItems.has(productId)) {
     pendingExhItems.delete(productId);
     el.style.borderColor = '';
@@ -19434,13 +19479,23 @@ function toggleExhibitionItem(productId, el) {
 
 async function saveExhibitionItems() {
   if (!currentExhibition || !pendingExhItems.size) { showToast('Select items first'); return; }
+  const exhibitionId = currentExhibition.id;
   try {
-    for (const pid of pendingExhItems) {
-      await db('insert', 'exhibition_items', { data: { exhibition_id: currentExhibition.id, product_id: pid } });
+    // Re-read membership right before inserting, so a product added from another
+    // device (or a double tap) is never linked twice.
+    const existing = await db('select', 'exhibition_items', { filter: { exhibition_id: exhibitionId } });
+    const linked = new Set((existing || []).map(r => r.product_id));
+    let added = 0, skipped = 0;
+    for (const pid of [...pendingExhItems]) {
+      if (linked.has(pid)) { skipped++; pendingExhItems.delete(pid); continue; }
+      const rows = await db('insert', 'exhibition_items', { data: { exhibition_id: exhibitionId, product_id: pid } });
+      linked.add(pid);
+      pendingExhItems.delete(pid);
+      added++;
+      if (_exhDataFor === exhibitionId && rows?.[0]) exhLinks.push(rows[0]);
     }
-    pendingExhItems.clear();
-    showToast('Items saved');
-    await openExhibitionDetail(currentExhibition.id);
+    showToast(skipped ? `${added} added · ${skipped} already in this exhibition` : 'Items saved');
+    if (currentExhibition?.id === exhibitionId) await openExhibitionDetail(exhibitionId);
   } catch(e) { showToast('Error: ' + e.message); }
 }
 
@@ -19521,7 +19576,7 @@ async function openExhTracker(id) {
   _exhTrackerTab = 'inventory';
   _renderExhTabs();
 
-  if (_exhLoadedExhibitions.has(exh.id)) {
+  if (_exhLoadedExhibitions.has(exh.id) && _exhDataFor === exh.id) {
     // Render cached data immediately, then refresh metadata in background
     _renderExhContent();
     _stampExhLastUpdated();
@@ -19536,26 +19591,67 @@ function closeExhTracker() {
   document.body.style.overflow = '';
 }
 
-// First-ever load — fetches full rows including photos.
+const EXH_PRODUCT_COLS = 'id,sku,name,status,sold_at,price,size_inventory';
+
+// Fold fresh product rows into the in-memory catalogue, which is what every
+// other screen (Stock, Product Detail) renders from.
+function _mergeExhProductRows(rows) {
+  (rows || []).forEach(row => {
+    const idx = inventory.findIndex(p => p.id === row.id);
+    if (idx >= 0) inventory[idx] = { ...inventory[idx], ...row };
+    else inventory.push({ ...row, _hydrated: false });
+    if (currentProduct?.id === row.id) currentProduct = inventory.find(p => p.id === row.id);
+  });
+}
+
+// Everything the tracker shows for one exhibition: standalone items, sales, and
+// the products imported into it with their current stock.
+async function _fetchExhTrackerData(exhibitionId, itemCols) {
+  const [items, allSales, links] = await Promise.all([
+    db('select', 'exh_items', { filter: { exhibition_id: exhibitionId }, columns: itemCols }),
+    db('select', 'exh_sales', { filter: { exhibition_id: exhibitionId } }),
+    db('select', 'exhibition_items', { filter: { exhibition_id: exhibitionId } }),
+  ]);
+  const uniqueLinks = _uniqueExhLinks(links);
+  if (uniqueLinks.length) {
+    // /api/db can only filter by equality, so one narrow read of every product
+    // is cheaper than a request per imported product.
+    const ids = new Set(uniqueLinks.map(l => l.product_id));
+    const prods = await db('select', 'products', { columns: EXH_PRODUCT_COLS });
+    _mergeExhProductRows((prods || []).filter(p => ids.has(p.id)));
+  }
+  return { items: items || [], sales: (allSales || []).filter(s => !s.voided), links: uniqueLinks };
+}
+
+// Full load for an exhibition whose rows are not the ones currently held.
+// Photos come with the first load of the session; after that they are cached.
 async function _loadExhData() {
+  const exhibitionId = currentExhibition.id;
+  // Never leave another exhibition's rows on screen, or in state, while loading.
+  exhItems = []; exhSales = []; exhLinks = [];
+  _exhDataFor = exhibitionId;
   const content = document.getElementById('exhTrackerContent');
   content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><i class="ti ti-loader-2" style="font-size:28px"></i><div style="margin-top:8px">Loading exhibition…</div></div>';
+  const firstLoad = !_exhLoadedExhibitions.has(exhibitionId);
   try {
-    const [items, allSales] = await Promise.all([
-      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id }, columns: EXH_ITEM_FULL_COLS }),
-      db('select', 'exh_sales', { filter: { exhibition_id: currentExhibition.id } }),
-    ]);
-    exhItems = (items || []).map(item => {
+    const data = await _fetchExhTrackerData(exhibitionId, firstLoad ? EXH_ITEM_FULL_COLS : EXH_ITEM_META_COLS);
+    if (currentExhibition?.id !== exhibitionId) return;
+    exhItems = data.items.map(item => {
       if (item.photo) { _exhPhotoCache[item.id] = item.photo; delete item.photo; }
       return item;
     });
-    exhSales = (allSales || []).filter(s => !s.voided);
-    _exhLoadedExhibitions.add(currentExhibition.id);
+    exhSales = data.sales;
+    exhLinks = data.links;
+    _exhLoadedExhibitions.add(exhibitionId);
+    if (!firstLoad) exhItems.forEach(i => _loadExhItemPhoto(i.id));
     await _backfillExhSizes();
+    if (currentExhibition?.id !== exhibitionId) return;
     _stampExhLastUpdated();
     _renderExhContent();
   } catch(e) {
-    content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${e.message}</div>`;
+    if (currentExhibition?.id === exhibitionId) {
+      content.innerHTML = `<div style="color:var(--error,#c0392b);padding:20px;text-align:center">${_esc(e.message)}</div>`;
+    }
     throw e;
   }
 }
@@ -19565,11 +19661,10 @@ async function _exhMetadataRefresh(exhibitionId) {
   if (_exhRefreshInFlight) return;
   _exhRefreshInFlight = true;
   try {
-    const [items, allSales] = await Promise.all([
-      db('select', 'exh_items', { filter: { exhibition_id: exhibitionId }, columns: EXH_ITEM_META_COLS }),
-      db('select', 'exh_sales', { filter: { exhibition_id: exhibitionId } }),
-    ]);
-    _mergeExhMetadata(items || [], (allSales || []).filter(s => !s.voided));
+    const data = await _fetchExhTrackerData(exhibitionId, EXH_ITEM_META_COLS);
+    // Another exhibition was opened while this was in flight — its rows win.
+    if (_exhDataFor !== exhibitionId || currentExhibition?.id !== exhibitionId) return;
+    _mergeExhMetadata(data.items, data.sales, data.links);
     _stampExhLastUpdated();
     _renderExhContent();
   } catch(e) {
@@ -19580,7 +19675,7 @@ async function _exhMetadataRefresh(exhibitionId) {
 }
 
 // Merge fresh metadata into exhItems/exhSales. Photo cache is never touched.
-function _mergeExhMetadata(freshItems, freshSales) {
+function _mergeExhMetadata(freshItems, freshSales, freshLinks) {
   const freshById = Object.fromEntries(freshItems.map(i => [i.id, i]));
   const existingIds = new Set(exhItems.map(i => i.id));
   const freshIds = new Set(freshItems.map(i => i.id));
@@ -19600,6 +19695,7 @@ function _mergeExhMetadata(freshItems, freshSales) {
     if (!freshIds.has(id)) delete _exhPhotoCache[id];
   }
   exhSales = freshSales;
+  exhLinks = freshLinks;
 }
 
 async function _backfillExhSizes() {
@@ -19636,12 +19732,11 @@ async function refreshExhTracker() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i>'; }
   const el = document.getElementById('exhLastUpdated');
   if (el) el.textContent = 'Refreshing…';
+  const exhibitionId = currentExhibition.id;
   try {
-    const [items, allSales] = await Promise.all([
-      db('select', 'exh_items', { filter: { exhibition_id: currentExhibition.id }, columns: EXH_ITEM_META_COLS }),
-      db('select', 'exh_sales', { filter: { exhibition_id: currentExhibition.id } }),
-    ]);
-    _mergeExhMetadata(items || [], (allSales || []).filter(s => !s.voided));
+    const data = await _fetchExhTrackerData(exhibitionId, EXH_ITEM_META_COLS);
+    if (_exhDataFor !== exhibitionId || currentExhibition?.id !== exhibitionId) return;
+    _mergeExhMetadata(data.items, data.sales, data.links);
     await _backfillExhSizes();
     _stampExhLastUpdated();
     _renderExhContent();
@@ -19676,18 +19771,50 @@ function _renderExhContent() {
   else content.innerHTML = _exhSummaryHTML();
 }
 
+// Imported products as tracker rows, shaped like exh_items rows so sorting and
+// counting treat both alike. Name, price and stock are read from the product on
+// every render — the exhibition holds only the link.
+function _exhProductRows() {
+  return exhLinks.map(l => {
+    const p = inventory.find(x => x.id === l.product_id);
+    return p ? { id: 'product:' + p.id, _productId: p.id, _product: p, name: p.name, price_usd: p.price } : null;
+  }).filter(Boolean);
+}
+
+function _exhProductRemaining(p) {
+  const inv = getSizeInventory(p);
+  return inv ? orderedSizeKeys(inv).reduce((a, s) => a + _safeSizeQty(inv[s]), 0) : 0;
+}
+
 function _exhItemRemaining(item) {
+  if (item._productId) return _exhProductRemaining(item._product);
   const inv = item.size_inventory || {};
   return Object.values(inv).reduce((a, b) => a + (Number(b) || 0), 0);
 }
 
 function _exhItemSold(item) {
-  return exhSales.filter(s => s.item_id === item.id).reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+  const mine = item._productId
+    ? s => s.product_id === item._productId
+    : s => s.item_id === item.id;
+  return exhSales.filter(mine).reduce((a, s) => a + (Number(s.quantity) || 1), 0);
+}
+
+// 960 rendition for the lightbox — never the master when a rendition exists.
+function _exhProductLargeImage(p) {
+  const hero = getPrimaryProductImage(p);
+  if (!hero) return null;
+  const v = imageVariantUrls(hero);
+  return v['960'] || v['1400'] || hero.src || null;
 }
 
 function _exhInventoryHTML() {
   const nonDeleted = exhItems.filter(i => i.status !== 'deleted');
-  const visible = nonDeleted.filter(i => _exhItemFilter === 'archived' ? i.status === 'archived' : i.status !== 'archived');
+  // Imported products have no archived state of their own — they are either in
+  // the exhibition or removed from it — so they list under Active only.
+  const productRows = _exhProductRows();
+  const visible = _exhItemFilter === 'archived'
+    ? nonDeleted.filter(i => i.status === 'archived')
+    : [...nonDeleted.filter(i => i.status !== 'archived'), ...productRows];
   const archivedCount = nonDeleted.filter(i => i.status === 'archived').length;
 
   const filterBar = `<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff">
@@ -19695,7 +19822,7 @@ function _exhInventoryHTML() {
     <button onclick="_setExhItemFilter('archived')" style="flex:1;padding:9px;border:none;border-left:1px solid var(--border);background:${_exhItemFilter==='archived'?'var(--burgundy)':'transparent'};color:${_exhItemFilter==='archived'?'#fff':'var(--ink)'};font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation">Archived${archivedCount ? ' (' + archivedCount + ')' : ''}</button>
   </div>`;
 
-  if (!nonDeleted.length) {
+  if (!nonDeleted.length && !productRows.length) {
     return filterBar + `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
       <i class="ti ti-package" style="font-size:44px;display:block;margin-bottom:12px;color:var(--gold,#c9a84c)"></i>
       <div style="font-size:16px;font-weight:600;margin-bottom:6px">No items yet</div>
@@ -19743,6 +19870,7 @@ function _exhInventoryHTML() {
 
   window._exhItemMenuIds = [];
   window._exhInvItemIds = [];
+  window._exhInvProductIds = [];
 
   let cards = '';
   let lastShade = null;
@@ -19753,6 +19881,12 @@ function _exhInventoryHTML() {
         lastShade = shade;
         cards += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);padding:4px 0 6px">${shade}</div>`;
       }
+    }
+    if (item._productId) {
+      const pidx = window._exhInvProductIds.length;
+      window._exhInvProductIds.push(item._productId);
+      cards += _exhProductCardHTML(item, pidx);
+      return;
     }
     const midx = window._exhItemMenuIds.length;
     window._exhItemMenuIds.push(item.id);
@@ -19799,6 +19933,44 @@ function _exhItemCardHTML(item, midx, pidx) {
     </div>`;
 }
 
+// Same card as a standalone item. The stock shown is the product's own
+// size_inventory, and every action edits or sells that same stock.
+function _exhProductCardHTML(row, pidx) {
+  const p = row._product;
+  const pid = p.id;
+  const inv = getSizeInventory(p);
+  const remaining = _exhItemRemaining(row);
+  const sold = _exhItemSold(row);
+  const sizeStr = inv
+    ? orderedSizeKeys(inv).filter(s => _safeSizeQty(inv[s]) > 0).map(s => `${_esc(s)}:${_safeSizeQty(inv[s])}`).join(' · ')
+    : '';
+  const statusCls = !inv ? 'exh-status-low' : remaining === 0 ? 'exh-status-sold' : remaining <= 2 ? 'exh-status-low' : 'exh-status-avail';
+  const statusLabel = !inv ? 'No sizes yet' : remaining === 0 ? 'Sold out' : remaining <= 2 ? 'Low' : 'Available';
+  const thumb = saleThumbUrl(p);
+  return `<div class="exh-item-card" data-exh-product-id="${pid}" style="position:relative">
+      <button onclick="showExhProductMenu(window._exhInvProductIds[${pidx}])" style="position:absolute;top:10px;right:10px;background:none;border:none;padding:4px 6px;cursor:pointer;font-size:18px;color:var(--muted);touch-action:manipulation;z-index:1">⋯</button>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div class="exh-item-thumb-wrap">${thumb
+          ? `<img src="${_esc(thumb)}" loading="lazy" onclick="openExhPhotoLightbox('${pidx}','prod')" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border);cursor:pointer;touch-action:manipulation">`
+          : `<div style="width:64px;height:64px;border-radius:8px;background:var(--sand-light,#f5f0ea);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-hanger" style="font-size:26px;color:var(--muted)"></i></div>`}</div>
+        <div style="flex:1;min-width:0;padding-right:24px">
+          <div style="font-weight:600;font-size:15px;margin-bottom:3px">${_esc(p.name || '')}</div>
+          <div style="font-size:12px;color:var(--muted)">${p.price ? '$' + p.price + ' · ' : ''}<span style="color:var(--burgundy)">From Products</span>${p.status === 'reserved' ? ' · Reserved' : ''}</div>
+          ${sizeStr ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${sizeStr}</div>` : ''}
+          <div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span class="${statusCls}" style="font-size:12px;font-weight:700">${statusLabel}</span>
+            <span style="font-size:12px;color:var(--muted)">${remaining} left · ${sold} sold</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        ${remaining > 0
+          ? `<button onclick="openLogExhSaleProduct('${pid}',this)" style="flex:2;padding:11px;background:var(--burgundy);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation">Log Sale</button>`
+          : `<button disabled style="flex:2;padding:11px;background:var(--sand-light,#f5f0ea);color:var(--muted);border:1px solid var(--border);border-radius:8px;font-size:14px">Sold Out</button>`}
+        <button onclick="openEditExhProduct('${pid}')" style="flex:1;padding:11px;background:#fff;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;touch-action:manipulation">Adjust</button>
+      </div>
+    </div>`;
+}
 
 function _setExhItemFilter(f) {
   _exhItemFilter = f;
@@ -19855,6 +20027,45 @@ function showExhItemMenu(id) {
         { label: 'Delete Item', fn: () => deleteExhItem(id, hasSales), danger: true },
       ];
   _showActionMenu(item.name, actions);
+}
+
+function showExhProductMenu(productId) {
+  const p = inventory.find(x => x.id === productId);
+  if (!p) return;
+  _showActionMenu(_esc(p.name || ''), [
+    { label: 'Edit Sizes', fn: () => openEditExhProduct(productId) },
+    { label: 'Open Full Product', fn: () => openFullProductFromExh(productId) },
+    { label: 'Remove from Exhibition', fn: () => removeExhProduct(productId), danger: true },
+  ]);
+}
+
+// Product Detail is an ordinary sheet and would paint underneath the tracker,
+// so the tracker steps aside. Reopening it reloads the product's stock.
+function openFullProductFromExh(productId) {
+  closeSheet('addExhItemSheet');
+  closeExhTracker();
+  openProductDetail(productId);
+}
+
+function removeExhProduct(productId) {
+  const p = inventory.find(x => x.id === productId);
+  if (!p) return;
+  _showActionMenu(`Remove "${_esc(p.name || '')}" from this exhibition?`, [
+    { label: 'The product, its stock and its sales history stay exactly as they are. Tap to remove.', fn: () => _confirmRemoveExhProduct(productId), danger: true }
+  ]);
+}
+
+async function _confirmRemoveExhProduct(productId) {
+  if (!currentExhibition) return;
+  const exhibitionId = currentExhibition.id;
+  try {
+    // Every link row for the pair, so an older duplicate cannot bring it back.
+    const rows = await db('select', 'exhibition_items', { filter: { exhibition_id: exhibitionId, product_id: productId } });
+    for (const r of rows || []) await db('delete', 'exhibition_items', { id: r.id });
+    if (_exhDataFor === exhibitionId) exhLinks = exhLinks.filter(l => l.product_id !== productId);
+    _renderExhContent();
+    showToast('Removed from exhibition');
+  } catch(e) { showToast('Could not remove: ' + e.message); }
 }
 
 async function archiveExhItem(id) {
@@ -19914,7 +20125,7 @@ function _exhSalesHTML() {
     const soldProduct = (!item && s.product_id) ? inventory.find(p => p.id === s.product_id) : null;
     const itemName = item?.name || soldProduct?.name || 'Unknown item';
     const photo = item ? _getExhItemPhoto(item)
-                : soldProduct ? productImageSrc(soldProduct)
+                : soldProduct ? saleThumbUrl(soldProduct)
                 : null;
     const dt = new Date(s.created_at);
     const timeStr = dt.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
@@ -19938,8 +20149,10 @@ function _exhSalesHTML() {
 function _exhSummaryHTML() {
   // Active (non-archived, non-deleted) items only for remaining counts
   const activeItems = exhItems.filter(i => i.status !== 'archived' && i.status !== 'deleted');
-  const totalItems = activeItems.length;
-  const totalRemaining = activeItems.reduce((a, i) => a + _exhItemRemaining(i), 0);
+  // Imported products count by the units left in their own size_inventory.
+  const productRows = _exhProductRows();
+  const totalItems = activeItems.length + productRows.length;
+  const totalRemaining = [...activeItems, ...productRows].reduce((a, i) => a + _exhItemRemaining(i), 0);
 
   // Sales come ONLY from exhibition_sales — never from inventory difference
   const totalSold = exhSales.reduce((a, s) => a + (Number(s.quantity) || 1), 0);
@@ -19949,6 +20162,11 @@ function _exhSummaryHTML() {
     const soldQty = exhSales.filter(s => s.item_id === i.id).reduce((x, s) => x + (Number(s.quantity) || 1), 0);
     return a + (Number(i.cost_pkr) || 0) * soldQty;
   }, 0);
+  // Only standalone items carry a PKR cost, so profit is estimated over their
+  // sales alone — subtracting their cost from all revenue would overstate it.
+  const costedIds = new Set(activeItems.filter(i => Number(i.cost_pkr) > 0).map(i => i.id));
+  const costedGrossUSD = exhSales.filter(s => costedIds.has(s.item_id))
+    .reduce((a, s) => a + (Number(s.sold_price_usd) || 0) * (Number(s.quantity) || 1), 0);
 
   const stat = (label, val, color) =>
     `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center">
@@ -19975,9 +20193,10 @@ function _exhSummaryHTML() {
       ${paymentRows}
     </div>` : '';
 
-  const profitSection = (grossUSD > 0 && totalCostPkr > 0) ? `
+  const profitSection = (costedGrossUSD > 0 && totalCostPkr > 0) ? `
     <div style="grid-column:1/-1;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px">
-      <div class="field-label" style="margin-bottom:10px">Profit Estimate (optional)</div>
+      <div class="field-label" style="margin-bottom:4px">Profit Estimate (optional)</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Items with a PKR cost only</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <span style="font-size:13px;color:var(--muted);white-space:nowrap">PKR per $1 =</span>
         <input type="number" id="exhRateInput" class="field-input" placeholder="e.g. 278" min="1" style="margin-bottom:0" oninput="_renderExhProfitCalc()">
@@ -19985,7 +20204,7 @@ function _exhSummaryHTML() {
       <div id="exhProfitResult" style="font-size:13px;color:var(--muted)">Enter exchange rate to estimate profit</div>
     </div>` : '';
 
-  window._exhSummaryGross = grossUSD;
+  window._exhSummaryGross = costedGrossUSD;
   window._exhSummaryCostPkr = totalCostPkr;
 
   return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-bottom:80px">
@@ -19993,7 +20212,7 @@ function _exhSummaryHTML() {
     ${stat('Pieces Sold', totalSold, '#27ae60')}
     ${stat('Remaining', totalRemaining, totalRemaining === 0 ? 'var(--error,#c0392b)' : 'var(--ink)')}
     ${stat('Gross Sales', '$' + grossUSD.toFixed(2), '#27ae60')}
-    ${totalCostPkr ? stat('Total Cost PKR', Math.round(totalCostPkr).toLocaleString(), 'var(--ink)') : ''}
+    ${totalCostPkr ? stat('Cost of Items Sold (PKR)', Math.round(totalCostPkr).toLocaleString(), 'var(--ink)') : ''}
     ${paymentSection}
     ${profitSection}
   </div>`;
@@ -20027,7 +20246,33 @@ function _exhSizeStepperHTML(sizesObj, idPrefix, sizeKeys) {
   ).join('');
 }
 
+// One sheet, two modes. 'product' shows an imported product's photo, name and
+// price read-only and edits only its sizes. Standalone-only fields are hidden.
+function _setExhItemSheetMode(mode) {
+  _exhEditMode = mode;
+  const isProduct = mode === 'product';
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('exhItemPhotoActions', !isProduct);
+  show('exhItemCostWrap', !isProduct);
+  show('exhItemNotesWrap', !isProduct);
+  show('exhProductNote', isProduct);
+  show('exhOpenProductBtn', isProduct);
+  ['exhItemNameInput', 'exhItemPriceInput'].forEach(id => {
+    const el = document.getElementById(id);
+    el.readOnly = isProduct;
+    el.style.background = isProduct ? 'var(--sand-light,#f5f0ea)' : '';
+  });
+  const preview = document.getElementById('exhItemPhotoPreview');
+  preview.style.pointerEvents = isProduct ? 'none' : '';
+  preview.style.borderStyle = isProduct ? 'solid' : 'dashed';
+  document.getElementById('exhItemPhotoLabel').textContent = isProduct ? 'Photo' : 'Photo (optional)';
+  document.getElementById('exhItemNameLabel').textContent = isProduct ? 'Name' : 'Item Name *';
+  document.getElementById('saveExhItemBtn').disabled = false;
+  if (!isProduct) { _exhEditProductId = null; _exhEditOpenedSizes = null; }
+}
+
 function openAddExhItemSheet() {
+  _setExhItemSheetMode('item');
   _exhAddSizes = Object.fromEntries(EXH_SIZES.map(s => [s, 0]));
   _exhAddPhoto = null;
   _exhItem = null;
@@ -20048,6 +20293,7 @@ function openAddExhItemSheet() {
 function openEditExhItem(itemId) {
   const item = exhItems.find(i => i.id === itemId);
   if (!item) return;
+  _setExhItemSheetMode('item');
   _exhItem = item;
   _exhAddSizes = { ...Object.fromEntries(EXH_SIZES.map(s => [s, 0])), ...item.size_inventory };
   _exhAddPhoto = _getExhItemPhoto(item) || null;
@@ -20068,6 +20314,112 @@ function openEditExhItem(itemId) {
   }
   document.getElementById('exhSizeGrid').innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdd');
   openSheet('addExhItemSheet');
+}
+
+// Edit an imported product's sizes. The stepper edits products.size_inventory
+// itself — there is no exhibition copy. The product is re-read first so the
+// sheet opens on current stock, and those opening values are kept for the
+// conflict check in _saveExhProductSizes.
+async function openEditExhProduct(productId) {
+  let p = null;
+  try {
+    const rows = await db('select', 'products', { filter: { id: productId }, columns: EXH_PRODUCT_COLS });
+    if (rows?.[0]) { _mergeExhProductRows([rows[0]]); p = inventory.find(x => x.id === productId); }
+  } catch (e) {
+    console.warn('[EXH EDIT PRODUCT] inventory check failed', e.message);
+  }
+  if (!p) { showToast('Could not check latest inventory. Please try again.'); return; }
+  _renderExhContent();
+
+  _setExhItemSheetMode('product');
+  _exhItem = null;
+  _exhEditProductId = productId;
+  _exhAddPhoto = null;
+  document.getElementById('addExhItemTitle').textContent = 'Edit Sizes';
+  document.getElementById('exhItemNameInput').value = p.name || '';
+  document.getElementById('exhItemPriceInput').value = p.price || '';
+  document.getElementById('exhItemCostInput').value = '';
+  document.getElementById('exhItemNotesInput').value = '';
+  document.getElementById('exhItemEditId').value = '';
+  document.getElementById('exhSuggestedNames').style.display = 'none';
+  const btn = document.getElementById('saveExhItemBtn');
+  btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Sizes';
+  const thumb = saleThumbUrl(p);
+  document.getElementById('exhItemPhotoPreview').innerHTML = thumb
+    ? `<img src="${_esc(thumb)}" style="width:100%;height:100%;object-fit:cover">`
+    : '<i class="ti ti-hanger" style="font-size:24px;color:var(--muted)"></i>';
+
+  const grid = document.getElementById('exhSizeGrid');
+  if (hasLegacySizeKeys(p)) {
+    // Same protection as Product Detail: no approved letter-to-number mapping
+    // exists, so the conversion happens there, deliberately, not here.
+    _exhEditOpenedSizes = null;
+    grid.innerHTML = '<div style="padding:12px 0;font-size:13px;color:var(--muted);line-height:1.5">This product still uses the old letter sizes. Open the full product to enter its numeric sizes.</div>';
+    btn.disabled = true;
+  } else {
+    const inv = getSizeInventory(p) || {};
+    _exhEditOpenedSizes = Object.fromEntries(SIZE_ORDER.map(s => [s, _safeSizeQty(inv[s])]));
+    _exhAddSizes = { ..._exhEditOpenedSizes };
+    grid.innerHTML = _exhSizeStepperHTML(_exhAddSizes, 'exhAdd', SIZE_ORDER);
+  }
+  openSheet('addExhItemSheet');
+}
+
+// Writes only the sizes Saima changed, onto a fresh read of the product. If a
+// changed size no longer holds the value the sheet opened with — a sale, or an
+// edit on another device — nothing is written, so that change is never lost.
+async function _saveExhProductSizes() {
+  const productId = _exhEditProductId;
+  const opened = _exhEditOpenedSizes;
+  if (!productId || !opened) return;
+  const changed = SIZE_ORDER.filter(s => _safeSizeQty(_exhAddSizes[s]) !== opened[s]);
+  if (!changed.length) { closeSheet('addExhItemSheet'); showToast('No changes'); return; }
+
+  const btn = document.getElementById('saveExhItemBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving…';
+  try {
+    const rows = await db('select', 'products', { filter: { id: productId }, columns: EXH_PRODUCT_COLS });
+    const fresh = rows?.[0];
+    if (!fresh) throw new Error('Product not found');
+    _mergeExhProductRows([fresh]);
+    _renderExhContent();
+    if (hasLegacySizeKeys(fresh)) {
+      showToast('This product now uses the old letter sizes. Nothing was saved — open the full product instead.', 6000);
+      return;
+    }
+    const freshInv = getSizeInventory(fresh) || {};
+    const conflicts = changed.filter(s => _safeSizeQty(freshInv[s]) !== opened[s]);
+    if (conflicts.length) {
+      const now = conflicts.map(s => `${s} is now ${_safeSizeQty(freshInv[s])}`).join(', ');
+      showToast(`Stock changed while you were editing (${now}). Nothing was saved — close and reopen to see the latest.`, 7000);
+      return;
+    }
+
+    const newInv = normalizeSizeInventory(freshInv);
+    changed.forEach(s => { newInv[s] = _safeSizeQty(_exhAddSizes[s]); });
+    // Same status rule and payload shape as Product Detail's saveProductEdits.
+    const status = deriveStatusFromInventory(fresh, newInv);
+    let sold_at = fresh.sold_at;
+    if (status === 'sold' && fresh.status !== 'sold') sold_at = new Date().toISOString();
+    if (status === 'available' && fresh.status === 'sold') sold_at = null;
+    const update = { size_inventory: JSON.stringify(newInv), status, sold_at };
+    await db('update', 'products', { id: productId, data: update });
+
+    _mergeExhProductRows([{ ...fresh, ...update }]);
+    closeSheet('addExhItemSheet');
+    _renderExhContent();
+    renderInventory();
+    _invalidateMktPreview();
+    const total = orderedSizeKeys(newInv).reduce((a, s) => a + _safeSizeQty(newInv[s]), 0);
+    showToast(total === 0 ? 'Sizes saved — product now Sold Out' : 'Sizes saved ✓');
+  } catch (e) {
+    console.warn('[EXH SAVE PRODUCT SIZES]', e.message);
+    showToast('Could not save sizes: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Sizes';
+  }
 }
 
 function exhAddSizeChange(size, delta) {
@@ -20124,6 +20476,7 @@ async function suggestExhItemName() {
 
 async function saveExhItem() {
   if (!currentExhibition) return;
+  if (_exhEditMode === 'product') return _saveExhProductSizes();
   const name = document.getElementById('exhItemNameInput').value.trim();
   if (!name) { showToast('Item name is required'); return; }
   const btn = document.getElementById('saveExhItemBtn');
@@ -20234,6 +20587,7 @@ async function openLogExhSale(itemId) {
 async function _saveExhProductSale() {
   const product = _exhSaleProduct;
   if (!product || !currentExhibition) return;
+  const exhibitionId = currentExhibition.id;
   if (!_exhSaleSize) { showToast('Select a size'); return; }
   const price = parseFloat(document.getElementById('exhSalePriceInput').value);
   if (!price || price <= 0) { showToast('Enter sold price'); return; }
@@ -20244,7 +20598,7 @@ async function _saveExhProductSale() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        exhibitionId: currentExhibition.id,
+        exhibitionId,
         productId: product.id,
         size: _exhSaleSize,
         quantity: _exhSaleQty,
@@ -20256,18 +20610,20 @@ async function _saveExhProductSale() {
     const json = await r.json();
     if (json.error) throw new Error(json.error);
 
-    if (json.sale) exhSales.push(json.sale);
+    // The tracker's cached rows may belong to a different exhibition, which
+    // must not receive this sale.
+    if (json.sale && _exhDataFor === exhibitionId) exhSales.push(json.sale);
     // Product row is authoritative — refresh every place it is held.
-    if (json.product) {
-      const idx = inventory.findIndex(p => p.id === json.product.id);
-      if (idx >= 0) inventory[idx] = { ...inventory[idx], ...json.product };
-      if (currentProduct?.id === json.product.id) currentProduct = inventory[idx] || currentProduct;
-    }
-    _stampExhLastUpdated();
+    if (json.product) _mergeExhProductRows([json.product]);
     closeSheet('logExhSaleSheet');
     _exhSaleMode = 'item';
     _exhSaleProduct = null;
-    await openExhibitionDetail(currentExhibition.id);
+    if (document.getElementById('exhTrackerOverlay').style.display === 'flex') {
+      _stampExhLastUpdated();
+      _renderExhContent();
+    } else if (currentExhibition?.id === exhibitionId) {
+      await openExhibitionDetail(exhibitionId);
+    }
     renderInventory();
     _invalidateMktPreview();
     showToast(json.remaining === 0 ? 'Sale logged — product now Sold Out' : 'Sale logged ✓');
@@ -20281,8 +20637,9 @@ async function _saveExhProductSale() {
 
 // Sell one size of an imported catalogue product. Reuses the standalone sale
 // sheet; only the stock source and the save endpoint differ.
-async function openLogExhSaleProduct(productId) {
-  const btn = document.getElementById('exhSellProd-' + productId);
+async function openLogExhSaleProduct(productId, btnEl) {
+  // The detail sheet and the tracker can both hold a button for this product.
+  const btn = btnEl || document.getElementById('exhSellProd-' + productId);
   const originalHTML = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.innerHTML = 'Checking…'; }
 
@@ -20420,10 +20777,18 @@ async function saveExhSale() {
   }
 }
 
-async function voidExhSale(saleId) {
+function voidExhSale(saleId) {
   const sale = exhSales.find(s => s.id === saleId);
   if (!sale) return;
-  if (!confirm(`Void this sale? The quantity will be returned to inventory.`)) return;
+  _showActionMenu('Void this sale?', [
+    { label: 'The quantity will be returned to inventory. Tap to void.', fn: () => _confirmVoidExhSale(saleId), danger: true }
+  ]);
+}
+
+async function _confirmVoidExhSale(saleId) {
+  const sale = exhSales.find(s => s.id === saleId);
+  if (!sale) return;
+  if (!sale.item_id && sale.product_id) return _voidExhProductSale(sale);
   try {
     await db('update', 'exh_sales', { id: saleId, data: { voided: true } });
     // Add quantity back to item inventory
@@ -20439,6 +20804,48 @@ async function voidExhSale(saleId) {
     _renderExhContent();
     showToast('Sale voided ✓');
   } catch(e) {
+    showToast('Could not void: ' + e.message);
+  }
+}
+
+// Voiding an imported-product sale returns the units to the exact size key that
+// was sold, in products.size_inventory. Stock is restored first and rolled back
+// if the void itself fails, so the two can never disagree.
+async function _voidExhProductSale(sale) {
+  try {
+    // Another device may have voided it already — restoring twice would invent stock.
+    const saleRows = await db('select', 'exh_sales', { filter: { id: sale.id } });
+    if (!saleRows?.[0] || saleRows[0].voided) {
+      exhSales = exhSales.filter(s => s.id !== sale.id);
+      _renderExhContent();
+      showToast('This sale was already voided');
+      return;
+    }
+    const rows = await db('select', 'products', { filter: { id: sale.product_id }, columns: EXH_PRODUCT_COLS });
+    const fresh = rows?.[0];
+    if (!fresh) throw new Error('Product not found');
+    const inv = getSizeInventory(fresh) || {};
+    const qty = Number(sale.quantity) || 1;
+    // Verbatim key, mirroring exhibition-sell-product.js — no size mapping.
+    const newInv = { ...inv, [sale.size]: _safeSizeQty(inv[sale.size]) + qty };
+    const status = deriveStatusFromInventory(fresh, newInv);
+    const update = { size_inventory: JSON.stringify(newInv), status };
+    if (status === 'available' && fresh.status === 'sold') update.sold_at = null;
+    await db('update', 'products', { id: fresh.id, data: update });
+    try {
+      await db('update', 'exh_sales', { id: sale.id, data: { voided: true } });
+    } catch (e) {
+      await db('update', 'products', { id: fresh.id, data: { size_inventory: JSON.stringify(inv), status: fresh.status } })
+        .catch(re => console.warn('[EXH VOID] stock rollback failed', re.message));
+      throw e;
+    }
+    _mergeExhProductRows([{ ...fresh, ...update }]);
+    exhSales = exhSales.filter(s => s.id !== sale.id);
+    _renderExhContent();
+    renderInventory();
+    _invalidateMktPreview();
+    showToast('Sale voided ✓');
+  } catch (e) {
     showToast('Could not void: ' + e.message);
   }
 }
@@ -20482,6 +20889,11 @@ function openExhPhotoLightbox(idx, source) {
     photo = _getExhItemPhoto(item);
     const remaining = _exhItemRemaining(item);
     caption = `${item.name} · ${remaining} remaining`;
+  } else if (source === 'prod') {
+    const p = inventory.find(x => x.id === (window._exhInvProductIds || [])[idx]);
+    if (!p) return;
+    photo = _exhProductLargeImage(p);
+    caption = `${p.name} · ${_exhProductRemaining(p)} remaining`;
   } else if (source === 'sale') {
     const saleId = (window._exhSaleIds || [])[idx];
     // exhSales is reversed in the HTML, so re-find the sale
@@ -20489,8 +20901,9 @@ function openExhPhotoLightbox(idx, source) {
     const sale = visibleSales[idx];
     if (!sale) return;
     const item = exhItems.find(i => i.id === sale.item_id);
-    photo = item ? _getExhItemPhoto(item) : null;
-    caption = `${item?.name || 'Unknown'} · Size ${sale.size} × ${sale.quantity || 1} · $${sale.sold_price_usd || 0}`;
+    const soldProduct = (!item && sale.product_id) ? inventory.find(p => p.id === sale.product_id) : null;
+    photo = item ? _getExhItemPhoto(item) : soldProduct ? _exhProductLargeImage(soldProduct) : null;
+    caption = `${item?.name || soldProduct?.name || 'Unknown'} · Size ${sale.size} × ${sale.quantity || 1} · $${sale.sold_price_usd || 0}`;
   }
   if (!photo) return;
   const lb = document.getElementById('exhPhotoLightbox');
