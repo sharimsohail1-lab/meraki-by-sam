@@ -17280,15 +17280,14 @@ const A4 = {
 // canvas pixel to A4 millimetres.
 const DIGITAL_W = 1080;
 const PX = 210 / DIGITAL_W;
-// Colours from the Meraki palette the Digital catalog already uses: the cream
-// of its cover (#FAF5EC) as the paper, the brand burgundy (#7A2337) for names,
-// the rose of its cover frame for photo hairlines, and its taupe for the
-// quiet lines. Ink stays on text and hairlines; no blocks, no gradients.
-const A4_PAGE = [250, 245, 236];
+// The paper is oat (#E9DECB), a step deeper than the Digital cover's creams on
+// purpose: printers lay light tints down paler than the screen shows, and the
+// Digital cream printed as near-white. Names are the brand burgundy (#7A2337);
+// the secondary line is a taupe dark enough to read on the oat.
+const A4_PAGE = [233, 222, 203];
 const A4_BURGUNDY = [122, 35, 55];
 const A4_TITLE_INK = [26, 16, 8];
-const A4_TAUPE = [139, 129, 120];
-const A4_HAIRLINE = [211, 180, 179];
+const A4_TAUPE = [105, 93, 80];
 
 function setA4CatalogLayout(layout) {
   a4CatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
@@ -17434,12 +17433,14 @@ function _a4BrandMark(pdf, logo, right) {
 // The Digital cover (_buildCatalogCoverCanvas), redrawn in vector on A4: every
 // offset below is its pixel value times PX, and its vertical anchors (logo at
 // 33 %, rule at 50 %) are taken as fractions of the A4 height. The ground is
-// its cream rather than its gentle gradient. Dark Digital themes fall back to
-// the default cream theme — A4 never prints a dark sheet.
+// the A4 oat rather than its gentle gradient. Dark Digital themes take the
+// default theme's accent — A4 never prints a dark sheet.
 async function _a4Cover(pdf, title, logo) {
   const themed = getCatalogCoverTheme(title);
   const theme = themed.light ? themed : getCatalogCoverTheme('');
-  const bg = _a4Hex(theme.bg1), accent = _a4Hex(theme.accent);
+  // The cover is printed on the same oat as the pages; only the accent follows
+  // the collection's Digital theme.
+  const bg = A4_PAGE, accent = _a4Hex(theme.accent);
   const { W, H } = A4, cx = W / 2;
   _a4Canvas(pdf, bg);
 
@@ -17506,13 +17507,11 @@ function _a4PieceLabel(p) {
   return names.find(n => n !== catalogCollection) || catalogCollection || '';
 }
 
-// Photo with a hairline in the cover frame's rose, so photographs shot against
-// very different backdrops share one finished edge. Fitted, never cropped.
-function _a4FramedPhoto(pdf, img, x, y, w, h) {
+// Fitted, never cropped, and unframed: on the toned paper every photograph's
+// edge already reads, where a hairline showed on light backdrops and vanished
+// on dark ones.
+function _a4Photo(pdf, img, x, y, w, h) {
   pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x, y, w, h);
-  pdf.setDrawColor(...A4_HAIRLINE);
-  pdf.setLineWidth(0.3);
-  pdf.rect(x, y, w, h, 'S');
 }
 
 // Name in bold burgundy serif, collection in taupe italic beneath, both set
@@ -17541,7 +17540,7 @@ async function _a4LookbookPage(pdf, p, logo) {
   const maxH = A4_MARK_BOTTOM - captionH - GAP - A4.TOP;
   const { w, h } = _a4Fit(img, MAX_W, maxH);
   const x = (A4.W - w) / 2, y = A4.TOP;
-  _a4FramedPhoto(pdf, img, x, y, w, h);
+  _a4Photo(pdf, img, x, y, w, h);
   lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w - A4_MARK_W - 8, 90), 'bold');
   _a4Caption(pdf, lines, label, x, y + h + GAP, { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
   _a4BrandMark(pdf, logo, x + w);
@@ -17562,7 +17561,7 @@ async function _a4CompactPage(pdf, items, onPhoto, logo) {
     const img = await _a4LoadPhoto(p, 'compact');
     const { w, h } = _a4Fit(img, cellW, areaH);
     const x = cellX + (cellW - w) / 2;
-    _a4FramedPhoto(pdf, img, x, cellY + areaH - h, w, h);
+    _a4Photo(pdf, img, x, cellY + areaH - h, w, h);
     const lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w, 60), 'bold');
     _a4Caption(pdf, lines, _a4PieceLabel(p), x, cellY + areaH + GAP,
       { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
