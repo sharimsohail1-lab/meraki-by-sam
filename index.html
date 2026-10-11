@@ -874,7 +874,10 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="catalog-toolbar">
       <button onclick="closeCatalogBuilder()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
       <div class="catalog-toolbar-title" id="catalogSelTitle">Select Items</div>
-      <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Preview →</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="openA4CatalogSheet()" style="padding:0 10px;font-size:11px;gap:4px" title="Printable A4 catalog"><i class="ti ti-printer"></i> A4</button>
+        <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Preview →</button>
+      </div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:white;border-bottom:1px solid var(--border);flex-shrink:0">
       <span id="catalogSelCount" style="font-size:12px;color:var(--muted)"></span>
@@ -899,6 +902,26 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     <div class="catalog-body" id="catalogPreviewBody">
       <div class="catalog-preview" id="catalogPreviewContent"></div>
     </div>
+  </div>
+</div>
+
+<!-- A4 PRINT CATALOG — a second output from the same catalog selection -->
+<div class="sheet-overlay over-fullscreen" id="a4CatalogSheet" onclick="closeSheetOutside(event,'a4CatalogSheet')">
+  <div class="sheet" style="min-height:auto">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">A4 Print Catalog</div>
+    <div id="a4CatalogSummary" style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5"></div>
+    <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Layout</div>
+    <div class="mkt-img-src-row">
+      <button class="mkt-img-src-btn active" id="a4LayoutLookbook" onclick="setA4CatalogLayout('lookbook')">Lookbook<br><span style="font-size:10px;opacity:.8">1 per page</span></button>
+      <button class="mkt-img-src-btn" id="a4LayoutCompact" onclick="setA4CatalogLayout('compact')">Compact<br><span style="font-size:10px;opacity:.8">4 per page</span></button>
+    </div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink);margin-bottom:18px;cursor:pointer">
+      <input type="checkbox" id="a4CatalogCover" checked onchange="_renderA4CatalogSummary()" style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0"> Include cover page
+    </label>
+    <div id="a4CatalogError" style="display:none;background:#fdecea;color:#8a1f1f;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:12px"></div>
+    <button class="btn btn-primary" id="a4GenerateBtn" style="width:100%;margin-bottom:8px" onclick="downloadA4Catalog()"><i class="ti ti-file-type-pdf"></i> Generate A4 PDF</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('a4CatalogSheet')">Cancel</button>
   </div>
 </div>
 
@@ -16250,8 +16273,10 @@ function openCatalogBuilder(collectionName) {
   // Reset per-session image choices and rendered-page cache
   catalogImageChoices = {};
   _clearCatalogRenderCache();
+  a4CatalogLayout = 'lookbook';
+  document.getElementById('a4CatalogCover').checked = true;
 
-  document.getElementById('catalogSelTitle').textContent = collectionName || 'Select Items';
+  document.getElementById('catalogSelTitle').textContent = catalogTitle();
   goToCatalogSelection();
   document.getElementById('catalogBuilderOverlay').classList.remove('hidden');
   closeSheet('collectionDetailSheet');
@@ -16273,9 +16298,42 @@ function _clearCatalogRenderCache() {
   catalogRenderSignature = null;
 }
 
+// The selected pieces, in catalog order. Every output — preview, Digital PDF,
+// Share and A4 — reads the selection through here, so a manual order added
+// later only has to be applied in this one place.
+function catalogSelectedInOrder() {
+  return catalogItems.filter(p => catalogSelected.has(p.id));
+}
+
+// openCatalogBuilder(null) is the Uncollected Items catalog.
+function catalogTitle() {
+  return catalogCollection || 'Uncollected Items';
+}
+
+function _catalogFileStem() {
+  return catalogTitle().replace(/[^a-z0-9]/gi, '-');
+}
+
+// Why the current selection cannot be rendered yet, or null when it can.
+// Shared by Digital and A4 so neither can produce a page the other refuses.
+function _catalogSelectionProblem() {
+  const selected = catalogSelectedInOrder();
+  if (!selected.length) return 'Select at least one item';
+  const noImage = selected.filter(p => !getPrimaryProductImage(p));
+  if (noImage.length) {
+    return `${noImage.length} product${noImage.length > 1 ? 's' : ''} have no image — exclude them first`;
+  }
+  const unprepared = selected.filter(p => {
+    const ch = catalogImageChoices[p.id];
+    return ch && ch.source === 'original' && ch.blurFace && !ch.blurredDataUrl;
+  });
+  if (unprepared.length) return `Prepare face blur for: ${unprepared.map(p => p.name).join(', ')}`;
+  return null;
+}
+
 function _catalogRenderSig() {
   // Signature covers: selected set, per-product choices (source/blur/blurredDataUrl), and key display fields
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const selected = catalogSelectedInOrder();
   return JSON.stringify({
     coll: catalogCollection,
     // The cover carries these, so a changed handle or a cleared setting must
@@ -16351,6 +16409,8 @@ function _refreshCatalogSelItem(id) {
   if (!p) return;
   const ctrl = document.getElementById('cat-img-ctrl-' + id);
   if (ctrl) ctrl.innerHTML = _catalogImgCtrlHTML(p);
+  const thumb = document.getElementById('cat-thumb-' + id);
+  if (thumb) thumb.innerHTML = _catalogThumbHTML(p);
 }
 
 function _setCatalogImgSource(id, source) {
@@ -16395,31 +16455,13 @@ function goToCatalogSelection() {
 }
 
 function goToCatalogPreview() {
-  if (catalogSelected.size === 0) { showToast('Select at least one item'); return; }
-
-  // Block if any selected product has no image at all
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
-  const noImage = selected.filter(p => !getPrimaryProductImage(p));
-  if (noImage.length) {
-    showToast(`${noImage.length} product${noImage.length > 1 ? 's' : ''} have no image — exclude them first`);
-    return;
-  }
-
-  // Block if any selected product has blur enabled but no prepared blurred image
-  const unprepared = selected.filter(p => {
-    const ch = catalogImageChoices[p.id];
-    return ch && ch.source === 'original' && ch.blurFace && !ch.blurredDataUrl;
-  });
-  if (unprepared.length) {
-    showToast(`Prepare face blur for: ${unprepared.map(p => p.name).join(', ')}`);
-    return;
-  }
-
+  const problem = _catalogSelectionProblem();
+  if (problem) { showToast(problem); return; }
   _showCatalogPreview();
 }
 
 function _showCatalogPreview() {
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const selected = catalogSelectedInOrder();
   console.log('[Meraki] Opening catalog preview', {
     build: _MERAKI_BUILD,
     count: selected.length,
@@ -16478,14 +16520,42 @@ function _catalogImgCtrlHTML(p) {
 // remain an explicit per-catalog override — chosen by Saima for one output,
 // usually to reach the face-blur workflow — but they no longer decide the
 // default, and nothing here infers a main image from the 'model' role.
-function _catalogDisplaySrc(p, ch) {
-  if (ch?.source === 'canonical') return getPrimaryProductImage(p)?.src || null;
+//
+// Resolves to the product_images row (or the prepared blur) rather than a URL,
+// so each output can pick the rendition its physical size needs from the same
+// choice: the selection thumbnail, the Digital pages and the A4 pages all show
+// the same photograph at different resolutions.
+function _catalogDisplayImage(p, ch) {
   if (ch?.source === 'original') {
-    if (ch.blurFace && ch.blurredDataUrl) return ch.blurredDataUrl;
-    return getOriginalProductImage(p)?.src || null;
+    if (ch.blurFace && ch.blurredDataUrl) return { dataUrl: ch.blurredDataUrl };
+    return { img: getOriginalProductImage(p) };
   }
-  if (ch?.source === 'model') return getModelProductImage(p)?.src || getPrimaryProductImage(p)?.src || null;
-  return getPrimaryProductImage(p)?.src || null;
+  if (ch?.source === 'model') return { img: getModelProductImage(p) || getPrimaryProductImage(p) };
+  return { img: getPrimaryProductImage(p) };
+}
+
+// width null means the master. Otherwise the smallest rendition at least that
+// wide, falling back to the master for images that predate renditions. A
+// prepared blur exists only as one full-size data URL.
+function _catalogImageSrc(choice, width) {
+  if (choice.dataUrl) return choice.dataUrl;
+  if (!choice.img) return null;
+  if (!width) return choice.img.src || null;
+  const v = imageVariantUrls(choice.img);
+  const key = ['560', '960', '1400'].find(w => Number(w) >= width && v[w]);
+  return (key && v[key]) || choice.img.src || null;
+}
+
+// The master. Digital pages are drawn from it, as they always have been.
+function _catalogDisplaySrc(p, ch) {
+  return _catalogImageSrc(_catalogDisplayImage(p, ch), null);
+}
+
+function _catalogThumbHTML(p) {
+  const src = _catalogImageSrc(_catalogDisplayImage(p, catalogImageChoices[p.id]), 560);
+  return src
+    ? `<img src="${_esc(src)}" alt="" loading="lazy">`
+    : '<i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i>';
 }
 
 function renderCatalogSelection() {
@@ -16500,17 +16570,19 @@ function renderCatalogSelection() {
 
   list.innerHTML = '<div style="background:white">' + catalogItems.map((p, i) => {
     const on = catalogSelected.has(p.id);
-    const ch = catalogImageChoices[p.id];
-    const displaySrc = _catalogDisplaySrc(p, ch);
     const noPrice = !p.price;
+    // isProductSoldOut is stock-aware and never true for a reserved piece, so a
+    // held piece is no longer described as sold out.
+    const stateNote = isProductSoldOut(p) ? 'Sold out — excluded by default'
+                    : p.status === 'reserved' ? 'Reserved' : '';
     return `<div class="catalog-sel-item" onclick="toggleCatalogItem('${p.id}',${i})">
-      <div class="catalog-sel-thumb">${displaySrc ? `<img src="${_esc(displaySrc)}" alt="" loading="lazy">` : '<i class="ti ti-hanger" style="font-size:20px;color:var(--gold-light)"></i>'}</div>
+      <div class="catalog-sel-thumb" id="cat-thumb-${p.id}">${_catalogThumbHTML(p)}</div>
       <div class="catalog-sel-info">
-        <div class="catalog-sel-name">${p.name}</div>
-        <div class="catalog-sel-meta">${[p.garment_type, p.season].filter(Boolean).join(' · ')}</div>
+        <div class="catalog-sel-name">${_esc(p.name)}</div>
+        <div class="catalog-sel-meta">${_esc([p.garment_type, p.season].filter(Boolean).join(' · '))}</div>
         <div class="catalog-sel-price ${noPrice ? 'no-price' : ''}">${p.price ? '$' + p.price : 'No price'}</div>
         ${on ? `<div id="cat-img-ctrl-${p.id}">${_catalogImgCtrlHTML(p)}</div>` : ''}
-        ${!isProductAvailable(p) ? '<div style="font-size:10px;color:var(--muted)">Sold out — excluded by default</div>' : ''}
+        ${stateNote ? `<div style="font-size:10px;color:var(--muted)">${stateNote}</div>` : ''}
       </div>
       <div class="catalog-sel-check ${on ? 'on' : ''}" id="cat-chk-${p.id}">
         ${on ? '<i class="ti ti-check" style="font-size:14px"></i>' : ''}
@@ -16581,7 +16653,7 @@ function getCatalogCoverTheme(name) {
 }
 
 async function renderCatalogPreview() {
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const selected = catalogSelectedInOrder();
   const noPrice = selected.filter(p => !p.price);
   const noModel = selected.filter(p => !getModelProductImage(p));
 
@@ -16611,8 +16683,8 @@ async function renderCatalogPreview() {
 }
 
 function _catalogWhatsAppMessage() {
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
-  const collName = catalogCollection || 'Collection';
+  const selected = catalogSelectedInOrder();
+  const collName = catalogTitle();
   const lines = selected.map(p => `• ${p.name || 'Untitled'} — ${p.price ? '$' + p.price : 'Price on request'}`).join('\n');
   return `*${collName}*\nMeraki by Saima\n\n${lines}\n\nDM to inquire about any piece ✨`;
 }
@@ -16710,7 +16782,7 @@ async function _buildCatalogPages() {
     return catalogRenderedPages;
   }
 
-  const selected = catalogItems.filter(p => catalogSelected.has(p.id));
+  const selected = catalogSelectedInOrder();
   if (!selected.length) throw new Error('No products selected');
 
   const W = 1080;
@@ -16771,7 +16843,7 @@ async function _buildCatalogPages() {
   const PAGE_H = IMG_H + MAX_INFO_H; // every page — cover and product — is this tall
 
   // Phase 3: cover page canvas
-  const collName = catalogCollection || 'Collection';
+  const collName = catalogTitle();
   const year = new Date().getFullYear();
   const theme = getCatalogCoverTheme(collName);
   const cover = await _buildCatalogCoverCanvas(W, PAGE_H, theme, collName, year);
@@ -16972,9 +17044,12 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
       const proxied = imgSrc.startsWith('data:') ? imgSrc : '/api/ideogram?url=' + encodeURIComponent(imgSrc);
       const img = await _loadImgWithTimeout(proxied, 10000);
       if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-        const scale = Math.min(W / img.naturalWidth, IMG_H / img.naturalHeight);
+        // The 16px of air above the photo comes out of the fit, not on top of
+        // it — otherwise a full-height photo is pushed 16px under the info panel.
+        const TOP = 16;
+        const scale = Math.min(W / img.naturalWidth, (IMG_H - TOP) / img.naturalHeight);
         const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-        ctx.drawImage(img, (W - dw) / 2, Math.max(16, (IMG_H - dh) / 2), dw, dh);
+        ctx.drawImage(img, (W - dw) / 2, Math.max(TOP, (IMG_H - dh) / 2), dw, dh);
         imgLoaded = true;
       }
     } catch(_) {}
@@ -16987,10 +17062,13 @@ async function _drawCatalogProductPage(W, PAGE_H, IMG_H, INFO_H, PAD, NAME_SIZE,
     ctx.fillText(safeName, W / 2, IMG_H / 2 + 48);
   }
 
-  // Sold / Reserved stamp
-  if (isSoldOut || p.status === 'reserved') {
-    const label = p.status === 'sold' ? 'SOLD' : 'RESERVED';
-    const stampBg = p.status === 'sold' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
+  // Sold / Reserved stamp. Sold is decided by stock through isProductSoldOut,
+  // so a piece with no sizes left still reads SOLD when its stored status was
+  // never moved off 'available'. Reserved is a manual hold and keeps its stamp.
+  const stamp = isProductSoldOut(p) ? 'SOLD' : p.status === 'reserved' ? 'RESERVED' : null;
+  if (stamp) {
+    const label = stamp;
+    const stampBg = stamp === 'SOLD' ? 'rgba(183,28,28,0.88)' : 'rgba(123,94,167,0.88)';
     ctx.font = `bold 28px "Playfair Display", serif`;
     const tw = ctx.measureText(label).width;
     const sw = tw + 36, sh = 48, sx = W - sw - 28, sy = 24;
@@ -17105,10 +17183,9 @@ async function downloadCatalogPDF() {
   const def = '<i class="ti ti-file-type-pdf"></i> PDF';
   _btnState(btn, 'preparing', def);
   try {
-    const { pages, collName, W, H } = await _buildCatalogPages();
+    const { pages, W, H } = await _buildCatalogPages();
     const pdf = _catalogToPdf(pages, W, H);
-    const safeName = (collName || 'Catalog').replace(/[^a-z0-9]/gi, '-');
-    await _downloadPdf(pdf, `Meraki-${safeName}-Catalog.pdf`);
+    await _downloadPdf(pdf, `Meraki-${_catalogFileStem()}-Catalog.pdf`);
     _btnState(btn, 'downloaded', def);
   } catch(e) {
     console.error('[Catalog] PDF download failed', e);
@@ -17123,14 +17200,13 @@ async function shareCatalogWithAsset() {
   _btnState(btn, 'preparing', def);
 
   // Clean message — no blob URLs, no internal URLs
-  const collName = catalogCollection || 'Collection';
+  const collName = catalogTitle();
   const shareTitle = collName + ' — Meraki by Saima';
   const shareText = _catalogWhatsAppMessage();
 
   try {
     const { pages, W, H } = await _buildCatalogPages();
-    const safeName = collName.replace(/[^a-z0-9]/gi, '-');
-    const filename = `Meraki-${safeName}-Catalog.pdf`;
+    const filename = `Meraki-${_catalogFileStem()}-Catalog.pdf`;
 
     if (window.jspdf) {
       const pdf = _catalogToPdf(pages, W, H);
@@ -17173,6 +17249,257 @@ async function shareCatalogWithAsset() {
     console.error('[Catalog] Share failed', e);
     _btnState(btn, 'error', def);
     showToast('Could not share: ' + e.message);
+  }
+}
+
+// ─── A4 PRINT CATALOG ─────────────────────────────────────────────────────────
+// A second output from the same selection, order and photo choices as the
+// Digital catalog. Digital paints whole pages into JPEGs sized for a phone; this
+// builds real 210 × 297 mm pages where only the photographs are raster, so the
+// cover, names and footer print as crisp vector text.
+//
+// Built-in Times is deliberate: no font file to ship, and the brand font can be
+// embedded later without touching the layout.
+
+let a4CatalogLayout = 'lookbook';
+
+const A4 = {
+  W: 210, H: 297,
+  MARGIN: 15,           // safe white margin on every side — no bleed needed
+  CONTENT_BOTTOM: 273,  // lowest point of any photo or name
+  FOOTER_Y: 285,        // footer baseline, 12 mm above the paper edge
+  MAX_DPI: 300,         // never embed more pixels than print can use
+  JPEG_QUALITY: 0.88,
+  LOGO_DPI: 220,        // the logo is never drawn larger than this supports
+  LOGO_MAX_W: 70,
+};
+const A4_INK = [26, 26, 26];
+const A4_MUTED = [150, 146, 140];
+const A4_RULE = [205, 192, 170];
+
+function setA4CatalogLayout(layout) {
+  a4CatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
+  document.getElementById('a4LayoutLookbook').classList.toggle('active', a4CatalogLayout === 'lookbook');
+  document.getElementById('a4LayoutCompact').classList.toggle('active', a4CatalogLayout === 'compact');
+  _renderA4CatalogSummary();
+}
+
+function _renderA4CatalogSummary() {
+  const n = catalogSelectedInOrder().length;
+  const cover = document.getElementById('a4CatalogCover').checked;
+  const pages = (a4CatalogLayout === 'compact' ? Math.ceil(n / 4) : n) + (cover ? 1 : 0);
+  document.getElementById('a4CatalogSummary').textContent =
+    `${catalogTitle()} · ${n} piece${n !== 1 ? 's' : ''} · ${pages} A4 page${pages !== 1 ? 's' : ''}. ` +
+    'Photo and name only — prices, sizes and availability stay in the Digital catalog.';
+}
+
+function openA4CatalogSheet() {
+  const problem = _catalogSelectionProblem();
+  if (problem) { showToast(problem); return; }
+  setA4CatalogLayout(a4CatalogLayout);
+  const err = document.getElementById('a4CatalogError');
+  err.style.display = 'none';
+  err.textContent = '';
+  openSheet('a4CatalogSheet');
+}
+
+// Largest w × h with the photo's own proportions inside maxW × maxH. Fitting,
+// never cropping: a hem or a dupatta edge is part of the garment.
+function _a4Fit(img, maxW, maxH) {
+  const s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
+  return { w: img.naturalWidth * s, h: img.naturalHeight * s };
+}
+
+// One photo re-encoded as JPEG (jsPDF cannot embed the WebP renditions are
+// stored as), downscaled to MAX_DPI at its printed width and never upscaled — a
+// smaller source is embedded at its own resolution.
+function _a4PhotoJpeg(img, wMm) {
+  const maxPx = Math.round(wMm / 25.4 * A4.MAX_DPI);
+  const s = Math.min(1, maxPx / img.naturalWidth);
+  const w = Math.max(1, Math.round(img.naturalWidth * s));
+  const h = Math.max(1, Math.round(img.naturalHeight * s));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  const dataUrl = c.toDataURL('image/jpeg', A4.JPEG_QUALITY);
+  c.width = c.height = 0; // release the bitmap now; iOS caps total canvas memory
+  return dataUrl;
+}
+
+// The photograph this piece carries in this catalog session. Lookbook prints it
+// near full page, so it gets the master; Compact prints it a quarter that size,
+// where the 1400 rendition already exceeds 300 dpi.
+async function _a4LoadPhoto(p, layout) {
+  const choice = _catalogDisplayImage(p, catalogImageChoices[p.id]);
+  const src = _catalogImageSrc(choice, layout === 'compact' ? 1400 : null);
+  if (!src) throw new Error(`"${p.name}" has no photo`);
+  // The route the Digital catalog takes, so a photo that renders there renders here.
+  const url = src.startsWith('data:') ? src : '/api/ideogram?url=' + encodeURIComponent(src);
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const img = await _loadImgWithTimeout(url, 20000);
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) return img;
+    } catch (e) { lastErr = e; }
+  }
+  // A print run with a missing photograph is worse than no print run.
+  throw new Error(`Could not load the photo for "${p.name}"${lastErr?.message ? ' (' + lastErr.message + ')' : ''}`);
+}
+
+function _a4Text(pdf, text, x, y, { size, color = A4_INK, style = 'normal', align = 'left', tracking = 0 }) {
+  pdf.setFont('times', style);
+  pdf.setFontSize(size);
+  pdf.setTextColor(...color);
+  if (!tracking) { pdf.text(text, x, y, { align }); return; }
+  // jsPDF leaves charSpace out when it aligns, so tracked text is placed by hand.
+  const w = pdf.getTextWidth(text) + tracking * (text.length - 1);
+  const left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  pdf.text(text, left, y, { charSpace: tracking });
+}
+
+// At most two lines; a longer name ends in an ellipsis rather than pushing the
+// photo off its frame.
+function _a4NameLines(pdf, name, size, maxW) {
+  pdf.setFont('times', 'normal');
+  pdf.setFontSize(size);
+  const lines = pdf.splitTextToSize((name || 'Untitled piece').trim(), maxW);
+  if (lines.length <= 2) return lines;
+  let second = lines.slice(1).join(' ');
+  while (second.length && pdf.getTextWidth(second + '…') > maxW) second = second.slice(0, -1);
+  return [lines[0], second.trimEnd() + '…'];
+}
+
+function _a4Footer(pdf, pageNo) {
+  const site = MERAKI_SITE_URL.replace(/^https?:\/\/(www\.)?/, '');
+  _a4Text(pdf, site, A4.MARGIN, A4.FOOTER_Y, { size: 8, color: A4_MUTED, tracking: 0.3 });
+  _a4Text(pdf, String(pageNo), A4.W - A4.MARGIN, A4.FOOTER_Y, { size: 8, color: A4_MUTED, align: 'right' });
+}
+
+// White, a little line work, no fills — a cover that costs almost no ink.
+async function _a4Cover(pdf, title) {
+  const cx = A4.W / 2;
+  let y = 92;
+  let logo = null;
+  try { logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch (_) {}
+  if (logo && logo.naturalWidth > 0) {
+    // As large as the artwork's resolution supports and no larger — about 38 mm
+    // for today's 330 px file. A higher-resolution file grows it automatically.
+    const w = Math.min(A4.LOGO_MAX_W, logo.naturalWidth / A4.LOGO_DPI * 25.4);
+    const h = w * logo.naturalHeight / logo.naturalWidth;
+    const c = document.createElement('canvas');
+    c.width = logo.naturalWidth; c.height = logo.naturalHeight;
+    c.getContext('2d').drawImage(logo, 0, 0);
+    pdf.addImage(c.toDataURL('image/png'), 'PNG', cx - w / 2, y, w, h);
+    c.width = c.height = 0;
+    y += h + 14;
+  } else {
+    _a4Text(pdf, 'Meraki by Saima', cx, y + 10, { size: 20, style: 'italic', align: 'center' });
+    y += 24;
+  }
+  pdf.setDrawColor(...A4_RULE);
+  pdf.setLineWidth(0.25);
+  pdf.line(cx - 20, y, cx + 20, y);
+  y += 17;
+  pdf.setFont('times', 'normal');
+  pdf.setFontSize(30);
+  pdf.splitTextToSize(title, 150).forEach((l, i) =>
+    _a4Text(pdf, l, cx, y + i * 12, { size: 30, align: 'center' }));
+  _a4Text(pdf, 'MERAKI BY SAIMA', cx, A4.CONTENT_BOTTOM, { size: 8.5, color: A4_MUTED, align: 'center', tracking: 1.6 });
+}
+
+// Lookbook: one piece, photo and name centred as a block on the page.
+async function _a4LookbookPage(pdf, p) {
+  const SIZE = 15, LH = 6.6, GAP = 10, MAX_W = 160;
+  const top = A4.MARGIN + 5, bottom = A4.CONTENT_BOTTOM;
+  const lines = _a4NameLines(pdf, p.name, SIZE, 150);
+  const img = await _a4LoadPhoto(p, 'lookbook');
+  const { w, h } = _a4Fit(img, MAX_W, bottom - top - GAP - (lines.length - 1) * LH - 2);
+  const blockH = h + GAP + (lines.length - 1) * LH;
+  const y = top + (bottom - top - blockH) / 2;
+  pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', (A4.W - w) / 2, y, w, h);
+  lines.forEach((l, i) => _a4Text(pdf, l, A4.W / 2, y + h + GAP + i * LH, { size: SIZE, align: 'center' }));
+}
+
+// Compact: a 2 × 2 grid. Photos sit on a shared baseline so the names in a row
+// line up whatever the photos' proportions.
+async function _a4CompactPage(pdf, items, onPhoto) {
+  const GUTTER = 12, ROW_GAP = 14, SIZE = 10, LH = 4.4, GAP = 6.5;
+  const cellW = (A4.W - 2 * A4.MARGIN - GUTTER) / 2;
+  const cellH = (A4.CONTENT_BOTTOM - A4.MARGIN - ROW_GAP) / 2;
+  const imgMaxW = cellW - 8;
+  const imgMaxH = cellH - GAP - LH - 3;
+  for (let i = 0; i < items.length; i++) {
+    const p = items[i];
+    onPhoto();
+    const cx = A4.MARGIN + (i % 2) * (cellW + GUTTER) + cellW / 2;
+    const cellTop = A4.MARGIN + Math.floor(i / 2) * (cellH + ROW_GAP);
+    const img = await _a4LoadPhoto(p, 'compact');
+    const { w, h } = _a4Fit(img, imgMaxW, imgMaxH);
+    pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', cx - w / 2, cellTop + imgMaxH - h, w, h);
+    _a4NameLines(pdf, p.name, SIZE, cellW - 4).forEach((l, j) =>
+      _a4Text(pdf, l, cx, cellTop + imgMaxH + GAP + j * LH, { size: SIZE, align: 'center' }));
+  }
+}
+
+// Photos are loaded one at a time and released as soon as they are embedded, so
+// a long catalog never holds more than one decoded master in memory.
+async function _buildA4CatalogPdf({ layout, cover, onProgress }) {
+  if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
+  const items = catalogSelectedInOrder();
+  if (!items.length) throw new Error('No products selected');
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  const title = catalogTitle();
+  pdf.setProperties({ title: `${title} · Meraki by Saima`, creator: 'Meraki by Saima' });
+
+  let page = 1;
+  if (cover) await _a4Cover(pdf, title);
+  const perPage = layout === 'compact' ? 4 : 1;
+  let done = 0;
+  for (let start = 0; start < items.length; start += perPage) {
+    if (cover || start > 0) { pdf.addPage('a4', 'portrait'); page++; }
+    const slice = items.slice(start, start + perPage);
+    if (layout === 'compact') {
+      await _a4CompactPage(pdf, slice, () => onProgress?.(++done, items.length));
+    } else {
+      onProgress?.(++done, items.length);
+      await _a4LookbookPage(pdf, slice[0]);
+    }
+    _a4Footer(pdf, page);
+  }
+  return pdf;
+}
+
+async function downloadA4Catalog() {
+  const btn = document.getElementById('a4GenerateBtn');
+  const def = '<i class="ti ti-file-type-pdf"></i> Generate A4 PDF';
+  const errEl = document.getElementById('a4CatalogError');
+  errEl.style.display = 'none';
+  const problem = _catalogSelectionProblem();
+  if (problem) { errEl.textContent = problem; errEl.style.display = 'block'; return; }
+
+  const layout = a4CatalogLayout;
+  const cover = document.getElementById('a4CatalogCover').checked;
+  btn.disabled = true;
+  try {
+    const pdf = await _buildA4CatalogPdf({
+      layout, cover,
+      onProgress: (i, n) => { btn.innerHTML = `<i class="ti ti-loader-2"></i> Preparing photo ${i} of ${n}…`; },
+    });
+    btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving PDF…';
+    const name = `Meraki-${_catalogFileStem()}-A4-${layout === 'compact' ? 'Compact' : 'Lookbook'}.pdf`;
+    await _downloadPdf(pdf, name);
+    _btnState(btn, 'downloaded', def);
+  } catch (e) {
+    console.error('[A4 catalog] generation failed', e);
+    errEl.textContent = 'Could not generate the A4 PDF: ' + (e.message || String(e));
+    errEl.style.display = 'block';
+    _btnState(btn, 'error', def);
   }
 }
 
