@@ -17265,25 +17265,21 @@ let a4CatalogLayout = 'lookbook';
 
 const A4 = {
   W: 210, H: 297,
-  MARGIN: 15,           // safe white margin on every side — no bleed needed
-  HEADER_Y: 19,         // running-head baseline
-  HEADER_RULE_Y: 22.5,
-  BODY_TOP: 28,         // top of every photo stage
-  FOOTER_RULE_Y: 276,
-  FOOTER_Y: 282,        // footer baseline, 15 mm above the paper edge
+  MARGIN: 15,           // all text and photos stay inside this — no bleed needed
+  BODY_TOP: 18,         // top of the photo area
+  FOOTER_Y: 284,        // footer baseline, 13 mm above the paper edge
   MAX_DPI: 300,         // never embed more pixels than print can use
   JPEG_QUALITY: 0.88,
   LOGO_DPI: 220,        // the logo is never drawn larger than this supports
   LOGO_MAX_W: 70,
 };
-// The Digital catalog's palette, kept to tints and hairlines so it costs
-// almost no ink: its gold (#8a6d2f) for small accents, its muted taupe for
-// secondary text, and its cream as a barely-there photo stage.
-const A4_INK = [34, 30, 27];
-const A4_GOLD = [138, 109, 47];
-const A4_MUTED = [139, 129, 120];
-const A4_RULE = [214, 200, 172];
-const A4_STAGE = [250, 246, 239];
+// The Digital catalog's own colours: its cream cover (#FAF5EC), its product
+// name ink (#1a1a1a), its cover title ink (#1a1008) and the quiet taupe it uses
+// for secondary text (#b5aca3).
+const A4_CREAM = [250, 245, 236];
+const A4_INK = [26, 26, 26];
+const A4_TITLE_INK = [26, 16, 8];
+const A4_MUTED = [181, 172, 163];
 
 function setA4CatalogLayout(layout) {
   a4CatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
@@ -17372,8 +17368,8 @@ function _a4Text(pdf, text, x, y, { size, color = A4_INK, style = 'normal', alig
 
 // At most two lines; a longer name ends in an ellipsis rather than pushing the
 // photo off its frame.
-function _a4NameLines(pdf, name, size, maxW) {
-  pdf.setFont('times', 'normal');
+function _a4NameLines(pdf, name, size, maxW, style = 'normal') {
+  pdf.setFont('times', style);
   pdf.setFontSize(size);
   const lines = pdf.splitTextToSize((name || 'Untitled piece').trim(), maxW);
   if (lines.length <= 2) return lines;
@@ -17382,41 +17378,38 @@ function _a4NameLines(pdf, name, size, maxW) {
   return [lines[0], second.trimEnd() + '…'];
 }
 
-function _a4Rule(pdf, x1, x2, y, color = A4_RULE, width = 0.2) {
+const _a4Hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+// The Digital cover draws its accent at partial alpha over the cream; jsPDF
+// colours are opaque, so the same tint is mixed here instead.
+const _a4Mix = (fg, bg, alpha) => fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
+
+function _a4Rule(pdf, x1, x2, y, color, width = 0.2) {
   pdf.setDrawColor(...color);
   pdf.setLineWidth(width);
   pdf.line(x1, y, x2, y);
 }
 
+// The whole sheet is the Digital catalog's cream. Text and photos stay inside
+// the safe margins; only this tint runs to the edge.
+function _a4Canvas(pdf, color = A4_CREAM) {
+  pdf.setFillColor(...color);
+  pdf.rect(0, 0, A4.W, A4.H, 'F');
+}
+
 const _a4SiteLabel = () => MERAKI_SITE_URL.replace(/^https?:\/\/(www\.)?/, '');
 
-// Running head and foot shared by every product page, Lookbook and Compact
-// alike: the brand above a hairline, the address and page number below one.
-function _a4PageFrame(pdf, pageNo) {
-  const L = A4.MARGIN, R = A4.W - A4.MARGIN;
-  _a4Text(pdf, 'MERAKI BY SAIMA', L, A4.HEADER_Y, { size: 7.5, color: A4_GOLD, tracking: 1.4 });
-  _a4Rule(pdf, L, R, A4.HEADER_RULE_Y);
-  _a4Rule(pdf, L, R, A4.FOOTER_RULE_Y);
-  _a4Text(pdf, _a4SiteLabel(), L, A4.FOOTER_Y, { size: 7.5, color: A4_MUTED, tracking: 0.6 });
-  _a4Text(pdf, String(pageNo), R, A4.FOOTER_Y, { size: 8, color: A4_GOLD, align: 'right' });
+function _a4Footer(pdf, pageNo) {
+  _a4Text(pdf, _a4SiteLabel(), A4.MARGIN, A4.FOOTER_Y, { size: 7, color: A4_MUTED, tracking: 0.4 });
+  _a4Text(pdf, String(pageNo), A4.W - A4.MARGIN, A4.FOOTER_Y, { size: 7, color: A4_MUTED, align: 'right' });
 }
 
-// A fixed pale stage with the photo fitted inside it. The stage, not the
-// photo, sets the page geometry, so wide, tall and 3:4 shots all sit in the
-// same frame. Fitting only — never cropped.
-function _a4Stage(pdf, img, x, y, w, h, pad) {
-  pdf.setFillColor(...A4_STAGE);
-  pdf.rect(x, y, w, h, 'F');
-  const fit = _a4Fit(img, w - pad * 2, h - pad * 2);
-  pdf.addImage(_a4PhotoJpeg(img, fit.w), 'JPEG', x + (w - fit.w) / 2, y + (h - fit.h) / 2, fit.w, fit.h);
-}
-
-async function _a4Logo(pdf, cx, y) {
+async function _a4Logo(pdf, cx, cy) {
   let logo = null;
   try { logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch (_) {}
   if (!logo || !(logo.naturalWidth > 0)) {
-    _a4Text(pdf, 'Meraki by Saima', cx, y + 9, { size: 20, style: 'italic', align: 'center' });
-    return 13;
+    _a4Text(pdf, 'Meraki by Saima', cx, cy + 3, { size: 20, style: 'italic', align: 'center' });
+    return 10;
   }
   // As large as the artwork's resolution supports and no larger — about 38 mm
   // for today's 330 px file. A higher-resolution file grows it automatically.
@@ -17425,83 +17418,91 @@ async function _a4Logo(pdf, cx, y) {
   const c = document.createElement('canvas');
   c.width = logo.naturalWidth; c.height = logo.naturalHeight;
   c.getContext('2d').drawImage(logo, 0, 0);
-  pdf.addImage(c.toDataURL('image/png'), 'PNG', cx - w / 2, y, w, h);
+  pdf.addImage(c.toDataURL('image/png'), 'PNG', cx - w / 2, cy - h / 2, w, h);
   c.width = c.height = 0;
   return h;
 }
 
-// Branding and title above, the first selected piece below on its own stage.
-// The photo is that piece's chosen image for this session, so the cover needs
-// no selection of its own. White paper throughout; the only tint is the stage.
-async function _a4Cover(pdf, title, firstPiece, layout) {
-  const cx = A4.W / 2, L = A4.MARGIN, R = A4.W - A4.MARGIN;
+// The Digital cover, redrawn at A4 in vector: cream ground, inset hairline
+// frame with corner marks, a faint centre rule, logo, divider, bold serif
+// title, an italic line in the accent, and the attribution at the foot.
+// Collections whose Digital cover is one of the dark themes use the brand's
+// default cream theme here — A4 never prints a dark ground.
+async function _a4Cover(pdf, title) {
+  const themed = getCatalogCoverTheme(title);
+  const theme = themed.light ? themed : getCatalogCoverTheme('');
+  const bg = _a4Hex(theme.bg1), accent = _a4Hex(theme.accent);
+  const { W, H } = A4, cx = W / 2;
+  _a4Canvas(pdf, bg);
 
-  let y = 17;
-  y += await _a4Logo(pdf, cx, y) + 16;
+  const M = 15;   // the frame sits on the safe margin
+  pdf.setDrawColor(..._a4Mix(accent, bg, 0.31));
+  pdf.setLineWidth(0.3);
+  pdf.rect(M, M, W - M * 2, H - M * 2, 'S');
+  const CL = 14, O = 2.4;
+  pdf.setDrawColor(..._a4Mix(accent, bg, 0.5));
+  pdf.setLineWidth(0.5);
+  [[M - O, M - O, 1, 1], [W - M + O, M - O, -1, 1], [M - O, H - M + O, 1, -1], [W - M + O, H - M + O, -1, -1]]
+    .forEach(([x, y, sx, sy]) => pdf.lines([[0, -sy * CL], [sx * CL, 0]], x, y + sy * CL, [1, 1], 'S'));
+  _a4Rule(pdf, M + 8, W - M - 8, H / 2, _a4Mix(accent, bg, 0.12), 0.2);
 
-  pdf.setFont('times', 'normal');
-  let size = 40;
+  let y = H * 0.28;
+  const logoH = await _a4Logo(pdf, cx, y);
+  y += logoH / 2 + 11;
+  _a4Rule(pdf, cx - 41, cx + 41, y, _a4Mix(accent, bg, 0.38), 0.3);
+  y += 8.5;
+
+  pdf.setFont('times', 'bold');
+  let size = 42;
   pdf.setFontSize(size);
-  let lines = pdf.splitTextToSize(title, R - L);
-  if (lines.length > 2) { size = 30; pdf.setFontSize(size); lines = pdf.splitTextToSize(title, R - L).slice(0, 2); }
-  const lh = size * 0.3528 * 1.15;
-  y += size * 0.3528 * 0.7;
-  lines.forEach((l, i) => _a4Text(pdf, l, cx, y + i * lh, { size, align: 'center' }));
+  let lines = pdf.splitTextToSize(title, W - 2 * M - 30);
+  if (lines.length > 2) { size = 32; pdf.setFontSize(size); lines = pdf.splitTextToSize(title, W - 2 * M - 30).slice(0, 2); }
+  const lh = size * 0.3528 * 1.2;
+  y += size * 0.3528 * 0.72;
+  lines.forEach((l, i) => _a4Text(pdf, l, cx, y + i * lh, { size, style: 'bold', align: 'center', color: A4_TITLE_INK }));
   y += (lines.length - 1) * lh + 11;
 
-  // LOOKBOOK 2026 between two short gold rules.
-  const label = `LOOKBOOK ${new Date().getFullYear()}`;
-  pdf.setFont('times', 'normal');
-  pdf.setFontSize(8.5);
-  const TRACK = 1.8;
-  const lw = pdf.getTextWidth(label) + TRACK * (label.length - 1);
-  _a4Text(pdf, label, cx, y, { size: 8.5, color: A4_GOLD, align: 'center', tracking: TRACK });
-  _a4Rule(pdf, cx - lw / 2 - 22, cx - lw / 2 - 6, y - 1.1, A4_GOLD, 0.25);
-  _a4Rule(pdf, cx + lw / 2 + 6, cx + lw / 2 + 22, y - 1.1, A4_GOLD, 0.25);
+  _a4Text(pdf, `Lookbook ${new Date().getFullYear()}`, cx, y,
+    { size: 14, style: 'italic', align: 'center', color: _a4Mix(accent, bg, 0.8) });
 
-  // The photograph takes everything between the label and the footer. Its
-  // stage hugs the photo rather than spanning the page, so a portrait shot is
-  // not left floating in a wide letterbox.
-  const top = y + 10, bottom = A4.FOOTER_RULE_Y - 8, PAD = 6;
-  if (firstPiece) {
-    const img = await _a4LoadPhoto(firstPiece, layout);
-    const fit = _a4Fit(img, (R - L) - PAD * 2, (bottom - top) - PAD * 2);
-    const sw = fit.w + PAD * 2, sh = fit.h + PAD * 2;
-    _a4Stage(pdf, img, cx - sw / 2, top + ((bottom - top) - sh) / 2, sw, sh, PAD);
-  }
-
-  _a4Rule(pdf, L, R, A4.FOOTER_RULE_Y);
-  _a4Text(pdf, 'MERAKI BY SAIMA', L, A4.FOOTER_Y, { size: 7.5, color: A4_GOLD, tracking: 1.4 });
-  _a4Text(pdf, _a4SiteLabel(), R, A4.FOOTER_Y, { size: 7.5, color: A4_MUTED, align: 'right', tracking: 0.6 });
+  _a4Text(pdf, `MERAKI BY SAIMA  ·  ${new Date().getFullYear()}`, cx, H - M - 13,
+    { size: 7.5, align: 'center', color: _a4Mix([60, 40, 20], bg, 0.4), tracking: 0.9 });
+  _a4Text(pdf, _a4SiteLabel(), cx, H - M - 6,
+    { size: 8.5, align: 'center', color: _a4Mix([40, 26, 12], bg, 0.72) });
 }
 
-// Lookbook: one piece on a full-width stage, the name set left beneath it on
-// the stage's edge, introduced by a short gold rule.
+// Lookbook: the photograph large and high on the page, the way the Digital
+// page leads with it, and the name in bold serif directly beneath, flush with
+// the photo's left edge. Fitted, never cropped; a wide shot simply leaves more
+// cream below it.
 async function _a4LookbookPage(pdf, p) {
-  const L = A4.MARGIN, W = A4.W - A4.MARGIN * 2;
-  const STAGE_H = 219, PAD = 5, SIZE = 19, LH = 7.5;
+  const AREA_W = A4.W - A4.MARGIN * 2, AREA_H = 228, SIZE = 18, LH = 7.4;
   const img = await _a4LoadPhoto(p, 'lookbook');
-  _a4Stage(pdf, img, L, A4.BODY_TOP, W, STAGE_H, PAD);
-  const below = A4.BODY_TOP + STAGE_H;
-  _a4Rule(pdf, L, L + 12, below + 7, A4_GOLD, 0.35);
-  _a4NameLines(pdf, p.name, SIZE, W).forEach((l, i) =>
-    _a4Text(pdf, l, L, below + 16 + i * LH, { size: SIZE }));
+  const { w, h } = _a4Fit(img, AREA_W, AREA_H);
+  const x = (A4.W - w) / 2, y = A4.BODY_TOP;
+  pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x, y, w, h);
+  _a4NameLines(pdf, p.name, SIZE, A4.W - A4.MARGIN - x, 'bold').forEach((l, i) =>
+    _a4Text(pdf, l, x, y + h + 10 + i * LH, { size: SIZE, style: 'bold' }));
 }
 
-// Compact: the same frame, four equal stages in a 2 × 2 grid, names set left
-// under each. Equal stages keep the rows aligned whatever the photos' shapes.
+// Compact: the same page at a quarter scale. Photos sit on a shared line at
+// the foot of each cell so the names in a row align whatever the photos'
+// proportions; each name starts at its own photo's left edge.
 async function _a4CompactPage(pdf, items, onPhoto) {
-  const GUTTER = 8, STAGE_H = 104, NAME_BAND = 18, PAD = 3, SIZE = 11, LH = 4.6;
+  const GUTTER = 10, ROW_GAP = 8, NAME_BAND = 16, SIZE = 10.5, LH = 4.5;
   const cellW = (A4.W - 2 * A4.MARGIN - GUTTER) / 2;
+  const areaH = (A4.FOOTER_Y - 8 - A4.BODY_TOP - ROW_GAP) / 2 - NAME_BAND;
   for (let i = 0; i < items.length; i++) {
     const p = items[i];
     onPhoto();
-    const x = A4.MARGIN + (i % 2) * (cellW + GUTTER);
-    const y = A4.BODY_TOP + Math.floor(i / 2) * (STAGE_H + NAME_BAND + 2);
+    const cellX = A4.MARGIN + (i % 2) * (cellW + GUTTER);
+    const cellY = A4.BODY_TOP + Math.floor(i / 2) * (areaH + NAME_BAND + ROW_GAP);
     const img = await _a4LoadPhoto(p, 'compact');
-    _a4Stage(pdf, img, x, y, cellW, STAGE_H, PAD);
-    _a4NameLines(pdf, p.name, SIZE, cellW).forEach((l, j) =>
-      _a4Text(pdf, l, x, y + STAGE_H + 6.5 + j * LH, { size: SIZE }));
+    const { w, h } = _a4Fit(img, cellW, areaH);
+    const x = cellX + (cellW - w) / 2;
+    pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x, cellY + areaH - h, w, h);
+    _a4NameLines(pdf, p.name, SIZE, cellX + cellW - x, 'bold').forEach((l, j) =>
+      _a4Text(pdf, l, x, cellY + areaH + 6 + j * LH, { size: SIZE, style: 'bold' }));
   }
 }
 
@@ -17517,11 +17518,12 @@ async function _buildA4CatalogPdf({ layout, cover, onProgress }) {
   pdf.setProperties({ title: `${title} · Meraki by Saima`, creator: 'Meraki by Saima' });
 
   let page = 1;
-  if (cover) await _a4Cover(pdf, title, items[0], layout);
+  if (cover) await _a4Cover(pdf, title);
   const perPage = layout === 'compact' ? 4 : 1;
   let done = 0;
   for (let start = 0; start < items.length; start += perPage) {
     if (cover || start > 0) { pdf.addPage('a4', 'portrait'); page++; }
+    _a4Canvas(pdf);
     const slice = items.slice(start, start + perPage);
     if (layout === 'compact') {
       await _a4CompactPage(pdf, slice, () => onProgress?.(++done, items.length));
@@ -17529,7 +17531,7 @@ async function _buildA4CatalogPdf({ layout, cover, onProgress }) {
       onProgress?.(++done, items.length);
       await _a4LookbookPage(pdf, slice[0]);
     }
-    _a4PageFrame(pdf, page);
+    _a4Footer(pdf, page);
   }
   return pdf;
 }
