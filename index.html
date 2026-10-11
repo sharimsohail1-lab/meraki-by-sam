@@ -876,7 +876,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
       <button onclick="closeCatalogBuilder()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
       <div class="catalog-toolbar-title" id="catalogSelTitle">Select Items</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-secondary btn-sm" onclick="openA4CatalogSheet()" style="padding:0 10px;font-size:11px;gap:4px" title="Printable A4 catalog"><i class="ti ti-printer"></i> A4</button>
+        <button class="btn btn-secondary btn-sm" onclick="openPrintCatalogSheet()" style="padding:0 10px;font-size:11px;gap:4px" title="Printable Letter catalog"><i class="ti ti-printer"></i> Print</button>
         <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Preview →</button>
       </div>
     </div>
@@ -906,23 +906,23 @@ textarea.field-input { min-height: 70px; resize: vertical; }
   </div>
 </div>
 
-<!-- A4 PRINT CATALOG — a second output from the same catalog selection -->
-<div class="sheet-overlay over-fullscreen" id="a4CatalogSheet" onclick="closeSheetOutside(event,'a4CatalogSheet')">
+<!-- LETTER PRINT CATALOG — a second output from the same catalog selection -->
+<div class="sheet-overlay over-fullscreen" id="printCatalogSheet" onclick="closeSheetOutside(event,'printCatalogSheet')">
   <div class="sheet" style="min-height:auto">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">A4 Print Catalog</div>
-    <div id="a4CatalogSummary" style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5"></div>
+    <div class="sheet-title">Letter Print Catalog</div>
+    <div id="printCatalogSummary" style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5"></div>
     <div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Layout</div>
     <div class="mkt-img-src-row">
-      <button class="mkt-img-src-btn active" id="a4LayoutLookbook" onclick="setA4CatalogLayout('lookbook')">Lookbook<br><span style="font-size:10px;opacity:.8">1 per page</span></button>
-      <button class="mkt-img-src-btn" id="a4LayoutCompact" onclick="setA4CatalogLayout('compact')">Compact<br><span style="font-size:10px;opacity:.8">4 per page</span></button>
+      <button class="mkt-img-src-btn active" id="printLayoutLookbook" onclick="setPrintCatalogLayout('lookbook')">Lookbook<br><span style="font-size:10px;opacity:.8">1 per page</span></button>
+      <button class="mkt-img-src-btn" id="printLayoutCompact" onclick="setPrintCatalogLayout('compact')">Compact<br><span style="font-size:10px;opacity:.8">4 per page</span></button>
     </div>
     <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink);margin-bottom:18px;cursor:pointer">
-      <input type="checkbox" id="a4CatalogCover" checked onchange="_renderA4CatalogSummary()" style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0"> Include cover page
+      <input type="checkbox" id="printCatalogCover" checked onchange="_renderPrintCatalogSummary()" style="accent-color:var(--burgundy);width:17px;height:17px;flex-shrink:0"> Include cover page
     </label>
-    <div id="a4CatalogError" style="display:none;background:#fdecea;color:#8a1f1f;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:12px"></div>
-    <button class="btn btn-primary" id="a4GenerateBtn" style="width:100%;margin-bottom:8px" onclick="downloadA4Catalog()"><i class="ti ti-file-type-pdf"></i> Generate A4 PDF</button>
-    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('a4CatalogSheet')">Cancel</button>
+    <div id="printCatalogError" style="display:none;background:#fdecea;color:#8a1f1f;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:12px"></div>
+    <button class="btn btn-primary" id="printGenerateBtn" style="width:100%;margin-bottom:8px" onclick="downloadPrintCatalog()"><i class="ti ti-file-type-pdf"></i> Generate Letter PDF</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="closeSheet('printCatalogSheet')">Cancel</button>
   </div>
 </div>
 
@@ -16275,8 +16275,8 @@ function openCatalogBuilder(collectionName) {
   // Reset per-session image choices and rendered-page cache
   catalogImageChoices = {};
   _clearCatalogRenderCache();
-  a4CatalogLayout = 'lookbook';
-  document.getElementById('a4CatalogCover').checked = true;
+  printCatalogLayout = 'lookbook';
+  document.getElementById('printCatalogCover').checked = true;
 
   document.getElementById('catalogSelTitle').textContent = catalogTitle();
   goToCatalogSelection();
@@ -16301,7 +16301,7 @@ function _clearCatalogRenderCache() {
 }
 
 // The selected pieces, in catalog order. Every output — preview, Digital PDF,
-// Share and A4 — reads the selection through here, so a manual order added
+// Share and Print — reads the selection through here, so a manual order added
 // later only has to be applied in this one place.
 function catalogSelectedInOrder() {
   return catalogItems.filter(p => catalogSelected.has(p.id));
@@ -16317,7 +16317,7 @@ function _catalogFileStem() {
 }
 
 // Why the current selection cannot be rendered yet, or null when it can.
-// Shared by Digital and A4 so neither can produce a page the other refuses.
+// Shared by Digital and Print so neither can produce a page the other refuses.
 function _catalogSelectionProblem() {
   const selected = catalogSelectedInOrder();
   if (!selected.length) return 'Select at least one item';
@@ -16525,7 +16525,7 @@ function _catalogImgCtrlHTML(p) {
 //
 // Resolves to the product_images row (or the prepared blur) rather than a URL,
 // so each output can pick the rendition its physical size needs from the same
-// choice: the selection thumbnail, the Digital pages and the A4 pages all show
+// choice: the selection thumbnail, the Digital pages and the Print pages all show
 // the same photograph at different resolutions.
 function _catalogDisplayImage(p, ch) {
   if (ch?.source === 'original') {
@@ -16869,7 +16869,7 @@ async function _buildCatalogPages() {
 }
 
 // The cover's italic line, chosen from the collection name. Shared by the
-// Digital and A4 covers so the two always say the same thing.
+// Digital and Print covers so the two always say the same thing.
 function catalogCoverTagline(collName) {
   const tn = (collName || '').toLowerCase();
   return (
@@ -17259,67 +17259,67 @@ async function shareCatalogWithAsset() {
   }
 }
 
-// ─── A4 PRINT CATALOG ─────────────────────────────────────────────────────────
+// ─── LETTER PRINT CATALOG ─────────────────────────────────────────────────────
 // A second output from the same selection, order and photo choices as the
 // Digital catalog. Digital paints whole pages into JPEGs sized for a phone; this
-// builds real 210 × 297 mm pages where only the photographs are raster, so the
+// builds real US Letter (8.5 × 11 in) pages where only the photographs are raster, so the
 // cover, names and footer print as crisp vector text.
 //
 // Built-in Times is deliberate: no font file to ship, and the brand font can be
 // embedded later without touching the layout.
 
-let a4CatalogLayout = 'lookbook';
+let printCatalogLayout = 'lookbook';
 
-const A4 = {
-  W: 210, H: 297,
+const PRINT = {
+  W: 215.9, H: 279.4,   // US Letter: Saima prints in NJ/NY
   SIDE: 8,              // photo and name margin — inside every printer's "Fit" area
   TOP: 8,
   MAX_DPI: 300,         // never embed more pixels than print can use
   JPEG_QUALITY: 0.88,
   LOGO_DPI: 180,        // the logo is never drawn larger than this supports
 };
-// The A4 cover is the Digital cover scaled to the sheet: PX converts a Digital
-// canvas pixel to A4 millimetres.
+// The printed cover is the Digital cover scaled to the sheet: PX converts a
+// Digital canvas pixel to millimetres on the page.
 const DIGITAL_W = 1080;
-const PX = 210 / DIGITAL_W;
+const PX = PRINT.W / DIGITAL_W;
 // The paper is oat (#E9DECB), a step deeper than the Digital cover's creams on
 // purpose: printers lay light tints down paler than the screen shows, and the
 // Digital cream printed as near-white. Names are the brand burgundy (#7A2337);
 // the secondary line is a taupe dark enough to read on the oat.
-const A4_PAGE = [233, 222, 203];
-const A4_BURGUNDY = [122, 35, 55];
-const A4_TITLE_INK = [26, 16, 8];
-const A4_TAUPE = [105, 93, 80];
+const PRINT_PAGE = [233, 222, 203];
+const PRINT_BURGUNDY = [122, 35, 55];
+const PRINT_TITLE_INK = [26, 16, 8];
+const PRINT_TAUPE = [105, 93, 80];
 
-function setA4CatalogLayout(layout) {
-  a4CatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
-  document.getElementById('a4LayoutLookbook').classList.toggle('active', a4CatalogLayout === 'lookbook');
-  document.getElementById('a4LayoutCompact').classList.toggle('active', a4CatalogLayout === 'compact');
-  _renderA4CatalogSummary();
+function setPrintCatalogLayout(layout) {
+  printCatalogLayout = layout === 'compact' ? 'compact' : 'lookbook';
+  document.getElementById('printLayoutLookbook').classList.toggle('active', printCatalogLayout === 'lookbook');
+  document.getElementById('printLayoutCompact').classList.toggle('active', printCatalogLayout === 'compact');
+  _renderPrintCatalogSummary();
 }
 
-function _renderA4CatalogSummary() {
+function _renderPrintCatalogSummary() {
   const n = catalogSelectedInOrder().length;
-  const cover = document.getElementById('a4CatalogCover').checked;
-  const pages = (a4CatalogLayout === 'compact' ? Math.ceil(n / 4) : n) + (cover ? 1 : 0);
-  document.getElementById('a4CatalogSummary').textContent =
-    `${catalogTitle()} · ${n} piece${n !== 1 ? 's' : ''} · ${pages} A4 page${pages !== 1 ? 's' : ''}. ` +
+  const cover = document.getElementById('printCatalogCover').checked;
+  const pages = (printCatalogLayout === 'compact' ? Math.ceil(n / 4) : n) + (cover ? 1 : 0);
+  document.getElementById('printCatalogSummary').textContent =
+    `${catalogTitle()} · ${n} piece${n !== 1 ? 's' : ''} · ${pages} Letter page${pages !== 1 ? 's' : ''}. ` +
     'Photo and name only — prices, sizes and availability stay in the Digital catalog.';
 }
 
-function openA4CatalogSheet() {
+function openPrintCatalogSheet() {
   const problem = _catalogSelectionProblem();
   if (problem) { showToast(problem); return; }
-  setA4CatalogLayout(a4CatalogLayout);
-  const err = document.getElementById('a4CatalogError');
+  setPrintCatalogLayout(printCatalogLayout);
+  const err = document.getElementById('printCatalogError');
   err.style.display = 'none';
   err.textContent = '';
-  openSheet('a4CatalogSheet');
+  openSheet('printCatalogSheet');
 }
 
 // Largest w × h with the photo's own proportions inside maxW × maxH. Fitting,
 // never cropping: a hem or a dupatta edge is part of the garment.
-function _a4Fit(img, maxW, maxH) {
+function _printFit(img, maxW, maxH) {
   const s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
   return { w: img.naturalWidth * s, h: img.naturalHeight * s };
 }
@@ -17327,8 +17327,8 @@ function _a4Fit(img, maxW, maxH) {
 // One photo re-encoded as JPEG (jsPDF cannot embed the WebP renditions are
 // stored as), downscaled to MAX_DPI at its printed width and never upscaled — a
 // smaller source is embedded at its own resolution.
-function _a4PhotoJpeg(img, wMm) {
-  const maxPx = Math.round(wMm / 25.4 * A4.MAX_DPI);
+function _printPhotoJpeg(img, wMm) {
+  const maxPx = Math.round(wMm / 25.4 * PRINT.MAX_DPI);
   const s = Math.min(1, maxPx / img.naturalWidth);
   const w = Math.max(1, Math.round(img.naturalWidth * s));
   const h = Math.max(1, Math.round(img.naturalHeight * s));
@@ -17340,7 +17340,7 @@ function _a4PhotoJpeg(img, wMm) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, w, h);
-  const dataUrl = c.toDataURL('image/jpeg', A4.JPEG_QUALITY);
+  const dataUrl = c.toDataURL('image/jpeg', PRINT.JPEG_QUALITY);
   c.width = c.height = 0; // release the bitmap now; iOS caps total canvas memory
   return dataUrl;
 }
@@ -17348,7 +17348,7 @@ function _a4PhotoJpeg(img, wMm) {
 // The photograph this piece carries in this catalog session. Lookbook prints it
 // near full page, so it gets the master; Compact prints it a quarter that size,
 // where the 1400 rendition already exceeds 300 dpi.
-async function _a4LoadPhoto(p, layout) {
+async function _printLoadPhoto(p, layout) {
   const choice = _catalogDisplayImage(p, catalogImageChoices[p.id]);
   const src = _catalogImageSrc(choice, layout === 'compact' ? 1400 : null);
   if (!src) throw new Error(`"${p.name}" has no photo`);
@@ -17365,7 +17365,7 @@ async function _a4LoadPhoto(p, layout) {
   throw new Error(`Could not load the photo for "${p.name}"${lastErr?.message ? ' (' + lastErr.message + ')' : ''}`);
 }
 
-function _a4Text(pdf, text, x, y, { size, color = A4_TITLE_INK, style = 'normal', align = 'left', tracking = 0 }) {
+function _printText(pdf, text, x, y, { size, color = PRINT_TITLE_INK, style = 'normal', align = 'left', tracking = 0 }) {
   pdf.setFont('times', style);
   pdf.setFontSize(size);
   pdf.setTextColor(...color);
@@ -17378,7 +17378,7 @@ function _a4Text(pdf, text, x, y, { size, color = A4_TITLE_INK, style = 'normal'
 
 // At most two lines; a longer name ends in an ellipsis rather than pushing the
 // photo off its frame.
-function _a4NameLines(pdf, name, size, maxW, style = 'normal') {
+function _printNameLines(pdf, name, size, maxW, style = 'normal') {
   pdf.setFont('times', style);
   pdf.setFontSize(size);
   const lines = pdf.splitTextToSize((name || 'Untitled piece').trim(), maxW);
@@ -17388,22 +17388,22 @@ function _a4NameLines(pdf, name, size, maxW, style = 'normal') {
   return [lines[0], second.trimEnd() + '…'];
 }
 
-const _a4Hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const _printHex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
 // The Digital cover draws its accent at partial alpha; jsPDF colours are
 // opaque, so the same tint is mixed against the ground instead.
-const _a4Mix = (fg, bg, alpha) => fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
+const _printMix = (fg, bg, alpha) => fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
 
-function _a4Canvas(pdf, color = A4_PAGE) {
+function _printCanvas(pdf, color = PRINT_PAGE) {
   pdf.setFillColor(...color);
-  pdf.rect(0, 0, A4.W, A4.H, 'F');
+  pdf.rect(0, 0, PRINT.W, PRINT.H, 'F');
 }
 
-const _a4SiteLabel = () => MERAKI_SITE_URL.replace(/^https?:\/\/(www\.)?/, '');
+const _printSiteLabel = () => MERAKI_SITE_URL.replace(/^https?:\/\/(www\.)?/, '');
 
 // The logo, prepared once per PDF. jsPDF stores identical image data once, so
 // repeating it on every page adds nothing to the file.
-async function _a4LoadLogo() {
+async function _printLoadLogo() {
   let logo = null;
   try { logo = await _loadImgWithTimeout(MERAKI_LOGO_SRC, 5000); } catch (_) {}
   if (!logo || !(logo.naturalWidth > 0)) return null;
@@ -17418,41 +17418,41 @@ async function _a4LoadLogo() {
 // Bottom-right brand mark on every product page: the logo, small enough that
 // today's 330 px file is sharp, with the website beneath it. It replaces the
 // page number — at a stall, the brand on every page matters more.
-const A4_MARK_W = 20;
-const A4_MARK_BOTTOM = 283;
-function _a4BrandMark(pdf, logo, right) {
-  const cx = right - A4_MARK_W / 2;
+const PRINT_MARK_W = 20;
+const PRINT_MARK_BOTTOM = PRINT.H - 14;
+function _printBrandMark(pdf, logo, right) {
+  const cx = right - PRINT_MARK_W / 2;
   if (logo) {
-    const h = A4_MARK_W * logo.pxH / logo.pxW;
-    pdf.addImage(logo.dataUrl, 'PNG', right - A4_MARK_W, A4_MARK_BOTTOM - h, A4_MARK_W, h);
+    const h = PRINT_MARK_W * logo.pxH / logo.pxW;
+    pdf.addImage(logo.dataUrl, 'PNG', right - PRINT_MARK_W, PRINT_MARK_BOTTOM - h, PRINT_MARK_W, h);
   } else {
-    _a4Text(pdf, 'Meraki by Saima', right, A4_MARK_BOTTOM - 1, { size: 11, style: 'italic', align: 'right', color: A4_BURGUNDY });
+    _printText(pdf, 'Meraki by Saima', right, PRINT_MARK_BOTTOM - 1, { size: 11, style: 'italic', align: 'right', color: PRINT_BURGUNDY });
   }
-  _a4Text(pdf, _a4SiteLabel(), logo ? cx : right, A4_MARK_BOTTOM + 4.2,
-    { size: 6.5, color: A4_TAUPE, align: logo ? 'center' : 'right', tracking: 0.2 });
+  _printText(pdf, _printSiteLabel(), logo ? cx : right, PRINT_MARK_BOTTOM + 4.2,
+    { size: 6.5, color: PRINT_TAUPE, align: logo ? 'center' : 'right', tracking: 0.2 });
 }
 
-// The Digital cover (_buildCatalogCoverCanvas), redrawn in vector on A4: every
+// The Digital cover (_buildCatalogCoverCanvas), redrawn in vector on Letter: every
 // offset below is its pixel value times PX, and its vertical anchors (logo at
-// 33 %, rule at 50 %) are taken as fractions of the A4 height. The ground is
-// the A4 oat rather than its gentle gradient. Dark Digital themes take the
-// default theme's accent — A4 never prints a dark sheet.
-async function _a4Cover(pdf, title, logo) {
+// 33 %, rule at 50 %) are taken as fractions of the page height. The ground is
+// the print oat rather than its gentle gradient. Dark Digital themes take the
+// default theme's accent — Print never prints a dark sheet.
+async function _printCover(pdf, title, logo) {
   const themed = getCatalogCoverTheme(title);
   const theme = themed.light ? themed : getCatalogCoverTheme('');
   // The cover is printed on the same oat as the pages; only the accent follows
   // the collection's Digital theme.
-  const bg = A4_PAGE, accent = _a4Hex(theme.accent);
-  const { W, H } = A4, cx = W / 2;
-  _a4Canvas(pdf, bg);
+  const bg = PRINT_PAGE, accent = _printHex(theme.accent);
+  const { W, H } = PRINT, cx = W / 2;
+  _printCanvas(pdf, bg);
 
   const M = 60 * PX;
-  pdf.setDrawColor(..._a4Mix(accent, bg, 0x50 / 255));
+  pdf.setDrawColor(..._printMix(accent, bg, 0x50 / 255));
   pdf.setLineWidth(1.5 * PX);
   pdf.rect(M, M, W - M * 2, H - M * 2, 'S');
 
   const CL = 72 * PX, O = 12 * PX;
-  pdf.setDrawColor(..._a4Mix(accent, bg, 0x80 / 255));
+  pdf.setDrawColor(..._printMix(accent, bg, 0x80 / 255));
   pdf.setLineWidth(2.5 * PX);
   [[M - O, M - O, 1, 1], [W - M + O, M - O, -1, 1], [M - O, H - M + O, 1, -1], [W - M + O, H - M + O, -1, -1]]
     .forEach(([x, y, sx, sy]) => pdf.lines([[0, -sy * CL], [sx * CL, 0]], x, y + sy * CL, [1, 1], 'S'));
@@ -17460,20 +17460,20 @@ async function _a4Cover(pdf, title, logo) {
   // The logo box keeps Digital's 176 px height so everything below lands where
   // it does there; the artwork inside it is capped at what its pixels support.
   const BOX_H = 176 * PX;
-  // Digital anchors the logo at 28 % of a much taller page; on A4 that leaves
+  // Digital anchors the logo at 28 % of a much taller page; on Letter that leaves
   // the lower half bare, so the group sits at the optical centre instead.
   let cy = H * 0.33;
   if (logo) {
-    const h = Math.min(BOX_H, logo.pxH / A4.LOGO_DPI * 25.4);
+    const h = Math.min(BOX_H, logo.pxH / PRINT.LOGO_DPI * 25.4);
     const w = h * logo.pxW / logo.pxH;
     pdf.addImage(logo.dataUrl, 'PNG', cx - w / 2, cy - h / 2, w, h);
     cy += BOX_H / 2 + 56 * PX;
   } else {
-    _a4Text(pdf, 'Meraki by Saima', cx, cy, { size: 36 * PX / 0.3528, style: 'italic', align: 'center', color: accent });
+    _printText(pdf, 'Meraki by Saima', cx, cy, { size: 36 * PX / 0.3528, style: 'italic', align: 'center', color: accent });
     cy += 64 * PX;
   }
 
-  pdf.setFillColor(..._a4Mix(accent, bg, 0x60 / 255));
+  pdf.setFillColor(..._printMix(accent, bg, 0x60 / 255));
   pdf.rect(cx - 210 * PX, cy, 420 * PX, 1.5 * PX, 'F');
   cy += 44 * PX;
 
@@ -17482,29 +17482,29 @@ async function _a4Cover(pdf, title, logo) {
   pdf.setFont('times', 'bold');
   pdf.setFontSize(size);
   const lines = pdf.splitTextToSize(title, W - 180 * PX);
-  lines.forEach((l, i) => _a4Text(pdf, l, cx, cy + 76 * PX * 0.76 + i * 92 * PX,
-    { size, style: 'bold', align: 'center', color: A4_TITLE_INK }));
+  lines.forEach((l, i) => _printText(pdf, l, cx, cy + 76 * PX * 0.76 + i * 92 * PX,
+    { size, style: 'bold', align: 'center', color: PRINT_TITLE_INK }));
   cy += lines.length * 92 * PX + 30 * PX;
 
-  _a4Text(pdf, catalogCoverTagline(title), cx, cy + 28 * PX * 0.76,
-    { size: 28 * PX / 0.3528, style: 'italic', align: 'center', color: _a4Mix(accent, bg, 0xCC / 255) });
+  _printText(pdf, catalogCoverTagline(title), cx, cy + 28 * PX * 0.76,
+    { size: 28 * PX / 0.3528, style: 'italic', align: 'center', color: _printMix(accent, bg, 0xCC / 255) });
 
   // Digital's faint rule sits at half height, well clear of the tagline on its
-  // taller page. A4 is shorter, so it keeps that clearance instead.
+  // taller page. Letter is shorter, so it keeps that clearance instead.
   const ruleY = Math.max(H * 0.5, cy + 28 * PX + 16);
-  pdf.setFillColor(..._a4Mix(accent, bg, 0x18 / 255));
+  pdf.setFillColor(..._printMix(accent, bg, 0x18 / 255));
   pdf.rect(M + 40 * PX, ruleY - 0.5 * PX, W - (M + 40 * PX) * 2, PX, 'F');
 
-  _a4Text(pdf, `MERAKI BY SAIMA  ·  ${new Date().getFullYear()}`, cx, H - M - 54 * PX,
-    { size: 22 * PX / 0.3528, align: 'center', color: _a4Mix([60, 40, 20], bg, 0.35) });
-  _a4Text(pdf, _a4SiteLabel(), cx, H - M - 18 * PX,
-    { size: 23 * PX / 0.3528, align: 'center', color: _a4Mix([40, 26, 12], bg, 0.72) });
+  _printText(pdf, `MERAKI BY SAIMA  ·  ${new Date().getFullYear()}`, cx, H - M - 54 * PX,
+    { size: 22 * PX / 0.3528, align: 'center', color: _printMix([60, 40, 20], bg, 0.35) });
+  _printText(pdf, _printSiteLabel(), cx, H - M - 18 * PX,
+    { size: 23 * PX / 0.3528, align: 'center', color: _printMix([40, 26, 12], bg, 0.72) });
 }
 
 // The line under a name: the piece's own collection, so a Full Collection
 // catalog still tells a customer which edit a piece belongs to. In a single
 // collection's catalog it is that collection.
-function _a4PieceLabel(p) {
+function _printPieceLabel(p) {
   const names = getProductCollections(p).filter(n => !archivedCollectionNames.has(n));
   return names.find(n => n !== catalogCollection) || catalogCollection || '';
 }
@@ -17512,117 +17512,117 @@ function _a4PieceLabel(p) {
 // Fitted, never cropped, and unframed: on the toned paper every photograph's
 // edge already reads, where a hairline showed on light backdrops and vanished
 // on dark ones.
-function _a4Photo(pdf, img, x, y, w, h) {
-  pdf.addImage(_a4PhotoJpeg(img, w), 'JPEG', x, y, w, h);
+function _printPhoto(pdf, img, x, y, w, h) {
+  pdf.addImage(_printPhotoJpeg(img, w), 'JPEG', x, y, w, h);
 }
 
 // Name in bold burgundy serif, collection in taupe italic beneath, both set
 // from the photo's left edge. Returns nothing; heights are planned by callers.
-function _a4Caption(pdf, lines, label, x, top, { size, lh, labelSize, labelGap }) {
+function _printCaption(pdf, lines, label, x, top, { size, lh, labelSize, labelGap }) {
   const ascent = size * 0.3528 * 0.72;
-  lines.forEach((l, i) => _a4Text(pdf, l, x, top + ascent + i * lh, { size, style: 'bold', color: A4_BURGUNDY }));
+  lines.forEach((l, i) => _printText(pdf, l, x, top + ascent + i * lh, { size, style: 'bold', color: PRINT_BURGUNDY }));
   if (label) {
-    _a4Text(pdf, label, x, top + ascent + (lines.length - 1) * lh + labelGap,
-      { size: labelSize, style: 'italic', color: A4_TAUPE });
+    _printText(pdf, label, x, top + ascent + (lines.length - 1) * lh + labelGap,
+      { size: labelSize, style: 'italic', color: PRINT_TAUPE });
   }
 }
 
 // Lookbook: the photograph as large as the page allows — top margin to just
 // above the caption — with the caption under its left edge and the brand mark
 // under its right.
-async function _a4LookbookPage(pdf, p, logo) {
-  const MAX_W = A4.W - A4.SIDE * 2;
+async function _printLookbookPage(pdf, p, logo) {
+  const MAX_W = PRINT.W - PRINT.SIDE * 2;
   const SIZE = 24, LH = 9.5, LABEL = 11, LABEL_GAP = 6.5, GAP = 6;
-  const img = await _a4LoadPhoto(p, 'lookbook');
-  const label = _a4PieceLabel(p);
+  const img = await _printLoadPhoto(p, 'lookbook');
+  const label = _printPieceLabel(p);
   // A narrow photo leaves a narrow column for its name, so lines are measured
   // against the widest the photo could be, then trimmed after fitting.
-  let lines = _a4NameLines(pdf, p.name, SIZE, MAX_W - A4_MARK_W - 8, 'bold');
+  let lines = _printNameLines(pdf, p.name, SIZE, MAX_W - PRINT_MARK_W - 8, 'bold');
   const captionH = SIZE * 0.3528 * 0.72 + (lines.length - 1) * LH + (label ? LABEL_GAP : 0) + 1.5;
-  const maxH = A4_MARK_BOTTOM - captionH - GAP - A4.TOP;
-  const { w, h } = _a4Fit(img, MAX_W, maxH);
-  const x = (A4.W - w) / 2, y = A4.TOP;
-  _a4Photo(pdf, img, x, y, w, h);
-  lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w - A4_MARK_W - 8, 90), 'bold');
-  _a4Caption(pdf, lines, label, x, y + h + GAP, { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
-  _a4BrandMark(pdf, logo, x + w);
+  const maxH = PRINT_MARK_BOTTOM - captionH - GAP - PRINT.TOP;
+  const { w, h } = _printFit(img, MAX_W, maxH);
+  const x = (PRINT.W - w) / 2, y = PRINT.TOP;
+  _printPhoto(pdf, img, x, y, w, h);
+  lines = _printNameLines(pdf, p.name, SIZE, Math.max(w - PRINT_MARK_W - 8, 90), 'bold');
+  _printCaption(pdf, lines, label, x, y + h + GAP, { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
+  _printBrandMark(pdf, logo, x + w);
 }
 
 // Compact: the same system, four to a page. Photos share a foot line in each
 // row so the captions align; one brand mark for the page.
-async function _a4CompactPage(pdf, items, onPhoto, logo) {
+async function _printCompactPage(pdf, items, onPhoto, logo) {
   const GUTTER = 8, ROW_GAP = 7, SIZE = 12, LH = 5, LABEL = 8.5, LABEL_GAP = 4.3, GAP = 3.5;
-  const cellW = (A4.W - A4.SIDE * 2 - GUTTER) / 2;
+  const cellW = (PRINT.W - PRINT.SIDE * 2 - GUTTER) / 2;
   const captionH = SIZE * 0.3528 * 0.72 + LH + LABEL_GAP + 1.5; // room for two name lines
-  const areaH = (A4_MARK_BOTTOM - 16 - A4.TOP - ROW_GAP) / 2 - GAP - captionH;
+  const areaH = (PRINT_MARK_BOTTOM - 16 - PRINT.TOP - ROW_GAP) / 2 - GAP - captionH;
   for (let i = 0; i < items.length; i++) {
     const p = items[i];
     onPhoto();
-    const cellX = A4.SIDE + (i % 2) * (cellW + GUTTER);
-    const cellY = A4.TOP + Math.floor(i / 2) * (areaH + GAP + captionH + ROW_GAP);
-    const img = await _a4LoadPhoto(p, 'compact');
-    const { w, h } = _a4Fit(img, cellW, areaH);
+    const cellX = PRINT.SIDE + (i % 2) * (cellW + GUTTER);
+    const cellY = PRINT.TOP + Math.floor(i / 2) * (areaH + GAP + captionH + ROW_GAP);
+    const img = await _printLoadPhoto(p, 'compact');
+    const { w, h } = _printFit(img, cellW, areaH);
     const x = cellX + (cellW - w) / 2;
-    _a4Photo(pdf, img, x, cellY + areaH - h, w, h);
-    const lines = _a4NameLines(pdf, p.name, SIZE, Math.max(w, 60), 'bold');
-    _a4Caption(pdf, lines, _a4PieceLabel(p), x, cellY + areaH + GAP,
+    _printPhoto(pdf, img, x, cellY + areaH - h, w, h);
+    const lines = _printNameLines(pdf, p.name, SIZE, Math.max(w, 60), 'bold');
+    _printCaption(pdf, lines, _printPieceLabel(p), x, cellY + areaH + GAP,
       { size: SIZE, lh: LH, labelSize: LABEL, labelGap: LABEL_GAP });
   }
-  _a4BrandMark(pdf, logo, A4.W - A4.SIDE);
+  _printBrandMark(pdf, logo, PRINT.W - PRINT.SIDE);
 }
 
 // Photos are loaded one at a time and released as soon as they are embedded, so
 // a long catalog never holds more than one decoded master in memory.
-async function _buildA4CatalogPdf({ layout, cover, onProgress }) {
+async function _buildPrintCatalogPdf({ layout, cover, onProgress }) {
   if (!window.jspdf) throw new Error('PDF library not loaded — check network and reload');
   const items = catalogSelectedInOrder();
   if (!items.length) throw new Error('No products selected');
   const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter', compress: true });
   const title = catalogTitle();
   pdf.setProperties({ title: `${title} · Meraki by Saima`, creator: 'Meraki by Saima' });
 
-  const logo = await _a4LoadLogo();
-  if (cover) await _a4Cover(pdf, title, logo);
+  const logo = await _printLoadLogo();
+  if (cover) await _printCover(pdf, title, logo);
   const perPage = layout === 'compact' ? 4 : 1;
   let done = 0;
   for (let start = 0; start < items.length; start += perPage) {
-    if (cover || start > 0) pdf.addPage('a4', 'portrait');
-    _a4Canvas(pdf);
+    if (cover || start > 0) pdf.addPage('letter', 'portrait');
+    _printCanvas(pdf);
     const slice = items.slice(start, start + perPage);
     if (layout === 'compact') {
-      await _a4CompactPage(pdf, slice, () => onProgress?.(++done, items.length), logo);
+      await _printCompactPage(pdf, slice, () => onProgress?.(++done, items.length), logo);
     } else {
       onProgress?.(++done, items.length);
-      await _a4LookbookPage(pdf, slice[0], logo);
+      await _printLookbookPage(pdf, slice[0], logo);
     }
   }
   return pdf;
 }
 
-async function downloadA4Catalog() {
-  const btn = document.getElementById('a4GenerateBtn');
-  const def = '<i class="ti ti-file-type-pdf"></i> Generate A4 PDF';
-  const errEl = document.getElementById('a4CatalogError');
+async function downloadPrintCatalog() {
+  const btn = document.getElementById('printGenerateBtn');
+  const def = '<i class="ti ti-file-type-pdf"></i> Generate Letter PDF';
+  const errEl = document.getElementById('printCatalogError');
   errEl.style.display = 'none';
   const problem = _catalogSelectionProblem();
   if (problem) { errEl.textContent = problem; errEl.style.display = 'block'; return; }
 
-  const layout = a4CatalogLayout;
-  const cover = document.getElementById('a4CatalogCover').checked;
+  const layout = printCatalogLayout;
+  const cover = document.getElementById('printCatalogCover').checked;
   btn.disabled = true;
   try {
-    const pdf = await _buildA4CatalogPdf({
+    const pdf = await _buildPrintCatalogPdf({
       layout, cover,
       onProgress: (i, n) => { btn.innerHTML = `<i class="ti ti-loader-2"></i> Preparing photo ${i} of ${n}…`; },
     });
     btn.innerHTML = '<i class="ti ti-loader-2"></i> Saving PDF…';
-    const name = `Meraki-${_catalogFileStem()}-A4-${layout === 'compact' ? 'Compact' : 'Lookbook'}.pdf`;
+    const name = `Meraki-${_catalogFileStem()}-Letter-${layout === 'compact' ? 'Compact' : 'Lookbook'}.pdf`;
     await _downloadPdf(pdf, name);
     _btnState(btn, 'downloaded', def);
   } catch (e) {
-    console.error('[A4 catalog] generation failed', e);
-    errEl.textContent = 'Could not generate the A4 PDF: ' + (e.message || String(e));
+    console.error('[Print catalog] generation failed', e);
+    errEl.textContent = 'Could not generate the Letter PDF: ' + (e.message || String(e));
     errEl.style.display = 'block';
     _btnState(btn, 'error', def);
   }
