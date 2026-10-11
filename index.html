@@ -791,6 +791,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
           <button onclick="_setLeadsFilter('all',this)" class="tab-pill active" style="font-size:12px;padding:6px 14px">All</button>
           <button onclick="_setLeadsFilter('appna26',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">APPNA'26</button>
           <button onclick="_setLeadsFilter('salon',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">Salon Rack</button>
+          <button onclick="_setLeadsFilter('diwali',this)" class="tab-pill" style="font-size:12px;padding:6px 14px">Diwali</button>
         </div>
         <div id="leadsList"></div>
       </div>
@@ -2317,6 +2318,7 @@ let _leadsFilter = 'all'; // 'all' | one of LEAD_SOURCE_FILTERS
 const LEAD_SOURCE_FILTERS = {
   appna26: { label: "APPNA'26",    source_event: "APPNA'26" },
   salon:   { label: 'Salon Rack',  source_event: 'Salon Rack 2026' },
+  diwali:  { label: 'Diwali 2026', source_event: 'Diwali 2026' },
 };
 
 // Columns fetched at boot for all list/summary views — excludes all base64 image fields.
