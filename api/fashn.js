@@ -6,6 +6,8 @@
 //
 // Auth: FASHN_API_KEY environment variable (never exposed to frontend).
 
+import { denyAdmin, ADMIN_ALLOW_HEADERS } from '../lib/require-admin.js';
+
 const FASHN_BASE  = 'https://api.fashn.ai/v1';
 const FASHN_BUILD = '86b95af-size-guard-v2';        // bump on every deploy; proves which code ran
 const POLL_RESPONSE_LIMIT_BYTES = 100_000;
@@ -63,8 +65,11 @@ export default async function handler(req, res) {
 
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', ADMIN_ALLOW_HEADERS);
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const denied = denyAdmin(req);
+  if (denied) return res.status(denied.code).json({ error: denied.error });
 
   const apiKey = process.env.FASHN_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'FASHN_API_KEY not configured' });

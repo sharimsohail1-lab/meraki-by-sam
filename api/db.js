@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { denyAdmin, ADMIN_ALLOW_HEADERS } from '../lib/require-admin.js';
 
 // Columns added in later migrations that may not exist if schema cache is stale
 const OPTIONAL_COLS = ['size_inventory', 'detail_photos', 'share_blurb', 'is_archived', 'collection_names', 'description_source',
@@ -124,8 +125,11 @@ function safeColumns(raw, table) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', ADMIN_ALLOW_HEADERS);
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const denied = denyAdmin(req);
+  if (denied) return res.status(denied.code).json({ error: denied.error });
 
   try {
     // Inside try so a null/unparsed body is caught rather than crashing the handler
