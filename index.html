@@ -383,6 +383,8 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 .catalog-toolbar { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #e0e0e0; background:white; flex-shrink:0; }
 .catalog-toolbar-title { font-size:13px; font-weight:600; color:var(--ink); }
 .catalog-body { flex:1; overflow-y:auto; background:#f5f5f0; }
+.catalog-actions { display:flex; gap:8px; padding:10px 16px; padding-bottom:max(10px, env(safe-area-inset-bottom)); border-top:1px solid #e0e0e0; background:white; flex-shrink:0; }
+.catalog-actions .btn { flex:1; margin:0; gap:6px; }
 
 /* Selection screen */
 .catalog-sel-item { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); background:white; }
@@ -420,7 +422,7 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 @media print {
   body > * { display: none !important; }
   .catalog-overlay { display: flex !important; position: fixed; inset: 0; z-index: 99999; }
-  .catalog-toolbar { display: none !important; }
+  .catalog-toolbar, .catalog-actions { display: none !important; }
   .catalog-body { overflow: visible; }
   .cat-cover { min-height: 100vh; page-break-after: always; }
   .cat-product-page { page-break-inside: avoid; margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid #eee; }
@@ -870,15 +872,12 @@ textarea.field-input { min-height: 70px; resize: vertical; }
 </div>
 
 <div class="catalog-overlay hidden" id="catalogBuilderOverlay">
-  <!-- Step 1: Selection -->
-  <div id="catalogSelScreen" style="display:flex;flex-direction:column;height:100%">
+  <!-- Pieces: opened from the preview, or first when the default picks cannot render -->
+  <div id="catalogSelScreen" style="display:none;flex-direction:column;height:100%">
     <div class="catalog-toolbar">
       <button onclick="closeCatalogBuilder()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
-      <div class="catalog-toolbar-title" id="catalogSelTitle">Select Items</div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-secondary btn-sm" onclick="openPrintCatalogSheet()" style="padding:0 10px;font-size:11px;gap:4px" title="Printable Letter catalog"><i class="ti ti-printer"></i> Print</button>
-        <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Preview →</button>
-      </div>
+      <div class="catalog-toolbar-title">Choose Pieces</div>
+      <button class="btn btn-primary btn-sm" onclick="goToCatalogPreview()" style="padding:0 14px">Done</button>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:white;border-bottom:1px solid var(--border);flex-shrink:0">
       <span id="catalogSelCount" style="font-size:12px;color:var(--muted)"></span>
@@ -889,19 +888,21 @@ textarea.field-input { min-height: 70px; resize: vertical; }
     </div>
     <div id="catalogSelList" style="flex:1;overflow-y:auto;background:#fafaf8"></div>
   </div>
-  <!-- Step 2: Preview -->
+  <!-- Preview: where the catalog opens, with every output in one bar -->
   <div id="catalogPreviewScreen" style="display:none;flex-direction:column;height:100%">
     <div class="catalog-toolbar">
-      <button onclick="goToCatalogSelection()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-arrow-left"></i></button>
-      <div class="catalog-toolbar-title">Catalog Preview</div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-secondary btn-sm" id="catDownloadBtn" onclick="downloadCatalogPDF()" style="padding:0 10px;font-size:11px;gap:4px" title="Download PDF catalog"><i class="ti ti-file-type-pdf"></i> PDF</button>
-        <button class="btn btn-primary btn-sm" id="catShareBtn" onclick="shareCatalogWithAsset()" style="padding:0 10px" title="Share catalog PDF"><i class="ti ti-share"></i></button>
-      </div>
+      <button onclick="closeCatalogBuilder()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0"><i class="ti ti-x"></i></button>
+      <div class="catalog-toolbar-title" id="catalogPreviewTitle"></div>
+      <button class="btn btn-secondary btn-sm" id="catalogPiecesBtn" onclick="goToCatalogSelection()" style="padding:0 10px;font-size:11px;gap:4px"><i class="ti ti-list-check"></i> Pieces</button>
     </div>
     <div id="catalogWarnings" style="display:none"></div>
     <div class="catalog-body" id="catalogPreviewBody">
       <div class="catalog-preview" id="catalogPreviewContent"></div>
+    </div>
+    <div class="catalog-actions">
+      <button class="btn btn-secondary" onclick="openPrintCatalogSheet()" title="Printable Letter catalog"><i class="ti ti-printer"></i> Print</button>
+      <button class="btn btn-secondary" id="catDownloadBtn" onclick="downloadCatalogPDF()" title="Download PDF catalog"><i class="ti ti-file-type-pdf"></i> PDF</button>
+      <button class="btn btn-primary" id="catShareBtn" onclick="shareCatalogWithAsset()" title="Share catalog PDF"><i class="ti ti-share"></i> Share</button>
     </div>
   </div>
 </div>
@@ -16278,16 +16279,25 @@ function openCatalogBuilder(collectionName) {
   printCatalogLayout = 'lookbook';
   document.getElementById('printCatalogCover').checked = true;
 
-  document.getElementById('catalogSelTitle').textContent = catalogTitle();
-  goToCatalogSelection();
+  document.getElementById('catalogPreviewTitle').textContent = catalogTitle();
   document.getElementById('catalogBuilderOverlay').classList.remove('hidden');
-  closeSheet('collectionDetailSheet');
+  // Whatever opened the catalog (usually the collection sheet) stays open
+  // beneath it, so closing the catalog returns there.
+  _initCatalogImageChoices();
 
-  // Hydrate images for all catalog items that are missing them
-  _hydrateCatalogImages();
+  // Straight to the catalog with the default picks. The piece list comes
+  // first only when those picks cannot be rendered, and says why.
+  const problem = _catalogSelectionProblem();
+  if (problem) {
+    goToCatalogSelection();
+    showToast(problem);
+  } else {
+    _showCatalogPreview();
+  }
 }
 
 function closeCatalogBuilder() {
+  _cancelCatalogPreview();
   document.getElementById('catalogBuilderOverlay').classList.add('hidden');
   Object.values(catalogImageChoices).forEach(ch => { if (ch) ch.blurredDataUrl = null; });
   catalogImageChoices = {};
@@ -16380,13 +16390,6 @@ function _invalidateCatalogCache(reason) {
   }
 }
 
-// Catalog images need no hydration: every product_images row is already loaded.
-// Kept as the single entry point so callers do not have to change.
-async function _hydrateCatalogImages() {
-  _initCatalogImageChoices();
-  renderCatalogSelection();
-}
-
 function _initCatalogImageChoices() {
   // Set defaults for any item not yet in catalogImageChoices
   catalogItems.forEach(p => {
@@ -16451,6 +16454,7 @@ async function _catalogPrepareBlur(id) {
 }
 
 function goToCatalogSelection() {
+  _cancelCatalogPreview();
   document.getElementById('catalogSelScreen').style.display = 'flex';
   document.getElementById('catalogPreviewScreen').style.display = 'none';
   renderCatalogSelection();
@@ -16476,6 +16480,8 @@ function _showCatalogPreview() {
   });
   document.getElementById('catalogSelScreen').style.display = 'none';
   document.getElementById('catalogPreviewScreen').style.display = 'flex';
+  document.getElementById('catalogPiecesBtn').innerHTML =
+    `<i class="ti ti-list-check"></i> Pieces ${catalogSelected.size}/${catalogItems.length}`;
   renderCatalogPreview().catch(err => {
     console.error('[Meraki] renderCatalogPreview failed', err);
     showToast('Catalog preview failed: ' + (err.message || String(err)));
@@ -16654,7 +16660,15 @@ function getCatalogCoverTheme(name) {
   return { bg1:'#FAF5EC', bg2:'#F0E8D8', accent:'#7A2337', light:true };
 }
 
+// Bumped whenever a preview build in progress stops being wanted (the piece
+// list opened, the catalog closed, or a newer build started). Building pages
+// from full-size photos keeps the browser busy for seconds, which made the
+// piece list too sluggish to scroll while an unwanted build ran behind it.
+let _catalogPreviewRun = 0;
+const _cancelCatalogPreview = () => { _catalogPreviewRun++; };
+
 async function renderCatalogPreview() {
+  const run = ++_catalogPreviewRun;
   const selected = catalogSelectedInOrder();
   const noPrice = selected.filter(p => !p.price);
   const noModel = selected.filter(p => !getModelProductImage(p));
@@ -16672,13 +16686,15 @@ async function renderCatalogPreview() {
   content.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:14px">Building catalog preview…<br><span style="font-size:11px">Loading images and rendering pages</span></div></div>';
 
   try {
-    const { pages } = await _buildCatalogPages();
+    const { pages } = await _buildCatalogPages({ isCancelled: () => run !== _catalogPreviewRun });
+    if (run !== _catalogPreviewRun) return;
     content.innerHTML = pages.map((page, i) =>
       `<div style="margin:${i === 0 ? '0 0 3px' : '3px 0'};line-height:0">
         <img src="${page.dataUrl}" style="width:100%;display:block" alt="${i === 0 ? 'Catalog cover' : 'Product page ' + i}">
       </div>`
     ).join('');
   } catch(err) {
+    if (err.cancelled) return;
     console.error('[Catalog] Preview render failed', err);
     content.innerHTML = `<div style="padding:24px;text-align:center;color:var(--burgundy);font-size:13px">Preview failed: ${err.message}</div>`;
   }
@@ -16777,7 +16793,12 @@ function catalogCoverLinks() {
 // Returns { pages: [{dataUrl, W, H}], collName, W, H }
 // pages[0] = cover, pages[1..] = product pages (all same W × H)
 // Preview, PDF download, and PDF share all call this single function.
-async function _buildCatalogPages() {
+// isCancelled is checked between pages; a cancelled build throws an error
+// carrying cancelled: true and caches nothing.
+async function _buildCatalogPages({ isCancelled } = {}) {
+  const stopIfCancelled = () => {
+    if (isCancelled?.()) throw Object.assign(new Error('Catalog build cancelled'), { cancelled: true });
+  };
   // Return cached result when signature matches (preview → PDF or Share without changes)
   const sig = _catalogRenderSig();
   if (catalogRenderedPages && catalogRenderSignature === sig) {
@@ -16853,6 +16874,7 @@ async function _buildCatalogPages() {
 
   // Phase 4: product page canvases
   for (const layout of cardLayouts) {
+    stopIfCancelled();
     const { dataUrl, links } = await _drawCatalogProductPage(
       W, PAGE_H, IMG_H, MAX_INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP,
       M, layout);
@@ -17203,7 +17225,7 @@ async function downloadCatalogPDF() {
 
 async function shareCatalogWithAsset() {
   const btn = document.getElementById('catShareBtn');
-  const def = '<i class="ti ti-share"></i>';
+  const def = '<i class="ti ti-share"></i> Share';
   _btnState(btn, 'preparing', def);
 
   // Clean message — no blob URLs, no internal URLs
