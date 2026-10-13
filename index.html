@@ -16297,6 +16297,7 @@ function openCatalogBuilder(collectionName) {
 }
 
 function closeCatalogBuilder() {
+  _cancelCatalogPreview();
   document.getElementById('catalogBuilderOverlay').classList.add('hidden');
   Object.values(catalogImageChoices).forEach(ch => { if (ch) ch.blurredDataUrl = null; });
   catalogImageChoices = {};
@@ -16453,6 +16454,7 @@ async function _catalogPrepareBlur(id) {
 }
 
 function goToCatalogSelection() {
+  _cancelCatalogPreview();
   document.getElementById('catalogSelScreen').style.display = 'flex';
   document.getElementById('catalogPreviewScreen').style.display = 'none';
   renderCatalogSelection();
@@ -16658,7 +16660,15 @@ function getCatalogCoverTheme(name) {
   return { bg1:'#FAF5EC', bg2:'#F0E8D8', accent:'#7A2337', light:true };
 }
 
+// Bumped whenever a preview build in progress stops being wanted (the piece
+// list opened, the catalog closed, or a newer build started). Building pages
+// from full-size photos keeps the browser busy for seconds, which made the
+// piece list too sluggish to scroll while an unwanted build ran behind it.
+let _catalogPreviewRun = 0;
+const _cancelCatalogPreview = () => { _catalogPreviewRun++; };
+
 async function renderCatalogPreview() {
+  const run = ++_catalogPreviewRun;
   const selected = catalogSelectedInOrder();
   const noPrice = selected.filter(p => !p.price);
   const noModel = selected.filter(p => !getModelProductImage(p));
@@ -16676,13 +16686,15 @@ async function renderCatalogPreview() {
   content.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px"><div class="loading"><span></span><span></span><span></span></div><div style="margin-top:14px">Building catalog preview…<br><span style="font-size:11px">Loading images and rendering pages</span></div></div>';
 
   try {
-    const { pages } = await _buildCatalogPages();
+    const { pages } = await _buildCatalogPages({ isCancelled: () => run !== _catalogPreviewRun });
+    if (run !== _catalogPreviewRun) return;
     content.innerHTML = pages.map((page, i) =>
       `<div style="margin:${i === 0 ? '0 0 3px' : '3px 0'};line-height:0">
         <img src="${page.dataUrl}" style="width:100%;display:block" alt="${i === 0 ? 'Catalog cover' : 'Product page ' + i}">
       </div>`
     ).join('');
   } catch(err) {
+    if (err.cancelled) return;
     console.error('[Catalog] Preview render failed', err);
     content.innerHTML = `<div style="padding:24px;text-align:center;color:var(--burgundy);font-size:13px">Preview failed: ${err.message}</div>`;
   }
@@ -16781,7 +16793,12 @@ function catalogCoverLinks() {
 // Returns { pages: [{dataUrl, W, H}], collName, W, H }
 // pages[0] = cover, pages[1..] = product pages (all same W × H)
 // Preview, PDF download, and PDF share all call this single function.
-async function _buildCatalogPages() {
+// isCancelled is checked between pages; a cancelled build throws an error
+// carrying cancelled: true and caches nothing.
+async function _buildCatalogPages({ isCancelled } = {}) {
+  const stopIfCancelled = () => {
+    if (isCancelled?.()) throw Object.assign(new Error('Catalog build cancelled'), { cancelled: true });
+  };
   // Return cached result when signature matches (preview → PDF or Share without changes)
   const sig = _catalogRenderSig();
   if (catalogRenderedPages && catalogRenderSignature === sig) {
@@ -16857,6 +16874,7 @@ async function _buildCatalogPages() {
 
   // Phase 4: product page canvases
   for (const layout of cardLayouts) {
+    stopIfCancelled();
     const { dataUrl, links } = await _drawCatalogProductPage(
       W, PAGE_H, IMG_H, MAX_INFO_H, PAD, NAME_SIZE, NAME_LH, BIO_SIZE, BIO_LH, INFO_PAD_TOP,
       M, layout);
