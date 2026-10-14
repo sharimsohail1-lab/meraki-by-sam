@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { denyAdmin, ADMIN_ALLOW_HEADERS } from '../lib/require-admin.js';
 
 // Atomic exhibition sale logger.
 // Re-fetches current inventory from DB before writing, so stale clients
@@ -6,8 +7,12 @@ import { createClient } from '@supabase/supabase-js';
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', ADMIN_ALLOW_HEADERS);
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const denied = denyAdmin(req);
+  if (denied) return res.status(denied.code).json({ error: denied.error });
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const url = process.env.SUPABASE_URL;

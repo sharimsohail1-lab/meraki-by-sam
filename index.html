@@ -2705,7 +2705,7 @@ async function db(action, table, { id, data, filter, columns } = {}) {
   if (data) body.data = data;
   if (filter) body.filter = JSON.stringify(filter);
   if (columns) body.columns = columns;
-  const r = await fetch('/api/db', {
+  const r = await adminFetch('/api/db', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -2728,7 +2728,7 @@ async function db(action, table, { id, data, filter, columns } = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function callClaude(messages, system = '', maxTokens = 1024) {
-  const r = await fetch('/api/claude', {
+  const r = await adminFetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -2787,7 +2787,7 @@ registerImageGenProvider('ideogram', {
       payload.image_b64 = refB64;
       payload.image_weight = imageWeight ?? 0.60;
     }
-    const r = await fetch('/api/ideogram', {
+    const r = await adminFetch('/api/ideogram', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3228,7 +3228,7 @@ async function preparePersistentImage(src, {
 const STORAGE_PROVIDER = 'supabase';
 
 async function _storageCall(action, payload) {
-  const r = await fetch('/api/storage', {
+  const r = await adminFetch('/api/storage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload }),
@@ -11330,7 +11330,7 @@ registerImageGenProvider('fashn', {
     _phase = 'fetch-start';
     console.log('[fashn gen]', { rid: _rid, phase: _phase, url: '/api/fashn', method: 'POST' });
 
-    const runRes = await fetch('/api/fashn', {
+    const runRes = await adminFetch('/api/fashn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: _bodyStr
@@ -11373,7 +11373,7 @@ registerImageGenProvider('fashn', {
       if (pollUrl.length > 1000) {
         throw new Error('Refusing oversized FASHN polling URL: ' + pollUrl.length + ' characters');
       }
-      const statusRes = await fetch(pollUrl);
+      const statusRes = await adminFetch(pollUrl);
 
       // Guard: check HTTP status before attempting JSON parse.
       // A non-JSON error body (Vercel 413 HTML, etc.) would throw a SyntaxError whose
@@ -14652,7 +14652,7 @@ async function _saveDetailPhotos() {
   console.log('[DETAIL PHOTO SAVE] start', { productId: currentProduct.id, count: photos.length });
   let r;
   try {
-    r = await fetch('/api/db', {
+    r = await adminFetch('/api/db', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'update', table: 'products', id: currentProduct.id, data: { detail_photos: value } })
@@ -21068,7 +21068,7 @@ async function _saveExhProductSale() {
   const btn = document.querySelector('#logExhSaleSheet .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
-    const r = await fetch('/api/exhibition-sell-product', {
+    const r = await adminFetch('/api/exhibition-sell-product', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -21215,7 +21215,7 @@ async function saveExhSale() {
   const btn = document.querySelector('#logExhSaleSheet .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
-    const r = await fetch('/api/exhibition-log-sale', {
+    const r = await adminFetch('/api/exhibition-log-sale', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
